@@ -29,6 +29,8 @@ SCRIPTS = ("bootstrap.sh", "deploy.sh", "backup.sh", "selftest.sh")
 WORKFLOWS = REPO / ".github" / "workflows"
 DOCS = REPO / "docs" / "ar"
 DOMAIN = "rotator.magic-lap.com"
+# Operator guides must point to the actual deployed application, independently of stub hosts.
+DOC_DOMAIN = "repeater.magic-lap.com"
 
 DOCKER_STUB = r"""#!/usr/bin/env bash
 printf '%s\n' "$*" >> "$STUB_LOG"
@@ -2284,7 +2286,7 @@ def test_server_inspect_is_read_only() -> None:
 def test_arabic_docs_exist_and_carry_exact_urls() -> None:
     from repeater.config import Settings
 
-    settings = Settings(base_url=f"https://{DOMAIN}")
+    settings = Settings(base_url=f"https://{DOC_DOMAIN}")
     expected = {
         "00-deploy.md": [
             "DNS only",
@@ -2303,7 +2305,7 @@ def test_arabic_docs_exist_and_carry_exact_urls() -> None:
             "video.publish",
             "SELF_ONLY",
             "5",
-            f"https://{DOMAIN}/m/",
+            f"https://{DOC_DOMAIN}/m/",
             "PULL_FROM_URL",
             "FILE_UPLOAD",
             "url_ownership_unverified",
@@ -2317,9 +2319,9 @@ def test_arabic_docs_exist_and_carry_exact_urls() -> None:
         ],
         "03-meta.md": [
             settings.oauth_redirect_uri("meta"),
-            f"https://{DOMAIN}/meta/deauthorize",
-            f"https://{DOMAIN}/meta/data-deletion",
-            f"https://{DOMAIN}/privacy",
+            f"https://{DOC_DOMAIN}/meta/deauthorize",
+            f"https://{DOC_DOMAIN}/meta/data-deletion",
+            f"https://{DOC_DOMAIN}/privacy",
             "instagram_content_publish",
         ],
         "04-telegram.md": ["REPEATER_TELEGRAM_BOT_TOKEN", "REPEATER_TELEGRAM_CHAT_ID", "getUpdates"],
@@ -2346,7 +2348,7 @@ def test_google_home_page_is_not_a_login_redirect() -> None:
     """deploy-ops-7: Google's brand verification rejects a home page that redirects to a login."""
     text = (DOCS / "02-google.md").read_text()
     line = next(line for line in text.splitlines() if "Application home page:" in line)
-    assert f"`https://{DOMAIN}`" not in line.split("Application home page:")[1].split("**")[0]
+    assert f"`https://{DOC_DOMAIN}`" not in line.split("Application home page:")[1].split("**")[0]
     assert "magic-lap.com/rotator" in line and "/privacy" in line
     assert "303" in line, "the doc says why the app's own URL does not qualify"
 
@@ -2355,7 +2357,7 @@ def test_tiktok_doc_states_the_intended_use_limit_and_the_url_property() -> None
     text = (DOCS / "01-tiktok.md").read_text()
     assert "الحسابات التي تديرها أنت أو فريقك" in text and "غير مقبولة" in text
     assert "كل صانع محتوى" in text and "SELF_ONLY" in text
-    assert "URL prefix" in text and f"https://{DOMAIN}/m/" in text
+    assert "URL prefix" in text and f"https://{DOC_DOMAIN}/m/" in text
     assert "FILE_UPLOAD" in text and "url_ownership_unverified" in text
 
 
