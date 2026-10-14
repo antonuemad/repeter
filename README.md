@@ -1,8 +1,35 @@
 # Repeater
 
-منصة SaaS لإعادة نشر الفيديوهات القصيرة تلقائيًا: انشر على منصة واحدة، والنظام يلتقط الفيديو الجديد ويعيد نشره على تيكتوك ويوتيوب شورتس وانستجرام ريلز وفيسبوك ريلز وفق جدول دوران.
+منصة SaaS لإعادة نشر الفيديوهات القصيرة تلقائيًا: انشر على منصة واحدة، والنظام يلتقط الفيديو الجديد ويعيد نشره على تيكتوك ويوتيوب شورتس وانستجرام ريلز وفيسبوك ريلز وفق جدول دوران، عبر الـ APIs الرسمية فقط.
 
-- **الخطة الكاملة (عربي):** [PLAN.md](PLAN.md)
-- الحالة: مرحلة التخطيط. لا يوجد كود بعد.
+Repeater watches a creator's source platform (or a Google Drive folder, or manual uploads), stores each new short video once, encodes one file that all four platforms accept, and re-publishes it to the other platforms on a rotation schedule using the official APIs.
 
-Repeater is a SaaS that watches one "source" platform for a creator's new short videos, stores them once, and re-publishes them to TikTok, YouTube Shorts, Instagram Reels and Facebook Reels on a rotation schedule using the official APIs only. The full product and technical plan (Arabic) is in `PLAN.md`.
+## Status
+
+Phase 0 (internal Magic Lap deployment at `rotator.magic-lap.com`) is implemented and tested; it is not deployed yet. The product and technical plan, with every platform fact sourced from official documentation, is in [PLAN.md](PLAN.md) (Arabic).
+
+| Area | Where |
+|---|---|
+| Platform adapters (OAuth, publish, list/download) | `repeater/platforms/` |
+| Import sources (Instagram, Facebook, Drive, opt-in yt-dlp, manual) and media processing | `repeater/sources/`, `repeater/media/` |
+| Rotation planner, publish pipeline, worker | `repeater/engine/`, `repeater/jobs/`, `repeater/queue.py` |
+| Dashboard (Arabic and English), auth, OAuth connect, signed media URLs, Meta callbacks | `repeater/web/` |
+| Docker, Compose, deploy scripts, CI | `Dockerfile`, `deploy/`, `.github/workflows/` |
+| Setup guides per developer app and operations (Arabic) | `docs/ar/` |
+
+## Develop
+
+```bash
+uv venv .venv && . .venv/bin/activate
+uv pip install -e ".[dev]"
+# tests need a PostgreSQL server whose user can CREATE DATABASE:
+export REPEATER_TEST_PG=postgresql+psycopg://postgres@127.0.0.1:5432/postgres
+python -m pytest -q
+ruff check . && ruff format --check .
+```
+
+Requires Python 3.12+, ffmpeg and PostgreSQL 16. Each test session creates and drops its own database.
+
+## Deploy
+
+See [docs/ar/00-deploy.md](docs/ar/00-deploy.md): DNS record, GitHub secrets, a read-only "Server inspect" workflow to run first, then the "Deploy" workflow or `deploy/bootstrap.sh`.
