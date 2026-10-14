@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Repeater">
-  <rect width="64" height="64" rx="14" fill="#5b3cc4"/>
+  <rect width="64" height="64" rx="14" fill="#2563eb"/>
   <path d="M20 22h20a8 8 0 0 1 8 8v2" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
   <path d="M44 28l4 6 4-6" fill="#fff"/>
   <path d="M44 42H24a8 8 0 0 1-8-8v-2" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>

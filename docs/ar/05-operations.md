@@ -88,8 +88,8 @@ bash backup.sh restore /srv/repeater/backups/<file>.sql.gz --yes
 
 | العَرَض | السبب المرجّح | الحل |
 |---|---|---|
-| المتصفح: لا يفتح `rotator.magic-lap.com` | سجل DNS غير موجود أو برتقالي، أو جدار Hostinger يغلق 80/443 | راجع سجل A (DNS only)، ثم `dc logs caddy` |
-| خطأ شهادة / Caddy لا يستخرج شهادة | الـ DNS لا يشير للسيرفر بعد، أو المنفذ 80 مغلق | `dig +short rotator.magic-lap.com`، وانتظر انتشار DNS؛ Caddy يعيد المحاولة وحده |
+| المتصفح: لا يفتح `repeater.magic-lap.com` | سجل DNS غير موجود أو برتقالي، أو جدار Hostinger يغلق 80/443 | راجع سجل A (DNS only)، ثم `dc logs caddy` |
+| خطأ شهادة / Caddy لا يستخرج شهادة | الـ DNS لا يشير للسيرفر بعد، أو المنفذ 80 مغلق | `dig +short repeater.magic-lap.com`، وانتظر انتشار DNS؛ Caddy يعيد المحاولة وحده |
 | 502 من Caddy أو البروكسي | حاوية web متوقفة أو غير سليمة | `dc ps` و`dc logs --tail 100 web` |
 | 413 عند رفع فيديو | بروكسي Cloudflare مفعّل (حد 100 ميجا) أو حد البروكسي الخارجي | اجعل السجل DNS only؛ في nginx: `client_max_body_size 600m` |
 | العامل unhealthy | ملف النبض قديم: العامل عالق أو القاعدة متوقفة | `dc logs --tail 200 worker` ثم `dc restart worker` |

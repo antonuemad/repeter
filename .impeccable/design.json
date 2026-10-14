@@ -1,0 +1,563 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-14T23:05:50.646380+00:00",
+  "title": "Design System: Repeater",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Magic Lap Blue",
+        "cssProperty": "--primary",
+        "tonalRamp": [
+          "oklch(0.1500 0.21521 262.88)",
+          "oklch(0.2643 0.21521 262.88)",
+          "oklch(0.3786 0.21521 262.88)",
+          "oklch(0.4929 0.21521 262.88)",
+          "oklch(0.6071 0.21521 262.88)",
+          "oklch(0.7214 0.21521 262.88)",
+          "oklch(0.8357 0.21521 262.88)",
+          "oklch(0.9500 0.21521 262.88)"
+        ]
+      },
+      "primary-hover": {
+        "role": "primary",
+        "displayName": "Action Blue",
+        "cssProperty": "--primary-hover",
+        "tonalRamp": [
+          "oklch(0.1500 0.21717 264.38)",
+          "oklch(0.2643 0.21717 264.38)",
+          "oklch(0.3786 0.21717 264.38)",
+          "oklch(0.4929 0.21717 264.38)",
+          "oklch(0.6071 0.21717 264.38)",
+          "oklch(0.7214 0.21717 264.38)",
+          "oklch(0.8357 0.21717 264.38)",
+          "oklch(0.9500 0.21717 264.38)"
+        ]
+      },
+      "primary-bg": {
+        "role": "primary",
+        "displayName": "Blue Wash",
+        "cssProperty": "--primary-bg",
+        "tonalRamp": [
+          "oklch(0.1500 0.01442 264.50)",
+          "oklch(0.2643 0.01442 264.50)",
+          "oklch(0.3786 0.01442 264.50)",
+          "oklch(0.4929 0.01442 264.50)",
+          "oklch(0.6071 0.01442 264.50)",
+          "oklch(0.7214 0.01442 264.50)",
+          "oklch(0.8357 0.01442 264.50)",
+          "oklch(0.9500 0.01442 264.50)"
+        ]
+      },
+      "primary-text": {
+        "role": "primary",
+        "displayName": "On Action",
+        "cssProperty": "--primary-text",
+        "tonalRamp": [
+          "oklch(0.1500 0.00000 0.00)",
+          "oklch(0.2643 0.00000 0.00)",
+          "oklch(0.3786 0.00000 0.00)",
+          "oklch(0.4929 0.00000 0.00)",
+          "oklch(0.6071 0.00000 0.00)",
+          "oklch(0.7214 0.00000 0.00)",
+          "oklch(0.8357 0.00000 0.00)",
+          "oklch(0.9500 0.00000 0.00)"
+        ]
+      },
+      "bg": {
+        "role": "neutral",
+        "displayName": "Pale Slate Canvas",
+        "cssProperty": "--bg",
+        "tonalRamp": [
+          "oklch(0.1500 0.00700 268.55)",
+          "oklch(0.2643 0.00700 268.55)",
+          "oklch(0.3786 0.00700 268.55)",
+          "oklch(0.4929 0.00700 268.55)",
+          "oklch(0.6071 0.00700 268.55)",
+          "oklch(0.7214 0.00700 268.55)",
+          "oklch(0.8357 0.00700 268.55)",
+          "oklch(0.9500 0.00700 268.55)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "White Surface",
+        "cssProperty": "--surface",
+        "tonalRamp": [
+          "oklch(0.1500 0.00000 0.00)",
+          "oklch(0.2643 0.00000 0.00)",
+          "oklch(0.3786 0.00000 0.00)",
+          "oklch(0.4929 0.00000 0.00)",
+          "oklch(0.6071 0.00000 0.00)",
+          "oklch(0.7214 0.00000 0.00)",
+          "oklch(0.8357 0.00000 0.00)",
+          "oklch(0.9500 0.00000 0.00)"
+        ]
+      },
+      "surface-alt": {
+        "role": "neutral",
+        "displayName": "Quiet Surface",
+        "cssProperty": "--surface-alt",
+        "tonalRamp": [
+          "oklch(0.1500 0.00341 247.86)",
+          "oklch(0.2643 0.00341 247.86)",
+          "oklch(0.3786 0.00341 247.86)",
+          "oklch(0.4929 0.00341 247.86)",
+          "oklch(0.6071 0.00341 247.86)",
+          "oklch(0.7214 0.00341 247.86)",
+          "oklch(0.8357 0.00341 247.86)",
+          "oklch(0.9500 0.00341 247.86)"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Ink Slate",
+        "cssProperty": "--text",
+        "tonalRamp": [
+          "oklch(0.1500 0.03982 265.75)",
+          "oklch(0.2643 0.03982 265.75)",
+          "oklch(0.3786 0.03982 265.75)",
+          "oklch(0.4929 0.03982 265.75)",
+          "oklch(0.6071 0.03982 265.75)",
+          "oklch(0.7214 0.03982 265.75)",
+          "oklch(0.8357 0.03982 265.75)",
+          "oklch(0.9500 0.03982 265.75)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Reading Slate",
+        "cssProperty": "--muted",
+        "tonalRamp": [
+          "oklch(0.1500 0.03745 257.28)",
+          "oklch(0.2643 0.03745 257.28)",
+          "oklch(0.3786 0.03745 257.28)",
+          "oklch(0.4929 0.03745 257.28)",
+          "oklch(0.6071 0.03745 257.28)",
+          "oklch(0.7214 0.03745 257.28)",
+          "oklch(0.8357 0.03745 257.28)",
+          "oklch(0.9500 0.03745 257.28)"
+        ]
+      },
+      "subtle": {
+        "role": "neutral",
+        "displayName": "Quiet Slate",
+        "cssProperty": "--subtle",
+        "tonalRamp": [
+          "oklch(0.1500 0.04097 257.42)",
+          "oklch(0.2643 0.04097 257.42)",
+          "oklch(0.3786 0.04097 257.42)",
+          "oklch(0.4929 0.04097 257.42)",
+          "oklch(0.6071 0.04097 257.42)",
+          "oklch(0.7214 0.04097 257.42)",
+          "oklch(0.8357 0.04097 257.42)",
+          "oklch(0.9500 0.04097 257.42)"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Soft Divider",
+        "cssProperty": "--border",
+        "tonalRamp": [
+          "oklch(0.1500 0.01289 266.70)",
+          "oklch(0.2643 0.01289 266.70)",
+          "oklch(0.3786 0.01289 266.70)",
+          "oklch(0.4929 0.01289 266.70)",
+          "oklch(0.6071 0.01289 266.70)",
+          "oklch(0.7214 0.01289 266.70)",
+          "oklch(0.8357 0.01289 266.70)",
+          "oklch(0.9500 0.01289 266.70)"
+        ]
+      },
+      "border-strong": {
+        "role": "neutral",
+        "displayName": "Control Edge",
+        "cssProperty": "--border-strong",
+        "tonalRamp": [
+          "oklch(0.1500 0.02124 261.77)",
+          "oklch(0.2643 0.02124 261.77)",
+          "oklch(0.3786 0.02124 261.77)",
+          "oklch(0.4929 0.02124 261.77)",
+          "oklch(0.6071 0.02124 261.77)",
+          "oklch(0.7214 0.02124 261.77)",
+          "oklch(0.8357 0.02124 261.77)",
+          "oklch(0.9500 0.02124 261.77)"
+        ]
+      },
+      "danger": {
+        "role": "semantic",
+        "displayName": "Danger",
+        "cssProperty": "--danger",
+        "tonalRamp": [
+          "oklch(0.1500 0.19049 27.52)",
+          "oklch(0.2643 0.19049 27.52)",
+          "oklch(0.3786 0.19049 27.52)",
+          "oklch(0.4929 0.19049 27.52)",
+          "oklch(0.6071 0.19049 27.52)",
+          "oklch(0.7214 0.19049 27.52)",
+          "oklch(0.8357 0.19049 27.52)",
+          "oklch(0.9500 0.19049 27.52)"
+        ]
+      },
+      "danger-bg": {
+        "role": "semantic",
+        "displayName": "Danger Tint",
+        "cssProperty": "--danger-bg",
+        "tonalRamp": [
+          "oklch(0.1500 0.01295 17.38)",
+          "oklch(0.2643 0.01295 17.38)",
+          "oklch(0.3786 0.01295 17.38)",
+          "oklch(0.4929 0.01295 17.38)",
+          "oklch(0.6071 0.01295 17.38)",
+          "oklch(0.7214 0.01295 17.38)",
+          "oklch(0.8357 0.01295 17.38)",
+          "oklch(0.9500 0.01295 17.38)"
+        ]
+      },
+      "danger-text": {
+        "role": "semantic",
+        "displayName": "On Danger",
+        "cssProperty": "--danger-text",
+        "tonalRamp": [
+          "oklch(0.1500 0.00000 0.00)",
+          "oklch(0.2643 0.00000 0.00)",
+          "oklch(0.3786 0.00000 0.00)",
+          "oklch(0.4929 0.00000 0.00)",
+          "oklch(0.6071 0.00000 0.00)",
+          "oklch(0.7214 0.00000 0.00)",
+          "oklch(0.8357 0.00000 0.00)",
+          "oklch(0.9500 0.00000 0.00)"
+        ]
+      },
+      "success": {
+        "role": "semantic",
+        "displayName": "Success",
+        "cssProperty": "--success",
+        "tonalRamp": [
+          "oklch(0.1500 0.13710 150.07)",
+          "oklch(0.2643 0.13710 150.07)",
+          "oklch(0.3786 0.13710 150.07)",
+          "oklch(0.4929 0.13710 150.07)",
+          "oklch(0.6071 0.13710 150.07)",
+          "oklch(0.7214 0.13710 150.07)",
+          "oklch(0.8357 0.13710 150.07)",
+          "oklch(0.9500 0.13710 150.07)"
+        ]
+      },
+      "success-bg": {
+        "role": "semantic",
+        "displayName": "Success Tint",
+        "cssProperty": "--success-bg",
+        "tonalRamp": [
+          "oklch(0.1500 0.01806 155.83)",
+          "oklch(0.2643 0.01806 155.83)",
+          "oklch(0.3786 0.01806 155.83)",
+          "oklch(0.4929 0.01806 155.83)",
+          "oklch(0.6071 0.01806 155.83)",
+          "oklch(0.7214 0.01806 155.83)",
+          "oklch(0.8357 0.01806 155.83)",
+          "oklch(0.9500 0.01806 155.83)"
+        ]
+      },
+      "warning": {
+        "role": "semantic",
+        "displayName": "Warning",
+        "cssProperty": "--warning",
+        "tonalRamp": [
+          "oklch(0.1500 0.12470 46.20)",
+          "oklch(0.2643 0.12470 46.20)",
+          "oklch(0.3786 0.12470 46.20)",
+          "oklch(0.4929 0.12470 46.20)",
+          "oklch(0.6071 0.12470 46.20)",
+          "oklch(0.7214 0.12470 46.20)",
+          "oklch(0.8357 0.12470 46.20)",
+          "oklch(0.9500 0.12470 46.20)"
+        ]
+      },
+      "warning-bg": {
+        "role": "semantic",
+        "displayName": "Warning Tint",
+        "cssProperty": "--warning-bg",
+        "tonalRamp": [
+          "oklch(0.1500 0.02140 95.28)",
+          "oklch(0.2643 0.02140 95.28)",
+          "oklch(0.3786 0.02140 95.28)",
+          "oklch(0.4929 0.02140 95.28)",
+          "oklch(0.6071 0.02140 95.28)",
+          "oklch(0.7214 0.02140 95.28)",
+          "oklch(0.8357 0.02140 95.28)",
+          "oklch(0.9500 0.02140 95.28)"
+        ]
+      },
+      "info": {
+        "role": "semantic",
+        "displayName": "Information",
+        "cssProperty": "--info",
+        "tonalRamp": [
+          "oklch(0.1500 0.11929 242.75)",
+          "oklch(0.2643 0.11929 242.75)",
+          "oklch(0.3786 0.11929 242.75)",
+          "oklch(0.4929 0.11929 242.75)",
+          "oklch(0.6071 0.11929 242.75)",
+          "oklch(0.7214 0.11929 242.75)",
+          "oklch(0.8357 0.11929 242.75)",
+          "oklch(0.9500 0.11929 242.75)"
+        ]
+      },
+      "info-bg": {
+        "role": "semantic",
+        "displayName": "Information Tint",
+        "cssProperty": "--info-bg",
+        "tonalRamp": [
+          "oklch(0.1500 0.01249 236.62)",
+          "oklch(0.2643 0.01249 236.62)",
+          "oklch(0.3786 0.01249 236.62)",
+          "oklch(0.4929 0.01249 236.62)",
+          "oklch(0.6071 0.01249 236.62)",
+          "oklch(0.7214 0.01249 236.62)",
+          "oklch(0.8357 0.01249 236.62)",
+          "oklch(0.9500 0.01249 236.62)"
+        ]
+      },
+      "pf-tiktok": {
+        "role": "platform",
+        "displayName": "TikTok Rose",
+        "cssProperty": "--pf-tiktok",
+        "tonalRamp": [
+          "oklch(0.1500 0.19895 3.96)",
+          "oklch(0.2643 0.19895 3.96)",
+          "oklch(0.3786 0.19895 3.96)",
+          "oklch(0.4929 0.19895 3.96)",
+          "oklch(0.6071 0.19895 3.96)",
+          "oklch(0.7214 0.19895 3.96)",
+          "oklch(0.8357 0.19895 3.96)",
+          "oklch(0.9500 0.19895 3.96)"
+        ]
+      },
+      "pf-instagram": {
+        "role": "platform",
+        "displayName": "Instagram Magenta",
+        "cssProperty": "--pf-instagram",
+        "tonalRamp": [
+          "oklch(0.1500 0.22580 323.95)",
+          "oklch(0.2643 0.22580 323.95)",
+          "oklch(0.3786 0.22580 323.95)",
+          "oklch(0.4929 0.22580 323.95)",
+          "oklch(0.6071 0.22580 323.95)",
+          "oklch(0.7214 0.22580 323.95)",
+          "oklch(0.8357 0.22580 323.95)",
+          "oklch(0.9500 0.22580 323.95)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Page headings."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Section and card headings."
+      },
+      "compact-title": {
+        "displayName": "Compact Title",
+        "purpose": "Subheadings and empty-state titles."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Working copy and form content."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Primary navigation."
+      },
+      "small": {
+        "displayName": "Small",
+        "purpose": "Supporting copy and compact actions."
+      },
+      "metric": {
+        "displayName": "Metric",
+        "purpose": "Summary values; tabular numerals."
+      }
+    },
+    "shadows": [
+      {
+        "name": "ambient-light",
+        "value": "0 1px 3px rgb(15 23 42 / 6%)",
+        "purpose": "Default cards and summary metrics."
+      },
+      {
+        "name": "ambient-dark",
+        "value": "0 1px 3px rgb(0 0 0 / 12%)",
+        "purpose": "Cards and summary metrics under the explicit dark theme."
+      }
+    ],
+    "motion": [
+      {
+        "name": "navigation-reveal",
+        "value": "160ms cubic-bezier(.16,1,.3,1)",
+        "purpose": "Native navigation opening only under prefers-reduced-motion: no-preference.",
+        "css": "@media (prefers-reduced-motion: no-preference) { .ds-navigation[open] .ds-mainnav { animation: ds-nav-reveal 160ms cubic-bezier(.16,1,.3,1); } @keyframes ds-nav-reveal { from { clip-path: inset(0 0 12%); } to { clip-path: inset(0); } }"
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "task-grid",
+        "value": "700px"
+      },
+      {
+        "name": "desktop-rail",
+        "value": "1000px"
+      },
+      {
+        "name": "wide-connections",
+        "value": "1400px"
+      }
+    ],
+    "themeModes": {
+      "default": "light",
+      "selector": "body[data-theme]",
+      "darkCss": "body[data-theme=\"dark\"] {\n  color-scheme: dark;\n  --bg: #0b1220; --surface: #111c2f; --surface-alt: #152238;\n  --text: #edf2fb; --muted: #b6c3d8; --subtle: #9bacc5; --border: #27354b; --border-strong: #40516c;\n  --primary: #8bb4ff; --primary-hover: #aac8ff; --primary-bg: #1c3052; --primary-text: #0b1730;\n  --danger: #fca5a5; --danger-bg: #351d2a; --danger-text: #281016;\n  --success: #86efac; --success-bg: #132d25; --warning: #fcd58b; --warning-bg: #332a1b;\n  --info: #7dd3fc; --info-bg: #142b3e;\n  --pf-tiktok: #f9a8d4; --pf-youtube: #fca5a5; --pf-instagram: #f0abfc; --pf-facebook: #93c5fd; --pf-gdrive: #86efac;\n  --shadow: 0 1px 3px rgb(0 0 0 / 12%);\n}",
+      "selection": "Explicit CSRF-protected POST /theme; HttpOnly SameSite=Lax cosmetic cookie, Secure in production; light when no dark preference is stored."
+    },
+    "focus": {
+      "css": ":focus-visible { outline:3px solid var(--primary,#2563eb);outline-offset:3px; }",
+      "purpose": "Every keyboard-focusable control; main is excluded after skip-link navigation."
+    },
+    "source": {
+      "stylesheet": "repeater/web/static/app.css",
+      "shell": "repeater/web/templates/base.html",
+      "macros": "repeater/web/templates/macros.html",
+      "behavior": "repeater/web/static/app.js",
+      "direction": "User-pinned Sentinel Eye family overrides direction seed c15f641f.",
+      "tonalRamps": "Synthesized OKLCH lightness ramps for panel inspection only; these are not application tokens or permission to expand the UI palette."
+    },
+    "componentSizing": "Canonical component height values describe the observed minimum height; content can expand."
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The filled action for the next useful task.",
+      "html": "<button class=\"ds-button\" type=\"button\">Upload video</button>",
+      "css": ".ds-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-family:var(--font,Inter,\"IBM Plex Sans Arabic\",system-ui,sans-serif);font-size:14px;font-weight:500;line-height:1.5;cursor:pointer;background:var(--primary,#2563eb);color:var(--primary-text,#fff);border:1px solid var(--primary,#2563eb);border-radius:10px;padding:10px 16px;text-decoration:none;min-height:44px}.ds-button:hover{background:var(--primary-hover,#1d4ed8);text-decoration:none}.ds-button:focus-visible{outline:3px solid var(--primary,#2563eb);outline-offset:3px;}.ds-button:disabled{opacity:.55;cursor:not-allowed}"
+    },
+    {
+      "name": "Secondary button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "A supporting action with a stronger surface edge.",
+      "html": "<button class=\"ds-button ds-secondary\" type=\"button\">View schedule</button>",
+      "css": ".ds-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-family:var(--font,Inter,\"IBM Plex Sans Arabic\",system-ui,sans-serif);font-size:14px;font-weight:500;line-height:1.5;cursor:pointer;background:var(--primary,#2563eb);color:var(--primary-text,#fff);border:1px solid var(--primary,#2563eb);border-radius:10px;padding:10px 16px;text-decoration:none;min-height:44px}.ds-button:hover{background:var(--primary-hover,#1d4ed8);text-decoration:none}.ds-button:focus-visible{outline:3px solid var(--primary,#2563eb);outline-offset:3px;}.ds-button:disabled{opacity:.55;cursor:not-allowed}.ds-secondary{background:var(--surface,#fff);color:var(--text,#0f172a);border-color:var(--border-strong,#cbd3e1)}.ds-secondary:hover{background:var(--surface-alt,#f8fafc)}"
+    },
+    {
+      "name": "Danger button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "An explicitly destructive action using the danger role.",
+      "html": "<button class=\"ds-button ds-danger\" type=\"button\">Disconnect</button>",
+      "css": ".ds-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-family:var(--font,Inter,\"IBM Plex Sans Arabic\",system-ui,sans-serif);font-size:14px;font-weight:500;line-height:1.5;cursor:pointer;background:var(--primary,#2563eb);color:var(--primary-text,#fff);border:1px solid var(--primary,#2563eb);border-radius:10px;padding:10px 16px;text-decoration:none;min-height:44px}.ds-button:hover{background:var(--primary-hover,#1d4ed8);text-decoration:none}.ds-button:focus-visible{outline:3px solid var(--primary,#2563eb);outline-offset:3px;}.ds-button:disabled{opacity:.55;cursor:not-allowed}.ds-button.ds-danger{background:var(--danger,#b91c1c);border-color:var(--danger,#b91c1c);color:var(--danger-text,#fff)}"
+    },
+    {
+      "name": "Text field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "A visible label, generous hit height, and native input behavior.",
+      "html": "<label class=\"ds-field\">Email<input type=\"email\" autocomplete=\"username\" placeholder=\"you@example.com\" dir=\"ltr\"></label>",
+      "css": ".ds-field{display:flex;flex-direction:column;gap:7px;font-family:var(--font,Inter,\"IBM Plex Sans Arabic\",system-ui,sans-serif);font-size:14px;font-weight:500;line-height:1.65;color:var(--text,#0f172a)}.ds-field input{font-family:var(--font,Inter,\"IBM Plex Sans Arabic\",system-ui,sans-serif);font-size:14px;line-height:1.65;color:var(--text,#0f172a);background:var(--surface,#fff);border:1px solid var(--border-strong,#cbd3e1);border-radius:10px;padding:10px 12px;min-width:0;min-height:44px}.ds-field input::placeholder{color:var(--subtle,#607087);opacity:1}.ds-field input:focus-visible{outline:3px solid var(--primary,#2563eb);outline-offset:3px;}"
+    },
+    {
+      "name": "Navigation item",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "Current-page tint and dot preserve orientation without a large accent field.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Main navigation\"><a href=\"#overview\" aria-current=\"page\"><svg class=\"ds-icon\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\" focusable=\"false\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\" rx=\"1.5\"/></svg><span>Overview</span><span class=\"ds-dot\" aria-hidden=\"true\"></span></a><a href=\"#library\"><svg class=\"ds-icon\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\" focusable=\"false\"><rect x=\"3\" y=\"5\" width=\"18\" height=\"14\" rx=\"2\"/><path d=\"M10 9l5 3-5 3z\"/></svg><span>Library</span></a></nav>",
+      "css": ".ds-nav{display:grid;gap:4px;width:216px;font-family:var(--font,Inter,\"IBM Plex Sans Arabic\",system-ui,sans-serif);}.ds-nav a{display:flex;align-items:center;gap:12px;min-height:44px;padding:10px 12px;color:var(--muted,#475569);border-radius:10px;font-size:13px;line-height:1.65;font-weight:500;text-decoration:none}.ds-nav a:hover{background:var(--surface-alt,#f8fafc);color:var(--text,#0f172a)}.ds-nav a[aria-current=\"page\"]{background:var(--primary-bg,#eff4fe);color:var(--primary,#2563eb)}.ds-nav a:focus-visible{outline:3px solid var(--primary,#2563eb);outline-offset:3px;}.ds-icon{flex:0 0 auto}.ds-dot{width:6px;height:6px;border-radius:50%;background:currentColor;margin-inline-start:auto}"
+    },
+    {
+      "name": "Status badge",
+      "kind": "chip",
+      "refersTo": "badge-success",
+      "description": "A readable status label paired with its semantic tint.",
+      "html": "<span class=\"ds-badge\">Ready</span>",
+      "css": ".ds-badge{display:inline-block;font-family:var(--font,Inter,\"IBM Plex Sans Arabic\",system-ui,sans-serif);font-size:11px;line-height:1.65;font-weight:500;padding:2px 8px;border-radius:6px;border:1px solid transparent;white-space:nowrap;color:var(--success,#15803d);background:var(--success-bg,#f0fdf4)}"
+    },
+    {
+      "name": "Task card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "The shared container for one task region, with restrained ambient depth.",
+      "html": "<section class=\"ds-card\"><h2>Account health</h2><p>Review connected accounts and sources.</p></section>",
+      "css": ".ds-card{font-family:var(--font,Inter,\"IBM Plex Sans Arabic\",system-ui,sans-serif);font-size:14px;line-height:1.65;color:var(--text,#0f172a);background:var(--surface,#fff);border:1px solid var(--border,#e5e9f2);border-radius:var(--radius,14px);padding:24px;box-shadow:var(--shadow,0 1px 3px rgb(15 23 42 / 6%))}.ds-card h2{font-size:17px;line-height:1.5;font-weight:600;margin:0 0 12px}.ds-card p{margin:0;color:var(--muted,#475569)}@media(max-width:699px){.ds-card{padding:20px}}"
+    },
+    {
+      "name": "Summary metric",
+      "kind": "card",
+      "refersTo": "stat",
+      "description": "A quiet operational count with a tabular value and line icon.",
+      "html": "<div class=\"ds-stat\"><div class=\"ds-stat-top\"><span>Ready videos</span><svg class=\"ds-icon\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\" focusable=\"false\"><rect x=\"3\" y=\"5\" width=\"18\" height=\"14\" rx=\"2\"/><path d=\"M10 9l5 3-5 3z\"/></svg></div><strong class=\"ds-value\">3</strong></div>",
+      "css": ".ds-stat{font-family:var(--font,Inter,\"IBM Plex Sans Arabic\",system-ui,sans-serif);font-size:14px;line-height:1.65;background:var(--surface,#fff);color:var(--text,#0f172a);border:1px solid var(--border,#e5e9f2);border-radius:14px;padding:20px;box-shadow:var(--shadow,0 1px 3px rgb(15 23 42 / 6%));min-width:0}.ds-stat-top{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--muted,#475569);font-size:12px}.ds-stat-top svg{color:var(--primary,#2563eb);flex:0 0 auto}.ds-value{display:block;font-size:30px;font-weight:600;line-height:1.5;font-variant-numeric:tabular-nums;letter-spacing:-.03em;margin-block:6px 0}@media(max-width:699px){.ds-stat{padding:16px}.ds-value{font-size:26px}}"
+    },
+    {
+      "name": "Paused-workspace banner",
+      "kind": "custom",
+      "description": "A warning surface with a concrete recovery destination.",
+      "html": "<div class=\"ds-banner\"><svg class=\"ds-icon\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\" focusable=\"false\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7v5l3 2\"/></svg><span>Publishing is paused in this workspace. <a href=\"#settings\">Resume in settings</a></span></div>",
+      "css": ".ds-banner{display:flex;align-items:flex-start;gap:10px;font-family:var(--font,Inter,\"IBM Plex Sans Arabic\",system-ui,sans-serif);font-size:14px;line-height:1.65;color:var(--text,#0f172a);background:var(--warning-bg,#fffbeb);border:1px solid color-mix(in srgb,var(--warning,#92400e) 25%,var(--border,#e5e9f2));border-radius:10px;padding:12px 16px}.ds-banner svg{flex:0 0 auto;margin-block-start:3px}.ds-banner a{color:var(--text,#0f172a);text-underline-offset:3px}.ds-banner a:hover{text-decoration:underline}.ds-banner a:focus-visible{outline:3px solid var(--primary,#2563eb);outline-offset:3px;}"
+    },
+    {
+      "name": "Setup task row",
+      "kind": "custom",
+      "description": "A numbered task, explanation, and text completion state in one flat row.",
+      "html": "<div class=\"ds-step\"><span class=\"ds-marker\" aria-hidden=\"true\">1</span><a href=\"#accounts\">Connect your accounts</a><span class=\"ds-step-help\">Choose the account you own.</span><span class=\"ds-step-state\">Done</span></div>",
+      "css": ".ds-step{display:grid;grid-template-columns:36px minmax(0,1fr) auto;column-gap:12px;padding-block:16px;align-items:center;border-block-start:1px solid var(--border,#e5e9f2);font-family:var(--font,Inter,\"IBM Plex Sans Arabic\",system-ui,sans-serif);font-size:14px;line-height:1.65}.ds-marker{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;grid-row:1/3;color:var(--success,#15803d);background:var(--success-bg,#f0fdf4)}.ds-step a{grid-column:2;color:var(--text,#0f172a);font-weight:500;text-decoration:none}.ds-step a:hover{color:var(--primary,#2563eb);text-decoration:underline}.ds-step a:focus-visible{outline:3px solid var(--primary,#2563eb);outline-offset:3px;}.ds-step-help{grid-column:2;color:var(--muted,#475569);font-size:12px}.ds-step-state{grid-column:3;grid-row:1/3;font-size:11px;font-weight:500;border:1px solid transparent;border-radius:6px;padding:2px 8px;color:var(--success,#15803d);background:var(--success-bg,#f0fdf4)}@media(max-width:699px){.ds-step{grid-template-columns:30px minmax(0,1fr);column-gap:10px}.ds-marker{width:28px;height:28px}.ds-step-state{grid-column:2;grid-row:3;justify-self:start;margin-block-start:8px}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Magic Lap Publishing Workspace",
+    "overview": "Repeater belongs to the user-approved Sentinel Eye product family: a white navigation rail, a pale slate canvas, crisp blue actions, and compact bilingual typography. The visual character is calm, precise, and practical. Thin borders and a faint ambient shadow keep each task region legible without making the chrome the center of attention.\n\nThe system gives Arabic and English equal weight. Direction follows the document language, the navigation rail follows logical start, and content names can resolve their own text direction. Repeater retains its own name, publishing content, and truthful workspace states within the shared Magic Lap identity.",
+    "keyCharacteristics": [
+      "Pale canvas, white surfaces, blue actions, and semantic state colors.",
+      "Compact hierarchy with quiet borders and gently rounded controls.",
+      "Arabic and English typography with direction-aware layout.",
+      "Native forms and disclosures with progressive enhancement."
+    ],
+    "rules": [
+      {
+        "name": "The State Has Words Rule",
+        "body": "Every operational color appears with a readable status label or explanatory text; color never carries the state alone.",
+        "section": "colors"
+      },
+      {
+        "name": "The Bilingual Type Rule",
+        "body": "Keep the same hierarchy in both languages, preserve the Arabic font assets, and let mixed-direction names and diagnostics resolve their own direction.",
+        "section": "typography"
+      },
+      {
+        "name": "The Logical Start Rule",
+        "body": "Use logical inline properties and start-aligned content so the rail and reading order follow Arabic RTL and English LTR without separate screen compositions.",
+        "section": "layout"
+      },
+      {
+        "name": "The Quiet Surface Rule",
+        "body": "Extend the existing thin borders, tonal fills, and ambient shadow when adding task regions; keep surface depth subordinate to the content.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** inherit the existing semantic custom properties so new components work in both themes.",
+      "**Do** keep the logical-start rail and the same information hierarchy in Arabic and English.",
+      "**Do** pair status color with translated text and preserve accessible names for icon actions.",
+      "**Do** reuse surface, control, badge, and icon grammar before adding a new component variant.",
+      "**Do** preserve native links, forms, disclosures, and visible keyboard focus."
+    ],
+    "donts": [
+      "**Don't** restore the replaced purple horizontal navigation; the approved family uses the blue action system and logical-start rail.",
+      "**Don't** replace the self-hosted Inter and IBM Plex Sans Arabic pairing when extending this product family.",
+      "**Don't** use a platform identifier color as the only indication of publication status.",
+      "**Don't** give new cards stronger shadows or arbitrary corner shapes that compete with the existing task hierarchy.",
+      "**Don't** require JavaScript to navigate, submit a form, or choose the theme."
+    ]
+  }
+}

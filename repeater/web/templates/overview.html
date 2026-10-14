@@ -2,7 +2,15 @@
 {% import "macros.html" as m with context %}
 {% block title %}{{ t('nav.overview') }}{% endblock %}
 {% block content %}
-<h1>{{ t('overview.title', name=workspace.name) }}</h1>
+<div class="page-heading">
+  <div><h1>{{ t('nav.overview') }}</h1><p>{{ t('overview.intro') }}</p></div>
+  <div class="actions"><a class="button secondary" href="/schedule">{{ m.icon('schedule', 18) }}{{ t('overview.open_schedule') }}</a><a class="button" href="/library?upload=1#upload">{{ m.icon('upload', 18) }}{{ t('overview.upload') }}</a></div>
+</div>
+<section class="stats" aria-label="{{ t('nav.overview') }}">
+  {% for key, icon in [('ready', 'video'), ('upcoming', 'clock'), ('published_week', 'send'), ('failed', 'alert')] %}
+  <div class="stat"><div class="stat-top"><span class="stat-label">{{ t('overview.count_' ~ key) }}</span>{{ m.icon(icon, 20) }}</div><span class="stat-value">{{ counts[key] }}</span></div>
+  {% endfor %}
+</section>
 
 {% if backup_stale_hours %}
 <div class="flash flash-warning" role="alert">{{ t('overview.backup_stale', hours=backup_stale_hours) }}</div>
@@ -10,7 +18,7 @@
 
 {% if not setup.done %}
 <section class="card setup" aria-labelledby="setup-title">
-  <h2 id="setup-title">{{ t('overview.setup_title') }}</h2>
+  <div class="setup-heading"><h2 id="setup-title">{{ t('overview.setup_title') }}</h2><span class="badge">{{ t('overview.setup_progress', done=(setup.accounts | int) + (setup.content | int) + (setup.rules | int)) }}</span></div>
   <p class="muted">{{ t('overview.setup_intro') }}</p>
   <ol class="steps">
     {% for key, href in [('accounts', '/accounts'), ('content', '/library'), ('rules', '/rules')] %}
@@ -21,17 +29,9 @@
     </li>
     {% endfor %}
   </ol>
+  <a class="button setup-next" href="{{ '/accounts' if not setup.accounts else '/library' if not setup.content else '/rules' }}">{{ t('overview.setup_next') }}{{ m.icon('arrow', 16) }}</a>
 </section>
 {% endif %}
-
-<section class="stats">
-  {% for key in ['ready', 'processing', 'failed', 'accounts', 'sources', 'upcoming', 'published_week'] %}
-  <div class="stat">
-    <span class="stat-value">{{ counts[key] }}</span>
-    <span class="stat-label">{{ t('overview.count_' ~ key) }}</span>
-  </div>
-  {% endfor %}
-</section>
 
 {% if reconnect_accounts or attention_posts or failed_videos or failing_sources or incomplete_rules %}
 <section class="card attention">
@@ -71,9 +71,11 @@
     {% endfor %}
   </ul>
 </section>
+{% else %}
+<div class="attention-ok">{{ m.icon('check', 20) }}<span>{{ t('overview.all_clear') }}</span></div>
 {% endif %}
 
-<div class="grid-2">
+<div class="overview-grid">
   <section class="card">
     <h2>{{ t('overview.next_48h') }}</h2>
     {% if upcoming %}
@@ -89,12 +91,16 @@
     </ul>
     <p><a href="/schedule">{{ t('overview.see_schedule') }}</a></p>
     {% else %}
-    <p class="muted">{{ t('overview.nothing_scheduled') }}</p>
+    <div class="empty-state">{{ m.icon('schedule', 32) }}<h3>{{ t('overview.no_upcoming_title') }}</h3><p>{{ t('overview.no_upcoming_help') }}</p><a class="button small secondary" href="/library">{{ t('overview.upload') }}</a></div>
     {% endif %}
   </section>
 
   <section class="card">
-    <h2>{{ t('overview.disk') }}</h2>
+    <h2>{{ t('overview.account_health') }}</h2>
+    <p class="muted small">{{ t('overview.account_health_help') }}</p>
+    <div class="health-row"><a href="/accounts">{{ m.icon('accounts', 18) }}{{ t('overview.count_accounts') }}</a><strong>{{ counts.accounts }}</strong></div>
+    <div class="health-row"><a href="/sources">{{ m.icon('sources', 18) }}{{ t('overview.count_sources') }}</a><strong>{{ counts.sources }}</strong></div>
+    <h3>{{ t('overview.disk') }}</h3>
     {% if disk %}
     <meter min="0" max="100" value="{{ disk.percent }}" low="70" high="90" optimum="10">{{ disk.percent }}%</meter>
     <p>{{ t('overview.disk_usage', used=fmt_bytes(disk.used), total=fmt_bytes(disk.total), free=fmt_bytes(disk.free), percent=disk.percent) }}</p>
@@ -106,7 +112,8 @@
 
 <section class="card">
   <h2>{{ t('overview.recent_activity') }}</h2>
-  {{ m.activity_list(activity, zone) }}
+  <div class="secondary-counts"><span>{{ t('overview.count_processing') }}: <strong>{{ counts.processing }}</strong></span><span>{{ t('overview.count_sources') }}: <strong>{{ counts.sources }}</strong></span></div>
+  {% if activity %}{{ m.activity_list(activity, zone) }}{% else %}<div class="empty-state">{{ m.icon('activity', 32) }}<h3>{{ t('overview.no_activity_title') }}</h3><p>{{ t('overview.no_activity_help') }}</p></div>{% endif %}
   <p><a href="/activity">{{ t('overview.see_activity') }}</a></p>
 </section>
 {% endblock %}

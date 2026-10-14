@@ -8,13 +8,14 @@
 <section class="connect-grid">
   {% for b in buttons %}
   <div class="card connect connect-{{ b.purpose }}">
+    <span class="connection-icon">{{ m.icon('sources' if b.purpose == 'gdrive' else 'accounts', 24) }}</span>
     <h2>{{ t('accounts.connect_' ~ b.purpose) }}</h2>
     <p class="muted small">{{ t('accounts.connect_' ~ b.purpose ~ '_help') }}</p>
     {% if b.configured %}
     {# A plain link: the provider is reached by redirect, never by a form post (CSP form-action 'self'). #}
     <a class="button" href="/connect/{{ b.purpose }}">{{ t('accounts.connect') }}</a>
     {% else %}
-    <span class="badge badge-disabled">{{ t('accounts.not_configured') }}</span>
+    <span class="badge badge-disabled">{{ t('accounts.not_configured') }}</span><p class="muted activation-help">{{ t('accounts.activation_help') }}</p>
     {% endif %}
   </div>
   {% endfor %}
@@ -51,7 +52,7 @@
     {% endfor %}
   </ul>
   {% else %}
-  <p class="muted">{{ t('accounts.empty') }}</p>
+  <div class="empty-state">{{ m.icon('accounts', 32) }}<h3>{{ t('accounts.empty_title') }}</h3><p>{{ t('accounts.empty_help') }}</p></div>
   {% endif %}
   {% if not can_disconnect %}<p class="muted small">{{ t('accounts.editor_note') }}</p>{% endif %}
 </section>

@@ -25,7 +25,7 @@
     {% endfor %}
   </ul>
   {% else %}
-  <p class="muted">{{ t('schedule.empty') }}</p>
+  <div class="empty-state">{{ m.icon('schedule', 32) }}<h3>{{ t('schedule.empty_title') }}</h3><p>{{ t('schedule.empty') }}</p><a class="button small secondary" href="/rules">{{ t('nav.rules') }}</a></div>
   {% endfor %}
 </section>
 

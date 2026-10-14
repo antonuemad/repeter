@@ -52,6 +52,6 @@
   {% endfor %}
 </ul>
 {% else %}
-<p class="card muted">{{ t('sources.empty') }}</p>
+<section class="card"><div class="empty-state">{{ m.icon('sources', 32) }}<h3>{{ t('sources.empty_title') }}</h3><p>{{ t('sources.empty_help') }}</p><a href="/library">{{ t('overview.upload') }}</a></div></section>
 {% endif %}
 {% endblock %}

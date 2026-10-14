@@ -2,6 +2,38 @@
 
 Written 2026-10-14 from a long Claude Code session. Read this first, then `PLAN.md` (Arabic product and technical plan, the source of truth for intent), then `docs/review/2026-10-14-findings.md` (what the last review found and how it was resolved).
 
+## Latest update: invitation trial and Magic Lap UI (2026-10-15)
+
+The user selected **a trial for invited customers**, and explicitly requested the
+approved Sentinel Eye UI/UX. Read [docs/ar/06-readiness.md](docs/ar/06-readiness.md)
+for the launch assessment, [PRODUCT.md](PRODUCT.md) for scope, and
+[DESIGN.md](DESIGN.md) plus `.impeccable/design.json` for the built visual system.
+The UI now uses the Sentinel Eye shell, self-hosted Inter/Plex fonts, explicit
+light/dark preference, native mobile navigation, and actionable setup/empty states.
+The upload CTA opens its form even when the library already contains videos.
+
+**Customer-trial readiness is still blocked:** no production platform credentials
+or accounts; no implemented invitation/password-reset lifecycle; no offsite backup
+or configured operator alerts; no real end-to-end platform acceptance evidence.
+Do not describe the healthy deployment or simulated tests as live integration proof.
+The single initial owner account is not a shared customer account.
+
+Validation: 335 web/message tests passed on local PostgreSQL (334 in the full web
+run plus the added upload-action regression, which was red before the fix and green
+after it); Ruff clean. Independent UI finish review disposition **ship**, no material
+fixes, with optional long-workspace-name truncation on mobile. Desktop/mobile and
+Arabic/English/light/dark captures are in `/Users/mac/dev/repeter-preview/` locally;
+all preview content is synthetic and the preview has no worker. Production remains
+free of demo data. The generic Inter detector warning is retained intentionally to
+match the user-pinned reference.
+
+The actual daily production dump was restored successfully to a throwaway
+Postgres container with no network/ports, tmpfs storage and no worker. Schema 0001,
+1 user, 1 workspace and 0 posts were verified; the container was removed. This does
+not establish media recovery, offsite recovery, or capacity/RTO for customer load.
+For each release, verify CI on the full commit SHA before deployment and use the
+server's `/srv/repeater/app/.deployed-revision` as the actual deployed revision.
+
 ## 1. What this project is
 
 **Repeater** is a multi-tenant SaaS that watches a creator's *source* platform (Instagram, Facebook Page, a Google Drive folder, manual uploads, or an opt-in yt-dlp path for TikTok/YouTube), stores each new short video once, encodes one file that all four platforms accept, and re-publishes it to **TikTok, YouTube Shorts, Instagram Reels and Facebook Reels** on a rotation schedule. It uses the official APIs only for publishing.
@@ -17,7 +49,7 @@ Written 2026-10-14 from a long Claude Code session. Read this first, then `PLAN.
 | Code | Phase 0 implemented: about 19.5k lines of source and 24k lines of tests |
 | Tests | Follow-up Linux run: **1717 passed, 8 skipped** (Docker CLI checks unavailable inside the disposable test container); `ruff check`, `ruff format --check`, `bash -n` and `shellcheck -x` clean. Alembic upgrade/check, downgrade to base, then upgrade/check again all clean. |
 | Docker | Image builds; compose stack smoke-tested (db, migrate, web, worker); `deploy/selftest.sh` passes as a non-root user |
-| CI | GitHub Actions `ci.yml` verifies lint/tests and the Docker image/deploy self-test. The medium follow-up `2d63977` passed; verify the exact final commit of the partial/low follow-up in Actions before deploying. |
+| CI | GitHub Actions `ci.yml` verifies lint/tests and the Docker image/deploy self-test. The previously deployed `f30676da58fb916c0d6007b08162c14a57a13e27` was green; verify the full SHA of each newer release in Actions before deploying. |
 | Review | 86 confirmed findings fixed by six owners and re-verified by independent skeptics: **81 fully fixed, 5 partial** at the original independent review snapshot. The follow-ups in section 7 resolve the remaining original partial findings and the subsequently reported medium/low issues; regression coverage verifies the changes. No independent re-review is claimed |
 | Deployed | **Phase 0 is live at https://repeater.magic-lap.com.** Existing local SSH alias `magic-lap-vps` reaches the VPS as `deploy` with passwordless sudo. App files: `/srv/repeater/app`; nginx forwards only this subdomain to `127.0.0.1:8091` (8090 belongs to the existing WhatsApp project). PostgreSQL/web/worker are healthy. Platform keys/accounts remain unconfigured. |
 

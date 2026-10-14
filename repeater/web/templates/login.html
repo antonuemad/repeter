@@ -2,21 +2,31 @@
 {% import "macros.html" as m with context %}
 {% block title %}{{ t('login.title') }}{% endblock %}
 {% block content %}
-<section class="card narrow">
-  <h1>{{ t('login.title') }}</h1>
-  <p class="muted">{{ t('login.intro') }}</p>
-  {% if error %}<div class="flash flash-error" role="alert">{{ t(error) }}</div>{% endif %}
-  <form method="post" action="/login" class="stack">
-    {{ m.csrf() }}
-    <input type="hidden" name="next" value="{{ next }}">
-    <label>{{ t('field.email') }}
-      <input type="email" name="email" value="{{ email }}" autocomplete="username" required maxlength="320" dir="ltr">
-    </label>
-    <label>{{ t('field.password') }}
-      <input type="password" name="password" autocomplete="current-password" required maxlength="1024" dir="ltr">
-    </label>
-    <button type="submit" class="button">{{ t('login.submit') }}</button>
-    <p class="muted small">{{ t('login.agree_before') }} <a href="/terms">{{ t('footer.terms') }}</a>{{ t('login.agree_and') }}<a href="/privacy">{{ t('footer.privacy') }}</a>.</p>
-  </form>
-</section>
+<div class="login-layout">
+  <section class="login-story" aria-labelledby="login-story-title">
+    <h2 id="login-story-title">{{ t('login.story_title') }}</h2>
+    <p>{{ t('login.story_intro') }}</p>
+    <ul class="login-features">
+      {% for key, icon in [('library', 'library'), ('schedule', 'schedule'), ('control', 'rules')] %}
+      <li>{{ m.icon(icon, 22) }}<span><strong>{{ t('login.feature_' ~ key) }}</strong><small>{{ t('login.feature_' ~ key ~ '_help') }}</small></span></li>
+      {% endfor %}
+    </ul>
+  </section>
+  <section class="card login-card" aria-labelledby="login-title">
+    <img class="login-mark" src="/static/favicon.svg" alt="" width="44" height="44">
+    <h1 id="login-title">{{ t('login.welcome') }}</h1>
+    <p class="muted">{{ t('login.intro') }}</p>
+    {% if error %}<div class="flash flash-error" role="alert">{{ t(error) }}</div>{% endif %}
+    <form method="post" action="/login" class="stack">
+      {{ m.csrf() }}
+      <input type="hidden" name="next" value="{{ next }}">
+      <label>{{ t('field.email') }}<input type="email" name="email" value="{{ email }}" autocomplete="username" required maxlength="320" dir="ltr"></label>
+      <label>{{ t('field.password') }}<input type="password" name="password" autocomplete="current-password" required maxlength="1024" dir="ltr"></label>
+      <button type="submit" class="button">{{ t('login.submit') }}</button>
+      <p class="muted small">{{ t('login.agree_before') }} <a href="/terms">{{ t('footer.terms') }}</a>{{ t('login.agree_and') }}<a href="/privacy">{{ t('footer.privacy') }}</a>.</p>
+    </form>
+    <p class="invite-note">{{ m.icon('lock', 16) }}{{ t('login.invite_only') }}</p>
+    <a class="login-help" href="mailto:info@magic-lap.com">{{ t('login.need_access') }}</a>
+  </section>
+</div>
 {% endblock %}

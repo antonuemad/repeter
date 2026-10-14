@@ -11,6 +11,23 @@
     }
   }
 
+  // Native details keeps navigation usable without JavaScript. On small screens the
+  // disclosure starts closed; Escape returns keyboard focus to its summary.
+  function setupNavigation() {
+    var nav = document.querySelector("[data-navigation]");
+    if (!nav || !window.matchMedia) { return; }
+    var desktop = window.matchMedia("(min-width: 1000px)");
+    function adapt() { nav.open = desktop.matches; }
+    adapt();
+    desktop.addEventListener("change", adapt);
+    nav.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && !desktop.matches && nav.open) {
+        nav.open = false;
+        nav.querySelector("summary").focus();
+      }
+    });
+  }
+
   // Ask before destructive actions: <form data-confirm="Are you sure?">
   function setupConfirm() {
     document.querySelectorAll("form[data-confirm]").forEach(function (form) {
@@ -138,6 +155,7 @@
   }
 
   onReady(function () {
+    setupNavigation();
     setupConfirm();
     setupUpload();
     setupTikTok();

@@ -11,59 +11,68 @@
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/app.js" defer></script>
 </head>
-<body>
+<body data-theme="{{ theme }}" class="{{ 'app-shell' if user and workspace else 'public-shell' }}">
+  <!-- THESIS: A publishing workspace in the approved Magic Lap product family.
+  OWN-WORLD: Sentinel Eye white sidebar, pale slate canvas, blue actions, Inter and IBM Plex Sans Arabic.
+  STORY: Connect owned accounts, prepare content, review explicit publishing rules, then monitor results.
+  FIRST VIEWPORT: 240px logical-start rail, 56px utility bar, compact page heading and useful next actions.
+  FORM: User-pinned Sentinel Eye system overrides direction seed c15f641f; operate mode.
+  FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md -->
   <a class="skip-link" href="#main">{{ t('nav.skip') }}</a>
-  <header class="topbar">
-    <div class="topbar-row">
-      <a class="brand" href="{{ '/' if user else '/login' }}">
-        <img src="/static/favicon.svg" alt="" width="28" height="28">
-        <span>Repeater</span>
-      </a>
-      <div class="top-actions">
-        <form method="post" action="/lang" class="inline">
-          {{ m.csrf() }}
-          <input type="hidden" name="next" value="{{ request.url.path }}{{ '?' ~ request.url.query if request.url.query else '' }}">
-          {% if lang == 'ar' %}
-          <button type="submit" name="lang" value="en" class="link-button" lang="en">English</button>
-          {% else %}
-          <button type="submit" name="lang" value="ar" class="link-button" lang="ar">العربية</button>
-          {% endif %}
-        </form>
-        {% if user %}
-        <span class="muted user-email">{{ user.email }}</span>
-        <form method="post" action="/logout" class="inline">
-          {{ m.csrf() }}
-          <button type="submit" class="link-button">{{ t('nav.logout') }}</button>
-        </form>
-        {% elif current_path != '/login' %}
-        <a href="/login">{{ t('nav.login') }}</a>
-        {% endif %}
-      </div>
+  {% if user and workspace %}
+  <aside class="sidebar">
+    <a class="brand" href="/">
+      <img src="/static/favicon.svg" alt="" width="34" height="34">
+      <span><strong>Repeater</strong><small>Magic Lap</small></span>
+    </a>
+    <details class="sidebar-navigation" open data-navigation>
+      <summary class="nav-toggle">{{ m.icon('menu') }}<span>{{ t('nav.label') }}</span></summary>
+      <nav class="mainnav" aria-label="{{ t('nav.label') }}">
+        {% for key, href in [('overview', '/'), ('library', '/library'), ('schedule', '/schedule'), ('accounts', '/accounts'), ('sources', '/sources'), ('rules', '/rules'), ('activity', '/activity')] %}
+        <a href="{{ href }}"{% if nav == key %} aria-current="page"{% endif %}>{{ m.icon(key, 18) }}<span>{{ t('nav.' ~ key) }}</span>{% if nav == key %}<span class="nav-dot" aria-hidden="true"></span>{% endif %}</a>
+        {% endfor %}
+        <a href="/rules#workspace" class="settings-link">{{ m.icon('settings', 18) }}<span>{{ t('nav.settings') }}</span></a>
+      </nav>
+    </details>
+    <div class="sidebar-bottom">
+      <div class="workspace-card"><span class="workspace-avatar" aria-hidden="true">{{ workspace.name[:1] }}</span><span><strong dir="auto">{{ workspace.name }}</strong><small>{{ t('shell.workspace') }}</small></span></div>
+      <a class="support-link" href="mailto:info@magic-lap.com">{{ m.icon('help', 18) }}{{ t('shell.support') }}</a>
     </div>
-    {% if user and workspace %}
-    <nav class="mainnav" aria-label="{{ t('nav.label') }}">
-      {% for key, href in [('overview', '/'), ('library', '/library'), ('schedule', '/schedule'), ('accounts', '/accounts'), ('sources', '/sources'), ('rules', '/rules'), ('activity', '/activity')] %}
-      <a href="{{ href }}"{% if nav == key %} aria-current="page"{% endif %}>{{ t('nav.' ~ key) }}</a>
-      {% endfor %}
-    </nav>
-    {% endif %}
-  </header>
-  {% if workspace and workspace.paused %}
-  <div class="banner banner-warning">{{ t('banner.paused') }} <a href="/rules#workspace">{{ t('banner.paused_link') }}</a></div>
+  </aside>
   {% endif %}
-  <main id="main" class="container">
-    {% for f in flashes %}
-    <div class="flash flash-{{ f.level }}" role="{{ 'alert' if f.level == 'error' else 'status' }}">{{ f.message }}</div>
-    {% endfor %}
-    {% block content %}{% endblock %}
-  </main>
-  <footer class="footer">
-    <div class="container footer-row">
-      <a href="/privacy">{{ t('footer.privacy') }}</a>
-      <a href="/terms">{{ t('footer.terms') }}</a>
-      <a href="mailto:info@magic-lap.com">info@magic-lap.com</a>
-      <span class="muted">© 2026 Magic Lap</span>
-    </div>
-  </footer>
+  <div class="app-body">
+    <header class="topbar">
+      <div class="topbar-row">
+        {% if user and workspace %}
+        <div class="breadcrumb"><span>{{ t('shell.workspace') }}</span><span aria-hidden="true">/</span><strong dir="auto">{{ workspace.name }}</strong></div>
+        {% else %}
+        <a class="brand" href="/login"><img src="/static/favicon.svg" alt="" width="34" height="34"><span><strong>Repeater</strong><small>Magic Lap</small></span></a>
+        {% endif %}
+        <div class="top-actions">
+          <form method="post" action="/lang" class="inline">
+            {{ m.csrf() }}
+            <input type="hidden" name="next" value="{{ request.url.path }}{{ '?' ~ request.url.query if request.url.query else '' }}">
+            {% if lang == 'ar' %}<button type="submit" name="lang" value="en" class="utility-button" lang="en">{{ m.icon('globe', 17) }} English</button>
+            {% else %}<button type="submit" name="lang" value="ar" class="utility-button" lang="ar">{{ m.icon('globe', 17) }} العربية</button>{% endif %}
+          </form>
+          <form method="post" action="/theme" class="inline">
+            {{ m.csrf() }}
+            <input type="hidden" name="next" value="{{ request.url.path }}{{ '?' ~ request.url.query if request.url.query else '' }}">
+            <button type="submit" name="theme" value="{{ 'light' if theme == 'dark' else 'dark' }}" class="utility-button icon-button" aria-label="{{ t('shell.light_theme') if theme == 'dark' else t('shell.dark_theme') }}" title="{{ t('shell.light_theme') if theme == 'dark' else t('shell.dark_theme') }}">{{ m.icon('sun' if theme == 'dark' else 'moon', 18) }}</button>
+          </form>
+          {% if user %}
+          <span class="user-email" dir="ltr">{{ user.email }}</span>
+          <form method="post" action="/logout" class="inline">{{ m.csrf() }}<button type="submit" class="utility-button icon-button" aria-label="{{ t('nav.logout') }}" title="{{ t('nav.logout') }}">{{ m.icon('logout', 18) }}</button></form>
+          {% elif current_path != '/login' %}<a class="button small secondary" href="/login">{{ t('nav.login') }}</a>{% endif %}
+        </div>
+      </div>
+    </header>
+    <main id="main" class="container" tabindex="-1">
+      {% if workspace and workspace.paused %}<div class="banner banner-warning">{{ m.icon('clock', 18) }}<span>{{ t('banner.paused') }} <a href="/rules#workspace">{{ t('banner.paused_link') }}</a></span></div>{% endif %}
+      {% for f in flashes %}<div class="flash flash-{{ f.level }}" role="{{ 'alert' if f.level == 'error' else 'status' }}">{{ f.message }}</div>{% endfor %}
+      {% block content %}{% endblock %}
+    </main>
+    <footer class="footer"><div class="container footer-row"><span class="muted">© 2026 Magic Lap</span><a href="/privacy">{{ t('footer.privacy') }}</a><a href="/terms">{{ t('footer.terms') }}</a><a href="mailto:info@magic-lap.com">info@magic-lap.com</a></div></footer>
+  </div>
 </body>
 </html>

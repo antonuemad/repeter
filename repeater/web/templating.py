@@ -128,6 +128,7 @@ def base_context(request: Request) -> dict[str, Any]:
         "request": request,
         "lang": lang,
         "dir": i18n.direction(lang),
+        "theme": "dark" if request.cookies.get("repeater_theme") == "dark" else "light",
         "t": i18n.Translator(lang),
         "csrf_token": csrf.ensure_token(request.session),
         "csrf_field": csrf.FORM_FIELD,

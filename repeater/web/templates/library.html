@@ -3,8 +3,9 @@
 {% block title %}{{ t('nav.library') }}{% endblock %}
 {% block content %}
 <h1>{{ t('library.title') }}</h1>
+<p class="muted">{{ t('library.intro') }}</p>
 
-<details class="card upload"{% if not videos %} open{% endif %}>
+<details id="upload" class="card upload"{% if not videos or request.query_params.get('upload') == '1' %} open{% endif %}>
   <summary><strong>{{ t('library.upload_title') }}</strong></summary>
   <p class="muted">{{ t('library.upload_help', max_mb=max_upload_mb) }}</p>
   <form method="post" action="/library/upload" enctype="multipart/form-data" class="stack" data-upload data-max-bytes="{{ max_upload_mb * 1024 * 1024 }}" data-too-large="{{ t('library.upload_too_large', max_mb=max_upload_mb) }}" data-uploading="{{ t('library.uploading') }}">
@@ -94,6 +95,6 @@
 </div>
 {{ m.pager(pager, '/library', {'status': status_filter}) }}
 {% else %}
-<p class="card muted">{{ t('library.empty') }}</p>
+<section class="card"><div class="empty-state">{{ m.icon('library', 32) }}<h3>{{ t('library.empty_title') }}</h3><p>{{ t('library.empty_help') }}</p><a href="/sources">{{ t('nav.sources') }}</a></div></section>
 {% endif %}
 {% endblock %}

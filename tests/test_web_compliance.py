@@ -723,7 +723,7 @@ def _ratio(a: str, b: str) -> float:
 def _themes() -> dict[str, dict[str, str]]:
     css = (STATIC / "app.css").read_text("utf-8")
     light_block = css.split(":root {", 1)[1].split("}", 1)[0]
-    dark_block = css.split("@media (prefers-color-scheme: dark) {", 1)[1].split("}", 1)[0]
+    dark_block = css.split('body[data-theme="dark"] {', 1)[1].split("}", 1)[0]
     light = dict(re.findall(r"--([a-z-]+):\s*(#[0-9a-fA-F]{6});", light_block))
     dark = {**light, **dict(re.findall(r"--([a-z-]+):\s*(#[0-9a-fA-F]{6});", dark_block))}
     return {"light": light, "dark": dark}
@@ -756,21 +756,31 @@ def test_danger_button_uses_the_per_theme_text_colour():
 
 
 @pytest.mark.parametrize("theme", ["light", "dark"])
-@pytest.mark.parametrize("surface,alpha", [("banner-warning", 0.18), ("flash-warning", 0.12)])
-def test_warning_surface_links_reach_wcag_aa(theme, surface, alpha):
+@pytest.mark.parametrize("surface", ["banner-warning", "flash-warning"])
+def test_warning_surface_links_reach_wcag_aa(theme, surface):
     css = (STATIC / "app.css").read_text()
     colors = _themes()[theme]
-
-    def rgb(color):
-        return [int(color[i : i + 2], 16) for i in (1, 3, 5)]
-
-    mixed = "#" + "".join(
-        f"{round(a * alpha + b * (1 - alpha)):02x}"
-        for a, b in zip(rgb(colors["warning"]), rgb(colors["surface"]), strict=True)
-    )
+    # The redesign uses an explicit warning surface in both user-selected themes.
+    backgrounds = re.findall(r"([^{}]+)\{[^{}]*background:\s*var\(--warning-bg\)", css)
+    assert any("." + surface in selectors for selectors in backgrounds)
     override = re.search(r"\." + surface + r" a\s*\{[^}]*color:\s*var\(--([\w-]+)\)", css)
     token = override.group(1) if override else "primary"
-    assert _ratio(colors[token], mixed) >= 4.5
+    assert _ratio(colors[token], colors["warning-bg"]) >= 4.5
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_secondary_text_and_state_labels_reach_wcag_aa(theme):
+    colors = _themes()[theme]
+    for token, background in [
+        ("subtle", "surface"),
+        ("subtle", "bg"),
+        ("primary", "primary-bg"),
+        ("success", "success-bg"),
+        ("info", "info-bg"),
+        ("danger", "danger-bg"),
+        ("warning", "warning-bg"),
+    ]:
+        assert _ratio(colors[token], colors[background]) >= 4.5, (theme, token, background)
 
 
 # --------------------------------------------------------------------------- ux-compliance-missed-4: delete a video

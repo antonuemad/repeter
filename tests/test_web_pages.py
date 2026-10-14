@@ -352,3 +352,17 @@ def test_legal_pages_are_public(web_app):
         for path in ("/privacy", "/terms"):
             resp = client.get(path, follow_redirects=False)
             assert resp.status_code == 200, path
+
+
+def test_overview_upload_action_opens_form_even_with_existing_videos(web_owner, web_make_video):
+    """A primary upload action must reach the form, including a populated library."""
+    from html import unescape
+
+    web_make_video(title="Already in the library")
+    overview = web_owner.get("/").text
+    target = unescape(re.search(r'href="([^"]*#upload)"', overview).group(1))
+    page = web_owner.get(target)
+    assert page.status_code == 200
+    disclosure = re.search(r'<details\b[^>]*\bid="upload"[^>]*>', page.text).group(0)
+    assert re.search(r"\bopen\b", disclosure), "upload action left the form collapsed"
+    assert 'action="/library/upload"' in page.text

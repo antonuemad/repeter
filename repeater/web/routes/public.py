@@ -132,6 +132,23 @@ def _legal_context() -> dict[str, object]:
     }
 
 
+@router.post("/theme")
+def switch_theme(form: Form) -> Response:
+    raw_next = form.get("next")
+    response = RedirectResponse(safe_next(raw_next if isinstance(raw_next, str) else None), status_code=303)
+    theme = form.get("theme")
+    if theme in ("light", "dark"):
+        response.set_cookie(
+            "repeater_theme",
+            theme,
+            max_age=365 * 24 * 3600,
+            httponly=True,
+            samesite="lax",
+            secure=get_settings().is_production,
+        )
+    return response
+
+
 @router.post("/lang")
 def switch_language(request: Request, db: DB, form: Form) -> Response:
     lang = i18n.normalize(form.get("lang") if isinstance(form.get("lang"), str) else None)

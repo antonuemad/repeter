@@ -15,13 +15,13 @@
 2. اختر حالة الاستخدام **Other** ثم نوع التطبيق **Business** (إن ظهر الاختيار)، الاسم `Magic Lap Rotator`، بريد التواصل، واربطه بـ Business Portfolio الخاص بـ Magic Lap.
 3. أضف منتج **Facebook Login for Business** (أو Facebook Login لو هو المتاح لنوع التطبيق) ← **Settings**:
    - Client OAuth login: On — Web OAuth login: On — Enforce HTTPS: On — Use Strict Mode for redirect URIs: On
-   - **Valid OAuth Redirect URIs:** `https://rotator.magic-lap.com/oauth/meta/callback`
-   - **Deauthorize callback URL:** `https://rotator.magic-lap.com/meta/deauthorize`
+   - **Valid OAuth Redirect URIs:** `https://repeater.magic-lap.com/oauth/meta/callback`
+   - **Deauthorize callback URL:** `https://repeater.magic-lap.com/meta/deauthorize`
 4. **App settings ← Basic:**
-   - App domains: `rotator.magic-lap.com`
-   - Privacy Policy URL: `https://rotator.magic-lap.com/privacy`
-   - Terms of Service URL: `https://rotator.magic-lap.com/terms`
-   - User data deletion ← **Data deletion callback URL:** `https://rotator.magic-lap.com/meta/data-deletion`
+   - App domains: `repeater.magic-lap.com`
+   - Privacy Policy URL: `https://repeater.magic-lap.com/privacy`
+   - Terms of Service URL: `https://repeater.magic-lap.com/terms`
+   - User data deletion ← **Data deletion callback URL:** `https://repeater.magic-lap.com/meta/data-deletion`
    - App icon (1024×1024) والفئة (Category).
    - انسخ **App ID** و**App secret** (زر Show) إلى الإعدادات وانشر.
 

@@ -10,12 +10,12 @@
    - **App name:** `Magic Lap Rotator` (اسم خاص بالتطبيق؛ ممنوع أن يحتوي "TikTok").
    - **App icon:** شعار واضح يطابق الاسم.
    - **Description:** أداة **يربط فيها كل صانع محتوى حسابه بنفسه وينشر محتواه الأصلي** من مكتبته على حساباته (لا تصفها كناقل من منصة لأخرى، ولا كأداة رفع لحسابات يديرها المطوّر أو فريقه؛ انظر القسم 3).
-   - **Terms of Service URL:** `https://rotator.magic-lap.com/terms`
-   - **Privacy Policy URL:** `https://rotator.magic-lap.com/privacy`
+   - **Terms of Service URL:** `https://repeater.magic-lap.com/terms`
+   - **Privacy Policy URL:** `https://repeater.magic-lap.com/privacy`
    - **Platforms:** Web، و**Website URL:** `https://magic-lap.com` (موقع رسمي كامل؛ صفحة دخول اللوحة لا تُقبل في المراجعة).
 3. أضف المنتجات (**Add products**):
    - **Login Kit** ← في إعداداته **Redirect URI** (Web):
-     `https://rotator.magic-lap.com/oauth/tiktok/callback`
+     `https://repeater.magic-lap.com/oauth/tiktok/callback`
      (لازم https، مطلق، بدون `?` أو `#`، ويطابق حرفيًا).
    - **Content Posting API** ← فعّل **Direct Post**.
    - **Display API** (لصلاحية `video.list` التي تقرأ فيديوهات الحساب العامة).
@@ -36,7 +36,7 @@
 
 ## 3. قائمة التدقيق (قبل الطلب)
 
-- [ ] موقع رسمي كامل على `https://magic-lap.com`، وفي تذييله رابطا الخصوصية والشروط ظاهران بدون فتح قائمة (يمكن أن يشيرا إلى `https://rotator.magic-lap.com/privacy` و`/terms`).
+- [ ] موقع رسمي كامل على `https://magic-lap.com`، وفي تذييله رابطا الخصوصية والشروط ظاهران بدون فتح قائمة (يمكن أن يشيرا إلى `https://repeater.magic-lap.com/privacy` و`/terms`).
 - [ ] شاشة النشر تطابق الإرشادات: اسم المستخدم (nickname) من `creator_info` ظاهر؛ قائمة الخصوصية **بدون قيمة افتراضية**؛ خيارات التعليق/Duet/Stitch غير مُعلَّمة وتُعطَّل ما يعطّله الحساب؛ مفتاح الإفصاح التجاري (Your brand / Branded content) مغلق افتراضيًا؛ نص الموافقة قبل زر النشر: "By posting, you agree to TikTok's Music Usage Confirmation"؛ معاينة للفيديو؛ لا علامات مائية دعائية.
 - [ ] فيديو عرض (حتى 5 فيديوهات، كل منها حتى 50 ميجا) يُظهر الرحلة كاملة من الدخول حتى ظهور المنشور، والنطاق في الفيديو يطابق Website URL، وكل منتج وصلاحية مطلوبة ظاهرة فيه. التطبيقات غير المعتمدة سابقًا تصوّر العرض في **Sandbox** من بوابة المطورين.
 - [ ] وصف يوضح أن المحتوى أصلي من مكتبة المستخدم نفسه (تيكتوك يرفض صراحة "تطبيقًا ينسخ محتوى عشوائيًا من منصات أخرى").
@@ -47,7 +47,7 @@
 
 - توكن الوصول يعيش 24 ساعة وتوكن التحديث 365 يومًا؛ Repeater يجددهما تلقائيًا.
 - **طريقة الرفع:** Repeater يطلب من تيكتوك سحب الفيديو من رابطنا الموقّع (`PULL_FROM_URL`)، في النشر المباشر وفي المسودات. ذلك يشترط توثيق ملكية الرابط، وإلا ترد تيكتوك بـ `403 url_ownership_unverified`، وحينها يتحول Repeater تلقائيًا إلى رفع الملف نفسه (`FILE_UPLOAD`) ويتذكر ذلك حتى يُعاد تشغيل العامل. `FILE_UPLOAD` يعمل دائمًا لكنه أبطأ ويحمّل شبكة السيرفر، فالتوثيق أفضل.
-- **توثيق الرابط** (مرة واحدة): في بوابة المطورين ← تطبيقك ← **URL properties** ← **Add property** ← النوع **URL prefix** والقيمة `https://rotator.magic-lap.com/m/` (كل مسار الوسائط الموقّع يبدأ بـ `/m/` على هذا النطاق)، ثم أتمّ التحقق بالطريقة التي تعرضها البوابة. الدليل الرسمي يوصي بإضافة سلسلة توقيع في سجلات DNS للنطاق ويقول إن الـ URL prefix هو `https://` + النطاق + المسار + `/` والنطاق يجب أن يكون اسمًا لا IP؛ لو اخترت **Domain** وأضفت سجل TXT في Cloudflare لـ `rotator.magic-lap.com` فهو يغطي كل المسارات (سجل TXT لا يتعارض مع كون سجل A "DNS only"). ثم جرّب بنفسك: `curl -sI "https://rotator.magic-lap.com/m/<id>/<expires>/<sig>.mp4"` (رابط من إحدى المنشورات في اللوحة) يجب أن يعطي `200` بلا `Location` (تيكتوك لا يتبع التحويلات: أي `3xx` يُعد رابطًا غير صالح)، ونفس الشيء لطلب GET (`curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' <الرابط>`). الرابط يبقى متاحًا ساعة كاملة من بدء التنزيل. (المصدر: https://developers.tiktok.com/doc/content-posting-api-media-transfer-guide)
+- **توثيق الرابط** (مرة واحدة): في بوابة المطورين ← تطبيقك ← **URL properties** ← **Add property** ← النوع **URL prefix** والقيمة `https://repeater.magic-lap.com/m/` (كل مسار الوسائط الموقّع يبدأ بـ `/m/` على هذا النطاق)، ثم أتمّ التحقق بالطريقة التي تعرضها البوابة. الدليل الرسمي يوصي بإضافة سلسلة توقيع في سجلات DNS للنطاق ويقول إن الـ URL prefix هو `https://` + النطاق + المسار + `/` والنطاق يجب أن يكون اسمًا لا IP؛ لو اخترت **Domain** وأضفت سجل TXT في Cloudflare لـ `repeater.magic-lap.com` فهو يغطي كل المسارات (سجل TXT لا يتعارض مع كون سجل A "DNS only"). ثم جرّب بنفسك: `curl -sI "https://repeater.magic-lap.com/m/<id>/<expires>/<sig>.mp4"` (رابط من إحدى المنشورات في اللوحة) يجب أن يعطي `200` بلا `Location` (تيكتوك لا يتبع التحويلات: أي `3xx` يُعد رابطًا غير صالح)، ونفس الشيء لطلب GET (`curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' <الرابط>`). الرابط يبقى متاحًا ساعة كاملة من بدء التنزيل. (المصدر: https://developers.tiktok.com/doc/content-posting-api-media-transfer-guide)
 - "فصل الحساب" في اللوحة يلغي التوكن عند تيكتوك.
 
 المراجع: https://developers.tiktok.com/doc/content-posting-api-get-started ، https://developers.tiktok.com/doc/content-sharing-guidelines ، https://developers.tiktok.com/doc/login-kit-web ، https://developers.tiktok.com/doc/app-review-guidelines

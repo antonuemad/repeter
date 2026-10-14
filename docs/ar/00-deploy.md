@@ -1,9 +1,14 @@
-# 00 — نشر Repeater على سيرفر Hostinger (rotator.magic-lap.com)
+# 00 — نشر Repeater على سيرفر Hostinger (repeater.magic-lap.com)
+
+> النشر الحالي (15 أكتوبر 2026): nginx القائم على المضيف يوجّه هذا النطاق إلى
+> `127.0.0.1:8091`، وملف الإعداد الفعلي هو `/srv/repeater/app/deploy/.env`.
+> الأمثلة أدناه تصف التثبيت العام وقد تستخدم المنفذ الافتراضي 8090؛ لا تستبدل
+> إعداد المضيف الحالي بها. راجع [تقييم الجاهزية](06-readiness.md) قبل دعوة العملاء.
 
 ## الصورة باختصار
 
 - الموقع الرئيسي `magic-lap.com` على استضافة Hostinger العادية (hPanel) خلف Cloudflare، ولا نلمسه.
-- Repeater يعمل على الـ VPS (KVM 4) بـ Docker Compose داخل `/srv/repeater`، على الساب دومين **`rotator.magic-lap.com`**.
+- Repeater يعمل على الـ VPS (KVM 4) بـ Docker Compose داخل `/srv/repeater`، على الساب دومين **`repeater.magic-lap.com`**.
 - الخدمات: `db` (PostgreSQL 16) و`migrate` (ترحيلات القاعدة) و`web` (اللوحة) و`worker` (الاستيراد والترميز والنشر) و`caddy` (HTTPS تلقائي، يعمل فقط لو المنفذان 80/443 فاضيان).
 - الحصة: نحو 2 vCPU و6 جيجا رام كحد أقصى، حتى لا يزاحم مشاريع Magic Lap الأخرى على نفس السيرفر.
 - الملفات على السيرفر:
@@ -24,7 +29,7 @@
    - **IPv4 address:** عنوان الـ VPS (من hPanel ← VPS ← صفحة السيرفر).
    - **Proxy status:** **DNS only** (السحابة رمادية) ← مهم.
    - **TTL:** Auto
-3. احفظ، وتأكد من جهازك: `dig +short rotator.magic-lap.com` يجب أن يطبع عنوان الـ VPS نفسه (لا عناوين Cloudflare).
+3. احفظ، وتأكد من جهازك: `dig +short repeater.magic-lap.com` يجب أن يطبع عنوان الـ VPS نفسه (لا عناوين Cloudflare).
 
 **لماذا رمادية (بدون بروكسي Cloudflare)؟**
 
@@ -55,7 +60,7 @@ ssh-keygen -t ed25519 -C "github-deploy-repeater" -f repeater_deploy -N ""
 | `VPS_HOST` | عنوان IP للـ VPS | نعم |
 | `VPS_USER` | `root` (أو المستخدم المخصص) | نعم |
 | `VPS_SSH_KEY` | محتوى الملف الخاص `repeater_deploy` كاملًا (من `-----BEGIN` إلى `-----END`) | نعم |
-| `REPEATER_DOMAIN` | `rotator.magic-lap.com` | نعم |
+| `REPEATER_DOMAIN` | `repeater.magic-lap.com` | نعم |
 | `VPS_PORT` | منفذ SSH إن لم يكن 22 | لا |
 | `REPEATER_PROXY` | أول نشر فقط: `auto` (الافتراضي) أو `caddy` أو `external` (القسم 5) | لا |
 | `VPS_KNOWN_HOSTS` | ناتج `ssh-keyscan` بعد مطابقة بصمته مع بصمة السيرفر (القسم 2) | **نعم** |
@@ -80,11 +85,11 @@ ssh-keygen -t ed25519 -C "github-deploy-repeater" -f repeater_deploy -N ""
 
 1. يتحقق من النظام (Ubuntu 22.04+ أو Debian 12+) ويثبّت Docker (السكربت الرسمي get.docker.com) إن لم يكن مثبتًا.
 2. ينشئ `/srv/repeater/{app,media,backups}`.
-3. ينشئ `deploy/.env` من `.env.example` ويولّد بـ `openssl` كلمة سر القاعدة و`REPEATER_SECRET_KEY` ومفتاح تشفير التوكنات، ويضبط `REPEATER_BASE_URL=https://rotator.magic-lap.com`.
+3. ينشئ `deploy/.env` من `.env.example` ويولّد بـ `openssl` كلمة سر القاعدة و`REPEATER_SECRET_KEY` ومفتاح تشفير التوكنات، ويضبط `REPEATER_BASE_URL=https://repeater.magic-lap.com`.
 4. يفحص المنفذين 80/443 (يحسب كل ما يحجزهما، حتى لو كان متوقفًا لحظة الفحص: حاوية متوقفة أو في إعادة تشغيل متكررة لها ربط على 80/443، وخدمة nginx أو apache أو caddy أو traefik مفعّلة في systemd لكنها لا تستمع الآن، وتثبيت Coolify):
    - **فاضيان والسيرفر لا يشغّل شيئًا آخر:** يشغّل Caddy الخاص بـ Repeater ويستخرج الشهادة تلقائيًا.
    - **فاضيان لكن السيرفر مشترك** (فيه حاويات مشاريع أخرى): **لا يشغّل Caddy من تلقاء نفسه**؛ ما يبدو فاضيًا الآن قد يكون بروكسي متوقفًا أو سيُشغَّل لاحقًا، وCaddy بـ `restart: unless-stopped` سيأخذ المنفذين ويُسقط كل المواقع الأخرى عند أول إعادة تشغيل. يطبع الإعداد الجاهز للبروكسي. لو أردت Caddy فعلًا اضبط `REPEATER_PROXY=caddy` (متغير بيئة، أو سر GitHub بنفس الاسم في أول نشر، أو `--stdin-env`).
-   - **مشغولان** (nginx أو Traefik أو Coolify أو غيره، شغّال أو متوقف): **لا يلمسه ولا يوقفه**، ويطبع في سجل الـ Action إعدادًا جاهزًا (بعنوان `Ports 80/443 are served by`) يضيفه من يدير ذلك البروكسي، يوجّه `rotator.magic-lap.com` إلى `127.0.0.1:8090` (أو عنوان docker0 لو البروكسي نفسه حاوية). في هذا الإعداد `X-Forwarded-For` **يُضبط** على عنوان العميل (`$remote_addr` في nginx) ولا يُلحَق بما أرسله العميل، لأن التطبيق يعتمد عليه في تحديد معدل محاولات الدخول وفي سجل الوصول للوسائط.
+   - **مشغولان** (nginx أو Traefik أو Coolify أو غيره، شغّال أو متوقف): **لا يلمسه ولا يوقفه**، ويطبع في سجل الـ Action إعدادًا جاهزًا (بعنوان `Ports 80/443 are served by`) يضيفه من يدير ذلك البروكسي، يوجّه `repeater.magic-lap.com` إلى `127.0.0.1:8090` (أو عنوان docker0 لو البروكسي نفسه حاوية). في هذا الإعداد `X-Forwarded-For` **يُضبط** على عنوان العميل (`$remote_addr` في nginx) ولا يُلحَق بما أرسله العميل، لأن التطبيق يعتمد عليه في تحديد معدل محاولات الدخول وفي سجل الوصول للوسائط.
    - `REPEATER_PROXY=caddy` مع منفذين مشغولين يتوقف السكربت برسالة صريحة (لا يشغّل Caddy ليفشل أو ليسرق المنفذين لاحقًا).
    - القرار يُحفظ في `deploy/.env` (`COMPOSE_PROFILES`, `REPEATER_WEB_BIND`, `REPEATER_WEB_PORT`) ويُفحص **في كل تشغيل لاحق** لـ `bootstrap.sh`: لو لم يعد يناسب السيرفر (مثلًا نُقل `.env` من سيرفر آخر) يتوقف قبل أي بناء أو تشغيل برسالة تذكر المشكلة، ويمكن إعادة القرار بـ `sudo bash bootstrap.sh --redetect-proxy`.
 5. يبني الصورة (أول مرة 5–10 دقائق) ويشغّل الخدمات وينتظر سلامتها.
@@ -92,7 +97,7 @@ ssh-keygen -t ed25519 -C "github-deploy-repeater" -f repeater_deploy -N ""
 7. يثبّت نسخًا احتياطيًا يوميًا (`/etc/cron.d/repeater-backup`).
 8. يطبع قائمة الخطوات الباقية.
 
-في النهاية يفحص النشر `https://rotator.magic-lap.com/healthz`؛ فشله وقتها تحذير فقط (غالبًا DNS لم ينتشر بعد).
+في النهاية يفحص النشر `https://repeater.magic-lap.com/healthz`؛ فشله وقتها تحذير فقط (غالبًا DNS لم ينتشر بعد).
 
 النشرات التالية: كل دفع إلى `main` = CI ثم `deploy.sh` (بناء، ترحيلات، تشغيل، انتظار السلامة). لا يغيّر `deploy/.env` إلا بمفاتيح المنصات الموجودة في الأسرار.
 
@@ -102,7 +107,7 @@ ssh-keygen -t ed25519 -C "github-deploy-repeater" -f repeater_deploy -N ""
 # على السيرفر كـ root
 apt-get update && apt-get install -y git
 git clone <رابط المستودع> /srv/repeater/app      # أو ارفع الكود بـ scp/rsync
-REPEATER_DOMAIN=rotator.magic-lap.com ADMIN_EMAIL=you@magic-lap.com \
+REPEATER_DOMAIN=repeater.magic-lap.com ADMIN_EMAIL=you@magic-lap.com \
   bash /srv/repeater/app/deploy/bootstrap.sh
 ```
 
@@ -112,7 +117,7 @@ REPEATER_DOMAIN=rotator.magic-lap.com ADMIN_EMAIL=you@magic-lap.com \
 
 - إنشاء أو إعادة ضبط: **Actions ← Deploy ← Run workflow** مع تفعيل `reset_admin` (يستخدم السرّين `ADMIN_EMAIL`/`ADMIN_PASSWORD`).
 - أو على السيرفر: `sudo ADMIN_EMAIL=you@magic-lap.com bash /srv/repeater/app/deploy/bootstrap.sh --create-admin`
-- الدخول: `https://rotator.magic-lap.com/login`
+- الدخول: `https://repeater.magic-lap.com/login`
 
 ## 7. مفاتيح المنصات
 
@@ -170,7 +175,7 @@ sudo bash /srv/repeater/app/deploy/backup.sh restore /srv/repeater/backups/repea
 - منفذ اللوحة (8090) مربوط على `127.0.0.1` فقط. لا تنشر أي منفذ على `0.0.0.0`: Docker يتجاوز ufw.
 - **عنوان العميل خلف البروكسي:** التطبيق يعتمد على `X-Forwarded-For` و`X-Forwarded-Proto` فقط من البروكسي نفسه: الـ loopback ونطاقات Docker الخاصة (`172.16.0.0/12` و`192.168.0.0/16`)، وهو ما يغطي Caddy الخاص بـ Repeater وnginx أو Nginx Proxy Manager أو Traefik/Coolify على نفس السيرفر. القيمة في `REPEATER_FORWARDED_ALLOW_IPS` (غيّرها لو يصل بروكسيك من عنوان آخر). لا تضع `*` أبدًا: عندها يأخذ التطبيق أول عنوان في الترويسة، وهو ما يكتبه العميل نفسه لو كان البروكسي يُلحِق بدل أن يستبدل (`$proxy_add_x_forwarded_for` في nginx)، فيتجاوز المهاجم تحديد معدل الدخول لكل IP ويزوّر عناوين سجل الوصول للوسائط. في nginx/NPM استخدم `proxy_set_header X-Forwarded-For $remote_addr;` (الإعداد الذي يطبعه `bootstrap.sh`)، وفي Apache `ProxyAddHeaders Off` مع `RequestHeader set X-Forwarded-For "%{REMOTE_ADDR}s"`. Caddy وTraefik يتجاهلان افتراضيًا ما يرسله العميل من هذه الترويسات. (حتى لو ألحق البروكسي، القائمة المحددة تجعل التطبيق يأخذ **آخر** عنوان غير موثوق، وهو ما أضافه البروكسي، لا أول عنوان؛ الضبط بـ `$remote_addr` طبقة حماية إضافية.)
 - لو فعّلت جدار حماية Hostinger للـ VPS من hPanel: اسمح بـ TCP 22 و80 و443 (وUDP 443 لـ HTTP/3).
-- الروابط المطلوبة في لوحات المنصات: الخصوصية `https://rotator.magic-lap.com/privacy` والشروط `https://rotator.magic-lap.com/terms`.
+- الروابط المطلوبة في لوحات المنصات: الخصوصية `https://repeater.magic-lap.com/privacy` والشروط `https://repeater.magic-lap.com/terms`.
 
 
 يفحص `deploy.sh` بعد تشغيل اللوحة عناوين بوابة Docker وCaddy الفعلية (IPv4 وIPv6) وعنوان الربط

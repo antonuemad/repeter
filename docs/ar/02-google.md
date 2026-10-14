@@ -16,9 +16,9 @@
 
 1. **Branding:**
    - App name: `Magic Lap Rotator` (بدون "YouTube" أو "YT" في الاسم)، وبريد الدعم.
-   - Application home page: **صفحة عامة على النطاق الموثّق** تصف التطبيق وتربط بـ `/privacy` و`/terms`، مثل `https://magic-lap.com/rotator` (أنشئها قبل التقديم). **لا تضع `https://rotator.magic-lap.com`**: للزائر بلا حساب يحوّله التطبيق (303) إلى صفحة الدخول، وتحقق العلامة التجارية في Google يشترط صفحة رئيسية "ظاهرة بلا تسجيل دخول، ثابتة، ولا تحوّل إلى عنوان آخر، وتعرض معلومات عن التطبيق" ويرفض الصفحة الواقعة خلف تسجيل الدخول (https://support.google.com/cloud/answer/13807376). نفس القاعدة طبقها تيكتوك ([01-tiktok.md](01-tiktok.md)). في وضع Testing/Internal لا يُطلب هذا؛ يلزم عند الانتقال إلى Production (القسم 4).
-   - Privacy policy: `https://rotator.magic-lap.com/privacy`
-   - Terms of service: `https://rotator.magic-lap.com/terms`
+   - Application home page: **صفحة عامة على النطاق الموثّق** تصف التطبيق وتربط بـ `/privacy` و`/terms`، مثل `https://magic-lap.com/rotator` (أنشئها قبل التقديم). **لا تضع `https://repeater.magic-lap.com`**: للزائر بلا حساب يحوّله التطبيق (303) إلى صفحة الدخول، وتحقق العلامة التجارية في Google يشترط صفحة رئيسية "ظاهرة بلا تسجيل دخول، ثابتة، ولا تحوّل إلى عنوان آخر، وتعرض معلومات عن التطبيق" ويرفض الصفحة الواقعة خلف تسجيل الدخول (https://support.google.com/cloud/answer/13807376). نفس القاعدة طبقها تيكتوك ([01-tiktok.md](01-tiktok.md)). في وضع Testing/Internal لا يُطلب هذا؛ يلزم عند الانتقال إلى Production (القسم 4).
+   - Privacy policy: `https://repeater.magic-lap.com/privacy`
+   - Terms of service: `https://repeater.magic-lap.com/terms`
    - Authorized domains: `magic-lap.com`
 2. **Audience:**
    - User type: **External**.
@@ -31,7 +31,7 @@
    - `openid` و`.../auth/userinfo.email`
 4. **Clients ← Create client:**
    - Application type: **Web application**، الاسم `Repeater web`.
-   - **Authorized redirect URIs:** `https://rotator.magic-lap.com/oauth/google/callback`
+   - **Authorized redirect URIs:** `https://repeater.magic-lap.com/oauth/google/callback`
    - **Create** ← انسخ Client ID وClient secret إلى الإعدادات وانشر.
 
 اختبر: اللوحة ← الحسابات ← ربط يوتيوب، ثم ربط Google Drive. عند الموافقة اترك كل المربعات مُعلَّمة؛ لو أُلغي مربع يطلب منك Repeater الربط مجددًا.
