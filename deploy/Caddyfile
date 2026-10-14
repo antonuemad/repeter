@@ -1,0 +1,43 @@
+# Repeater's own reverse proxy, used only when COMPOSE_PROFILES includes "caddy" (bootstrap.sh
+# enables it when ports 80/443 are free). Automatic HTTPS from Let's Encrypt needs a DNS A
+# record for REPEATER_DOMAIN pointing at this server with the Cloudflare proxy OFF (grey cloud).
+{
+	servers {
+		timeouts {
+			read_header 30s
+			# Dashboard uploads go up to REPEATER_MAX_UPLOAD_MB (500 MB) over mobile links;
+			# `write` counts from the request headers, so it must cover the upload too.
+			read_body 1h
+			write 1h
+			idle 5m
+		}
+	}
+}
+
+{$REPEATER_DOMAIN} {
+	encode zstd gzip
+
+	# Above the app's 500 MB upload limit plus multipart overhead; the app enforces its own.
+	request_body {
+		max_size 600MB
+	}
+
+	# The app sets its own security headers; these are defaults for anything that lacks them.
+	header {
+		?Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		?X-Content-Type-Options "nosniff"
+		?Referrer-Policy "strict-origin-when-cross-origin"
+		?X-Frame-Options "DENY"
+		-Server
+	}
+
+	# No access log: request lines carry OAuth codes and signed media links.
+	reverse_proxy web:8000 {
+		transport http {
+			dial_timeout 5s
+			response_header_timeout 5m
+			read_timeout 10m
+			write_timeout 10m
+		}
+	}
+}

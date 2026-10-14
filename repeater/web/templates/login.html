@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('login.title') }}{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>{{ t('login.title') }}</h1>
+  <p class="muted">{{ t('login.intro') }}</p>
+  {% if error %}<div class="flash flash-error" role="alert">{{ t(error) }}</div>{% endif %}
+  <form method="post" action="/login" class="stack">
+    {{ m.csrf() }}
+    <input type="hidden" name="next" value="{{ next }}">
+    <label>{{ t('field.email') }}
+      <input type="email" name="email" value="{{ email }}" autocomplete="username" required maxlength="320" dir="ltr">
+    </label>
+    <label>{{ t('field.password') }}
+      <input type="password" name="password" autocomplete="current-password" required maxlength="1024" dir="ltr">
+    </label>
+    <button type="submit" class="button">{{ t('login.submit') }}</button>
+  </form>
+</section>
+{% endblock %}

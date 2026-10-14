@@ -18,7 +18,7 @@ dependencies = [
   "httpx>=0.27",
   "cryptography>=42",
   "argon2-cffi>=23.1",
-  "yt-dlp>=2026.8.19",
+  "yt-dlp[default]>=2026.8.19",
   "pillow>=10.4",
   "imagehash>=4.3",
   "tzdata>=2024.1",
@@ -29,6 +29,7 @@ dev = [
   "pytest>=8.2",
   "respx>=0.21",
   "ruff>=0.5",
+  "pyyaml>=6",
 ]
 
 [build-system]
@@ -52,6 +53,10 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S"]
 ignore = ["S101", "S311", "S603", "S607", "E501"]
+
+[tool.ruff.format]
+# Alembic writes revision files in its own style; they are generated, not hand-formatted.
+exclude = ["migrations/versions/*.py"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S105", "S106", "S107", "S108"]

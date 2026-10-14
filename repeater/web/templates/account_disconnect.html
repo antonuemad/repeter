@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('accounts.disconnect') }}{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>{{ t('accounts.disconnect_title') }}</h1>
+  <p>{{ m.platform(account.platform) }} <strong dir="auto">{{ account.display_name }}</strong></p>
+  <p>{{ t('accounts.disconnect_body') }}</p>
+  {% if account.platform in ['instagram', 'facebook'] %}
+  <p class="muted">{{ t('accounts.disconnect_meta_note') }}</p>
+  {% elif account.platform in ['youtube', 'gdrive'] %}
+  <p class="muted">{{ t('accounts.disconnect_google_note') }} <a href="https://myaccount.google.com/permissions" rel="noopener noreferrer" target="_blank">myaccount.google.com/permissions</a></p>
+  {% endif %}
+  <form method="post" action="/accounts/{{ account.id }}/disconnect" class="actions">
+    {{ m.csrf() }}
+    <button type="submit" class="button danger">{{ t('accounts.disconnect_confirm') }}</button>
+    <a class="button secondary" href="/accounts">{{ t('common.cancel') }}</a>
+  </form>
+</section>
+{% endblock %}

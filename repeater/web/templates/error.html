@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ t(title_key) }}{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>{{ t(title_key) }}</h1>
+  <p>{{ t(body_key) }}</p>
+  <p class="muted">{{ t('error.code', code=status) }}</p>
+  <p><a class="button" href="{{ '/' if user else '/login' }}">{{ t('error.home') }}</a></p>
+</section>
+{% endblock %}

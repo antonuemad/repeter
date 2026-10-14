@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('nav.overview') }}{% endblock %}
+{% block content %}
+<h1>{{ t('overview.title', name=workspace.name) }}</h1>
+
+<section class="stats">
+  {% for key in ['ready', 'processing', 'failed', 'accounts', 'sources', 'upcoming', 'published_week'] %}
+  <div class="stat">
+    <span class="stat-value">{{ counts[key] }}</span>
+    <span class="stat-label">{{ t('overview.count_' ~ key) }}</span>
+  </div>
+  {% endfor %}
+</section>
+
+{% if reconnect_accounts or attention_posts or failed_videos or failing_sources or incomplete_rules %}
+<section class="card attention">
+  <h2>{{ t('overview.attention') }}</h2>
+  <ul class="plain">
+    {% for a in reconnect_accounts %}
+    <li>
+      {{ m.platform(a.platform) }} <strong dir="auto">{{ a.display_name }}</strong> — {{ t('overview.needs_reconnect') }}
+      {% if a.last_error %}<span class="muted" dir="auto">({{ a.last_error[:200] }})</span>{% endif %}
+      <a class="button small" href="/connect/{{ 'meta' if a.platform in ['instagram', 'facebook'] else a.platform }}">{{ t('accounts.reconnect') }}</a>
+    </li>
+    {% endfor %}
+    {% for r, problems in incomplete_rules %}
+    <li>
+      {{ m.platform(r.platform) }} <strong dir="auto">{{ r.connected_account.display_name }}</strong> — {{ t('overview.rule_incomplete') }}
+      <a href="/rules/{{ r.connected_account_id }}">{{ t('overview.complete_settings') }}</a>
+    </li>
+    {% endfor %}
+    {% for p in attention_posts %}
+    <li>
+      {{ m.platform(p.platform) }} <a href="/library/{{ p.video_id }}" dir="auto">{{ m.video_title(p.video) }}</a>
+      → <span dir="auto">{{ p.connected_account.display_name }}</span>: {{ m.badge('post_status', p.status) }}
+      {% if p.error %}<span class="muted" dir="auto">{{ p.error[:200] }}</span>{% endif %}
+    </li>
+    {% endfor %}
+    {% for v in failed_videos %}
+    <li>
+      <a href="/library/{{ v.id }}" dir="auto">{{ m.video_title(v) }}</a> {{ m.badge('video_status', v.status) }}
+      {% if v.error %}<span class="muted" dir="auto">{{ v.error[:200] }}</span>{% endif %}
+    </li>
+    {% endfor %}
+    {% for s in failing_sources %}
+    <li>
+      {{ t('overview.source') }} <a href="/sources/{{ s.id }}/edit" dir="auto">{{ s.name }}</a>:
+      <span class="muted" dir="auto">{{ s.last_error[:200] }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<div class="grid-2">
+  <section class="card">
+    <h2>{{ t('overview.next_48h') }}</h2>
+    {% if upcoming %}
+    <ul class="plain">
+      {% for p in upcoming %}
+      <li>
+        <span class="time">{{ fmt_dt(p.scheduled_at, zone) }}</span>
+        {{ m.platform(p.platform) }}
+        <a href="/library/{{ p.video_id }}" dir="auto">{{ m.video_title(p.video) }}</a>
+        {{ m.badge('post_status', p.status) }}
+      </li>
+      {% endfor %}
+    </ul>
+    <p><a href="/schedule">{{ t('overview.see_schedule') }}</a></p>
+    {% else %}
+    <p class="muted">{{ t('overview.nothing_scheduled') }}</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>{{ t('overview.disk') }}</h2>
+    {% if disk %}
+    <meter min="0" max="100" value="{{ disk.percent }}" low="70" high="90" optimum="10">{{ disk.percent }}%</meter>
+    <p>{{ t('overview.disk_usage', used=fmt_bytes(disk.used), total=fmt_bytes(disk.total), free=fmt_bytes(disk.free), percent=disk.percent) }}</p>
+    {% else %}
+    <p class="muted">{{ t('overview.disk_unavailable') }}</p>
+    {% endif %}
+  </section>
+</div>
+
+<section class="card">
+  <h2>{{ t('overview.recent_activity') }}</h2>
+  {{ m.activity_list(activity, zone) }}
+  <p><a href="/activity">{{ t('overview.see_activity') }}</a></p>
+</section>
+{% endblock %}

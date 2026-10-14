@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('nav.schedule') }}{% endblock %}
+{% block content %}
+<h1>{{ t('schedule.title') }}</h1>
+<p class="muted">{{ t('schedule.timezone', zone=workspace.timezone) }}</p>
+
+<section class="card">
+  <h2>{{ t('schedule.next_hours', hours=upcoming_hours) }}</h2>
+  {% for day, posts in days %}
+  <h3 class="day">{{ t('day.' ~ day.weekday()) }} {{ day.isoformat() }}{% if day == today %} · {{ t('schedule.today') }}{% endif %}</h3>
+  <ul class="schedule-list">
+    {% for p in posts %}
+    <li class="schedule-item">
+      <span class="time">{{ fmt_dt(p.scheduled_at, zone, 'time') }}{% if p.scheduled_at < now and p.status == 'scheduled' %} <span class="muted">({{ t('schedule.due') }})</span>{% endif %}</span>
+      <span class="what">
+        {{ m.platform(p.platform) }} <span dir="auto">{{ p.connected_account.display_name }}</span> ·
+        <a href="/library/{{ p.video_id }}" dir="auto">{{ m.video_title(p.video) }}</a>
+        {% if p.cycle %}<span class="muted">({{ t('library.cycle', cycle=p.cycle) }})</span>{% endif %}
+      </span>
+      {{ m.badge('post_status', p.status) }}
+      {% if p.error %}<span class="muted small" dir="auto">{{ p.error[:200] }}</span>{% endif %}
+      {{ m.post_actions(p, actionable, '/schedule') }}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">{{ t('schedule.empty') }}</p>
+  {% endfor %}
+</section>
+
+<section class="card">
+  <h2>{{ t('schedule.history', days=history_days) }}</h2>
+  {% if history %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>{{ t('schedule.when') }}</th><th>{{ t('schedule.account') }}</th><th>{{ t('schedule.video') }}</th><th>{{ t('library.status') }}</th><th>{{ t('schedule.link') }}</th></tr></thead>
+      <tbody>
+        {% for p in history %}
+        <tr>
+          <td>{{ fmt_dt(p.published_at or p.updated_at, zone) }}</td>
+          <td>{{ m.platform(p.platform) }} <span dir="auto">{{ p.connected_account.display_name }}</span></td>
+          <td><a href="/library/{{ p.video_id }}" dir="auto">{{ m.video_title(p.video) }}</a></td>
+          <td>{{ m.badge('post_status', p.status) }}{% if p.error %}<div class="muted small" dir="auto">{{ p.error[:300] }}</div>{% endif %}
+            {{ m.post_actions(p, actionable, '/schedule') }}</td>
+          <td>{% if p.permalink and p.permalink.startswith('https://') %}<a href="{{ p.permalink }}" rel="noopener noreferrer" target="_blank">{{ t('schedule.open') }}</a>{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">{{ t('schedule.history_empty') }}</p>
+  {% endif %}
+</section>
+{% endblock %}

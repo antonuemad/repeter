@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ m.video_title(video) }}{% endblock %}
+{% block content %}
+<p><a href="/library">← {{ t('library.back') }}</a></p>
+<h1 dir="auto">{{ m.video_title(video) }}</h1>
+
+<div class="grid-2">
+  <section class="card">
+    {% if has_preview %}
+    <video class="preview" controls preload="metadata" src="/library/{{ video.id }}/preview"{% if video.thumbnail_path %} poster="/library/{{ video.id }}/thumb.jpg"{% endif %}></video>
+    {% else %}
+    <p class="thumb-placeholder">{{ t('library.no_preview') }}</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>{{ t('library.details') }}</h2>
+    <dl class="details">
+      <dt>{{ t('library.status') }}</dt><dd>{{ m.badge('video_status', video.status) }}</dd>
+      {% if video.error %}<dt>{{ t('library.error') }}</dt><dd dir="auto">{{ video.error }}</dd>{% endif %}
+      {% if video.duplicate_of_id %}<dt>{{ t('library.duplicate_of') }}</dt><dd><a href="/library/{{ video.duplicate_of_id }}">#{{ video.duplicate_of_id }}</a></dd>{% endif %}
+      <dt>{{ t('library.source') }}</dt>
+      <dd>{% if video.source_platform %}{{ m.platform(video.source_platform) }}{% else %}{{ t('library.manual') }}{% endif %}
+        {% if video.permalink and video.permalink.startswith('https://') %} · <a href="{{ video.permalink }}" rel="noopener noreferrer" target="_blank">{{ t('library.original_link') }}</a>{% endif %}</dd>
+      <dt>{{ t('library.imported') }}</dt><dd>{{ fmt_dt(video.created_at, zone) }}</dd>
+      {% if video.source_published_at %}<dt>{{ t('library.published_at_source') }}</dt><dd>{{ fmt_dt(video.source_published_at, zone) }}</dd>{% endif %}
+      <dt>{{ t('library.duration') }}</dt><dd>{{ fmt_duration(video.duration_s) }}</dd>
+      {% if video.width and video.height %}<dt>{{ t('library.dimensions') }}</dt><dd dir="ltr">{{ video.width }}×{{ video.height }}</dd>{% endif %}
+      <dt>{{ t('library.size') }}</dt><dd>{{ fmt_bytes(video.encoded_size_bytes or video.size_bytes) }}</dd>
+    </dl>
+    <div class="actions">
+      {% if video.status == 'failed' %}
+      <form method="post" action="/library/{{ video.id }}/retry" class="inline">
+        {{ m.csrf() }}
+        <button type="submit" class="button">{{ t('library.retry') }}</button>
+      </form>
+      {% endif %}
+      {% if video.status == 'archived' %}
+      <form method="post" action="/library/{{ video.id }}/restore" class="inline">
+        {{ m.csrf() }}
+        <button type="submit" class="button secondary">{{ t('library.restore') }}</button>
+      </form>
+      {% elif video.status not in ['importing', 'duplicate'] %}
+      <form method="post" action="/library/{{ video.id }}/archive" class="inline" data-confirm="{{ t('library.archive_confirm') }}">
+        {{ m.csrf() }}
+        <button type="submit" class="button secondary">{{ t('library.archive') }}</button>
+      </form>
+      {% endif %}
+    </div>
+    {% if video.status == 'ready' and accounts %}
+    <form method="post" action="/library/{{ video.id }}/publish-now" class="stack">
+      {{ m.csrf() }}
+      <label>{{ t('library.publish_to') }}
+        <select name="account_id" required>
+          <option value="">—</option>
+          {% for a in accounts %}
+          <option value="{{ a.id }}">{{ platform_name(a.platform) }} · {{ a.display_name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="button">{{ t('library.publish_now') }}</button>
+      <p class="muted small">{{ t('library.publish_now_help') }}</p>
+    </form>
+    {% endif %}
+  </section>
+</div>
+
+<section class="card">
+  <h2>{{ t('library.edit_title') }}</h2>
+  <p class="muted">{{ t('library.edit_help') }}</p>
+  <form method="post" action="/library/{{ video.id }}/edit" class="stack">
+    {{ m.csrf() }}
+    <label>{{ t('field.title') }}
+      <input type="text" name="title" maxlength="300" value="{{ overrides.get('title', '') }}" placeholder="{{ video.title }}" dir="auto">
+    </label>
+    <label>{{ t('field.caption') }}
+      <textarea name="caption" rows="4" maxlength="5000" placeholder="{{ video.caption }}" dir="auto">{{ overrides.get('caption', '') }}</textarea>
+    </label>
+    <fieldset>
+      <legend>{{ t('library.platforms') }}</legend>
+      {% for p in publish_platforms %}
+      <label class="check"><input type="checkbox" name="platform_{{ p }}" value="1"{% if p not in excluded %} checked{% endif %}> {{ platform_name(p) }}</label>
+      {% endfor %}
+    </fieldset>
+    <button type="submit" class="button">{{ t('common.save') }}</button>
+  </form>
+</section>
+
+{% if previews %}
+<section class="card">
+  <h2>{{ t('library.preview_title') }}</h2>
+  <p class="muted">{{ t('library.preview_help') }}</p>
+  {% for pv in previews %}
+  <div class="caption-preview">
+    <h3>{{ m.platform(pv.account.platform) }} <span dir="auto">{{ pv.account.display_name }}</span></h3>
+    {% if pv.account.platform in ['youtube', 'facebook'] %}<p><strong>{{ t('field.title') }}:</strong> <span dir="auto">{{ pv.title }}</span></p>{% endif %}
+    <pre class="caption" dir="auto">{{ pv.caption }}</pre>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>{{ t('library.history') }}</h2>
+  {% if posts %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>{{ t('schedule.when') }}</th><th>{{ t('schedule.account') }}</th><th>{{ t('library.status') }}</th><th>{{ t('schedule.link') }}</th></tr></thead>
+      <tbody>
+        {% for p in posts %}
+        <tr>
+          <td>{{ fmt_dt(p.published_at or p.scheduled_at, zone) }}{% if p.cycle %} <span class="muted">({{ t('library.cycle', cycle=p.cycle) }})</span>{% endif %}</td>
+          <td>{{ m.platform(p.platform) }} <span dir="auto">{{ p.connected_account.display_name }}</span></td>
+          <td>{{ m.badge('post_status', p.status) }}{% if p.error %}<div class="muted small" dir="auto">{{ p.error[:300] }}</div>{% endif %}</td>
+          <td>{% if p.permalink and p.permalink.startswith('https://') %}<a href="{{ p.permalink }}" rel="noopener noreferrer" target="_blank">{{ t('schedule.open') }}</a>{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">{{ t('library.no_posts') }}</p>
+  {% endif %}
+</section>
+{% endblock %}

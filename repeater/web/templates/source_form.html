@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('sources.add_' ~ kind) if is_new else t('sources.edit_title') }}{% endblock %}
+{% block content %}
+<p><a href="/sources">← {{ t('nav.sources') }}</a></p>
+<h1>{{ t('sources.add_' ~ kind) if is_new else t('sources.edit_title') }}</h1>
+<p class="muted">{{ t('sources.kind_help_' ~ kind) }}</p>
+{{ m.form_error(error) }}
+
+<form method="post" action="{{ '/sources/new' if is_new else '/sources/' ~ source.id ~ '/edit' }}" class="card stack">
+  {{ m.csrf() }}
+  <input type="hidden" name="kind" value="{{ kind }}">
+  <label>{{ t('field.name') }}
+    <input type="text" name="name" maxlength="200" value="{{ values.name or '' }}" dir="auto">
+  </label>
+
+  {% if kind == 'ytdlp' %}
+  <div class="warning-box" role="note">
+    <h2>{{ t('sources.unofficial_title') }}</h2>
+    <p>{{ t('sources.unofficial_warning_1') }}</p>
+    <p>{{ t('sources.unofficial_warning_2') }}</p>
+    <p>{{ t('sources.unofficial_warning_3') }}</p>
+  </div>
+  <fieldset>
+    <legend>{{ t('field.platform') }}</legend>
+    {% for p in ytdlp_platforms %}
+    <label class="check"><input type="radio" name="platform" value="{{ p }}"{% if values.platform == p %} checked{% endif %}{% if not is_new %} disabled{% endif %} required> {{ platform_name(p) }}</label>
+    {% endfor %}
+    {% if not is_new %}<input type="hidden" name="platform" value="{{ values.platform }}">{% endif %}
+  </fieldset>
+  <label>{{ t('field.profile_url') }}
+    <input type="url" name="profile_url" required maxlength="500" value="{{ values.profile_url or '' }}" placeholder="https://www.tiktok.com/@name" dir="ltr">
+  </label>
+  <label>{{ t('sources.linked_account') }}
+    <select name="account_id">
+      <option value="">{{ t('sources.no_account') }}</option>
+      {% for a in accounts %}
+      <option value="{{ a.id }}"{% if values.account_id == a.id %} selected{% endif %}>{{ platform_name(a.platform) }} · {{ a.display_name }}</option>
+      {% endfor %}
+    </select>
+    <span class="muted small">{{ t('sources.linked_account_help') }}</span>
+  </label>
+  {% if source.unofficial_ack_at %}
+  <p class="muted">{{ t('sources.acknowledged_on', date=fmt_dt(source.unofficial_ack_at, zone)) }}</p>
+  {% else %}
+  <label class="check ack"><input type="checkbox" name="ack" value="1" required{% if values.ack %} checked{% endif %}> {{ t('sources.ack_label') }}</label>
+  {% endif %}
+
+  {% elif kind == 'platform_api' %}
+  <label>{{ t('sources.account') }}
+    <select name="account_id" required>
+      <option value="">—</option>
+      {% for a in accounts %}
+      <option value="{{ a.id }}"{% if values.account_id == a.id %} selected{% endif %}>{{ platform_name(a.platform) }} · {{ a.display_name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% if not accounts %}<p class="muted">{{ t('sources.connect_meta_first') }} <a href="/accounts">{{ t('nav.accounts') }}</a></p>{% endif %}
+
+  {% else %}
+  <label>{{ t('sources.drive_account') }}
+    <select name="account_id" required>
+      <option value="">—</option>
+      {% for a in accounts %}
+      <option value="{{ a.id }}"{% if values.account_id == a.id %} selected{% endif %}>{{ a.display_name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% if not accounts %}<p class="muted">{{ t('sources.connect_drive_first') }} <a href="/accounts">{{ t('nav.accounts') }}</a></p>{% endif %}
+  <label>{{ t('field.folder') }}
+    <input type="text" name="folder" required maxlength="500" value="{{ values.folder or '' }}" placeholder="https://drive.google.com/drive/folders/…" dir="ltr">
+  </label>
+  {% endif %}
+
+  <div class="grid-2">
+    <label>{{ t('field.poll_interval_minutes') }}
+      <input type="number" name="poll_interval_minutes" min="{{ min_poll }}" max="{{ max_poll }}" required value="{{ values.poll_interval_minutes }}">
+      <span class="muted small">{{ t('sources.poll_help', min=min_poll) }}</span>
+    </label>
+    <label>{{ t('field.backfill_count') }}
+      <input type="number" name="backfill_count" min="0" max="{{ max_backfill }}" value="{{ values.backfill_count or 0 }}">
+      <span class="muted small">{{ t('sources.backfill_help') }}</span>
+    </label>
+  </div>
+  <label class="check"><input type="checkbox" name="enabled" value="1"{% if values.enabled %} checked{% endif %}> {{ t('sources.enabled_label') }}</label>
+  {% if not is_new and source.last_error %}
+  <div class="flash flash-error small" dir="auto">{{ t('sources.last_error') }}: {{ source.last_error }}</div>
+  {% endif %}
+  <div class="actions">
+    <button type="submit" class="button">{{ t('common.save') }}</button>
+    <a class="button secondary" href="/sources">{{ t('common.cancel') }}</a>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('nav.library') }}{% endblock %}
+{% block content %}
+<h1>{{ t('library.title') }}</h1>
+
+<details class="card upload"{% if not videos %} open{% endif %}>
+  <summary><strong>{{ t('library.upload_title') }}</strong></summary>
+  <p class="muted">{{ t('library.upload_help', max_mb=max_upload_mb) }}</p>
+  <form method="post" action="/library/upload" enctype="multipart/form-data" class="stack" data-upload data-max-bytes="{{ max_upload_mb * 1024 * 1024 }}" data-too-large="{{ t('library.upload_too_large', max_mb=max_upload_mb) }}" data-uploading="{{ t('library.uploading') }}">
+    {# The CSRF field must come before the file: the server checks it before storing any byte. #}
+    {{ m.csrf() }}
+    <label>{{ t('field.title') }}
+      <input type="text" name="title" maxlength="300" dir="auto">
+    </label>
+    <label>{{ t('field.caption') }}
+      <textarea name="caption" rows="3" maxlength="5000" dir="auto"></textarea>
+    </label>
+    <label>{{ t('field.file') }}
+      <input type="file" name="file" accept="video/*" required>
+    </label>
+    <p class="muted small">{{ t('library.upload_watermark') }}</p>
+    <button type="submit" class="button">{{ t('library.upload_submit') }}</button>
+  </form>
+</details>
+
+<nav class="tabs" aria-label="{{ t('library.filter') }}">
+  {% for f in status_filters %}
+  <a href="/library?status={{ f }}"{% if f == status_filter %} aria-current="page"{% endif %}>{{ t('library.filter_' ~ f) }}</a>
+  {% endfor %}
+</nav>
+
+{% if videos %}
+<div class="video-grid">
+  {% for v in videos %}
+  {% set vposts = posts.get(v.id, {}) %}
+  <article class="video-card">
+    <a href="/library/{{ v.id }}" class="thumb">
+      {% if v.thumbnail_path %}
+      <img src="/library/{{ v.id }}/thumb.jpg" alt="" loading="lazy">
+      {% else %}
+      <span class="thumb-placeholder">{{ t('library.no_thumbnail') }}</span>
+      {% endif %}
+      {% if v.duration_s %}<span class="duration">{{ fmt_duration(v.duration_s) }}</span>{% endif %}
+    </a>
+    <div class="video-body">
+      <a href="/library/{{ v.id }}" class="video-title" dir="auto">{{ m.video_title(v) }}</a>
+      <div class="meta">
+        {{ m.badge('video_status', v.status) }}
+        {% if v.source_platform %}{{ m.platform(v.source_platform) }}{% else %}<span class="platform">{{ t('library.manual') }}</span>{% endif %}
+        <span class="muted">{{ fmt_dt(v.created_at, zone, 'date') }}</span>
+      </div>
+      {% if accounts %}
+      <ul class="post-status">
+        {% for a in accounts %}
+        {% set p = vposts.get(a.id) %}
+        <li title="{{ a.display_name }}">
+          {{ m.platform(a.platform) }}
+          {% if p %}{{ m.badge('post_status', p.status) }}{% elif v.source_account_id == a.id %}<span class="muted">{{ t('library.is_source') }}</span>{% else %}<span class="muted">{{ t('library.not_planned') }}</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      <div class="actions">
+        {% if v.status == 'ready' and accounts %}
+        <form method="post" action="/library/{{ v.id }}/publish-now" class="inline publish-now">
+          {{ m.csrf() }}
+          <input type="hidden" name="next" value="/library?status={{ status_filter }}&page={{ pager.number }}">
+          <label class="visually-hidden" for="acc-{{ v.id }}">{{ t('library.publish_to') }}</label>
+          <select name="account_id" id="acc-{{ v.id }}" required>
+            <option value="">{{ t('library.publish_to') }}</option>
+            {% for a in accounts if a.id != v.source_account_id %}
+            <option value="{{ a.id }}">{{ platform_name(a.platform) }} · {{ a.display_name }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="button small">{{ t('library.publish_now') }}</button>
+        </form>
+        {% endif %}
+        {% if v.status == 'archived' %}
+        <form method="post" action="/library/{{ v.id }}/restore" class="inline">
+          {{ m.csrf() }}<input type="hidden" name="next" value="/library?status={{ status_filter }}&page={{ pager.number }}">
+          <button type="submit" class="button small secondary">{{ t('library.restore') }}</button>
+        </form>
+        {% elif v.status not in ['importing', 'duplicate'] %}
+        <form method="post" action="/library/{{ v.id }}/archive" class="inline" data-confirm="{{ t('library.archive_confirm') }}">
+          {{ m.csrf() }}<input type="hidden" name="next" value="/library?status={{ status_filter }}&page={{ pager.number }}">
+          <button type="submit" class="button small secondary">{{ t('library.archive') }}</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+  </article>
+  {% endfor %}
+</div>
+{{ m.pager(pager, '/library', {'status': status_filter}) }}
+{% else %}
+<p class="card muted">{{ t('library.empty') }}</p>
+{% endif %}
+{% endblock %}

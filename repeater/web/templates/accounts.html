@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('nav.accounts') }}{% endblock %}
+{% block content %}
+<h1>{{ t('accounts.title') }}</h1>
+<p class="muted">{{ t('accounts.intro') }}</p>
+
+<section class="connect-grid">
+  {% for b in buttons %}
+  <div class="card connect connect-{{ b.purpose }}">
+    <h2>{{ t('accounts.connect_' ~ b.purpose) }}</h2>
+    <p class="muted small">{{ t('accounts.connect_' ~ b.purpose ~ '_help') }}</p>
+    {% if b.configured %}
+    {# A plain link: the provider is reached by redirect, never by a form post (CSP form-action 'self'). #}
+    <a class="button" href="/connect/{{ b.purpose }}">{{ t('accounts.connect') }}</a>
+    {% else %}
+    <span class="badge badge-disabled">{{ t('accounts.not_configured') }}</span>
+    {% endif %}
+  </div>
+  {% endfor %}
+</section>
+
+<section class="card">
+  <h2>{{ t('accounts.connected') }}</h2>
+  {% if accounts %}
+  <ul class="account-list">
+    {% for a in accounts %}
+    <li class="account account-{{ a.status }}">
+      {% if a.avatar_url and a.avatar_url.startswith('https://') %}<img class="avatar" src="{{ a.avatar_url }}" alt="" width="40" height="40" referrerpolicy="no-referrer">{% else %}<span class="avatar avatar-empty" aria-hidden="true"></span>{% endif %}
+      <div class="account-body">
+        <div>{{ m.platform(a.platform) }} <strong dir="auto">{{ a.display_name }}</strong>
+          {% set handle = a.extra.get('username') or a.extra.get('custom_url') or a.extra.get('email') %}
+          {% if handle %}<span class="muted" dir="ltr">{{ handle }}</span>{% endif %}
+        </div>
+        <div>{{ m.badge('account_status', a.status) }}
+          {% if a.last_error and a.status != 'active' %}<span class="muted small" dir="auto">{{ a.last_error[:300] }}</span>{% endif %}
+        </div>
+      </div>
+      <div class="actions">
+        {% if configured[a.platform] and a.status != 'active' %}
+        <a class="button small" href="/connect/{{ purposes[a.platform] }}">{{ t('accounts.reconnect') }}</a>
+        {% endif %}
+        {% if a.platform != 'gdrive' and a.status != 'disabled' %}
+        <a class="button small secondary" href="/rules/{{ a.id }}">{{ t('accounts.rules') }}</a>
+        {% endif %}
+        {% if can_disconnect and a.status != 'disabled' %}
+        <a class="button small danger" href="/accounts/{{ a.id }}/disconnect">{{ t('accounts.disconnect') }}</a>
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">{{ t('accounts.empty') }}</p>
+  {% endif %}
+  {% if not can_disconnect %}<p class="muted small">{{ t('accounts.editor_note') }}</p>{% endif %}
+</section>
+{% endblock %}

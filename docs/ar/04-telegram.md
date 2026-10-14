@@ -1,0 +1,31 @@
+# 04 — تنبيهات تيليجرام
+
+النتيجة: `REPEATER_TELEGRAM_BOT_TOKEN` و`REPEATER_TELEGRAM_CHAT_ID`. يرسل Repeater تنبيهًا عند فشل نشر، أو حساب يحتاج إعادة ربط، أو مشكلة تحتاج تدخلًا.
+
+## 1. إنشاء البوت
+
+1. في تيليجرام افتح **@BotFather** (بالعلامة الزرقاء) ← `/newbot`.
+2. الاسم: `Magic Lap Rotator Alerts`، واسم المستخدم ينتهي بـ `bot` مثل `magiclap_rotator_bot`.
+3. يعطيك BotFather توكنًا بالشكل `123456789:AA...` ← هذا `REPEATER_TELEGRAM_BOT_TOKEN`. عامله ككلمة مرور ولا تنشره في أي محادثة.
+
+## 2. معرّف المحادثة (chat id)
+
+1. أنشئ مجموعة (مثلًا `Rotator alerts`) وأضف البوت لها مع من يتابع التشغيل.
+2. أرسل في المجموعة: `/start@اسم_البوت` (البوت في المجموعات يرى الأوامر الموجهة له فقط).
+3. افتح في المتصفح (ضع التوكن مكان `<TOKEN>`):
+   `https://api.telegram.org/bot<TOKEN>/getUpdates`
+4. ابحث عن `"chat":{"id":...}`. معرّف المجموعة سالب مثل `-1001234567890` ← هذا `REPEATER_TELEGRAM_CHAT_ID` (بالسالب).
+   (لتنبيهات خاصة لشخص واحد: أرسل `/start` للبوت في محادثة خاصة وخذ الـ id الموجب.)
+
+## 3. التفعيل والاختبار
+
+ضع القيمتين في `deploy/.env` (أو أسرار GitHub) وانشر، ثم على السيرفر:
+
+```bash
+cd /srv/repeater/app/deploy
+docker compose --env-file .env exec web python -c "from repeater.notify import notify; print(notify('اختبار تنبيهات Repeater'))"
+```
+
+يطبع `True` وتصل الرسالة. `False` يعني توكن أو chat id خطأ، أو أن البوت ليس عضوًا في المجموعة.
+
+لو تسرّب التوكن: BotFather ← `/revoke` ← اختر البوت، ثم ضع التوكن الجديد وانشر.

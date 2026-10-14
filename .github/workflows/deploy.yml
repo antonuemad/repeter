@@ -1,0 +1,253 @@
+name: Deploy
+
+# Deploys to the Hostinger VPS over SSH: syncs the code to /srv/repeater/app, then runs
+# deploy/bootstrap.sh on the first deploy (no deploy/.env on the server yet, or a bootstrap that
+# did not finish) or deploy/deploy.sh.
+# Setup and the list of secrets: docs/ar/00-deploy.md.
+#
+# Required secrets: VPS_HOST, VPS_USER, VPS_SSH_KEY, REPEATER_DOMAIN
+# Optional secrets: VPS_PORT (22), VPS_KNOWN_HOSTS (output of `ssh-keyscan -p PORT HOST`),
+#   ADMIN_EMAIL + ADMIN_PASSWORD (first deploy, or with reset_admin),
+#   REPEATER_TIKTOK_CLIENT_KEY/SECRET, REPEATER_GOOGLE_CLIENT_ID/SECRET, REPEATER_META_APP_ID/SECRET,
+#   REPEATER_TELEGRAM_BOT_TOKEN/CHAT_ID, REPEATER_YTDLP_PROXY (copied into deploy/.env when set).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to deploy
+        type: string
+        default: main
+      skip_tests:
+        description: Deploy without running CI first (emergencies only)
+        type: boolean
+        default: false
+      reset_admin:
+        description: Create or reset the dashboard admin from ADMIN_EMAIL / ADMIN_PASSWORD
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  config:
+    name: Check deploy secrets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - name: Check required secrets
+        id: check
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          REPEATER_DOMAIN: ${{ secrets.REPEATER_DOMAIN }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          missing=()
+          for name in VPS_HOST VPS_USER VPS_SSH_KEY REPEATER_DOMAIN; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ "${#missing[@]}" -eq 0 ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          msg="Missing repository secrets: ${missing[*]} (Settings > Secrets and variables > Actions; see docs/ar/00-deploy.md)."
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "::error::$msg"
+            exit 1
+          fi
+          echo "::notice::$msg Deploy skipped."
+
+  tests:
+    name: CI
+    needs: config
+    if: needs.config.outputs.ready == 'true' && !inputs.skip_tests
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ inputs.ref || github.sha }}
+
+  deploy:
+    name: Deploy to the VPS
+    needs: [config, tests]
+    if: >-
+      always() && needs.config.outputs.ready == 'true' &&
+      (needs.tests.result == 'success' || (needs.tests.result == 'skipped' && inputs.skip_tests))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
+      REPEATER_DOMAIN: ${{ secrets.REPEATER_DOMAIN }}
+      APP_DIR: /srv/repeater/app
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+
+      - name: Validate settings
+        run: |
+          [[ "$REPEATER_DOMAIN" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$ ]] ||
+            { echo "::error::REPEATER_DOMAIN must be a hostname such as rotator.magic-lap.com"; exit 1; }
+          [[ "$VPS_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "::error::VPS_PORT must be a number"; exit 1; }
+          [[ "$VPS_USER" =~ ^[a-z_][a-z0-9_.-]*$ ]] || { echo "::error::VPS_USER is not a valid user name"; exit 1; }
+          [[ "$VPS_HOST" =~ ^[A-Za-z0-9.:-]+$ ]] || { echo "::error::VPS_HOST must be an IP address or hostname"; exit 1; }
+
+      - name: Set up SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          (umask 077 && printf '%s\n' "$VPS_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key)
+          if ! ssh-keygen -y -f ~/.ssh/deploy_key > /dev/null 2>&1; then
+            echo "::error::VPS_SSH_KEY is not a valid private key without a passphrase"
+            exit 1
+          fi
+          if [ -n "$VPS_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$VPS_KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts
+          else
+            echo "::warning::VPS_KNOWN_HOSTS is not set: trusting the host key the server presents right now. Save the ssh-keyscan output below as the VPS_KNOWN_HOSTS secret."
+            ssh-keyscan -T 20 -p "$VPS_PORT" "$VPS_HOST" > ~/.ssh/known_hosts 2> /dev/null || true
+            if [ ! -s ~/.ssh/known_hosts ]; then
+              echo "::error::cannot reach $VPS_HOST:$VPS_PORT over SSH"
+              exit 1
+            fi
+            cat ~/.ssh/known_hosts
+            ssh-keygen -lf ~/.ssh/known_hosts
+          fi
+          chmod 600 ~/.ssh/known_hosts
+          cat > ~/.ssh/config << EOF
+          Host vps
+            HostName $VPS_HOST
+            Port $VPS_PORT
+            User $VPS_USER
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+            UserKnownHostsFile ~/.ssh/known_hosts
+            StrictHostKeyChecking yes
+            BatchMode yes
+            ConnectTimeout 20
+            ServerAliveInterval 30
+            ServerAliveCountMax 10
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Check access to the server
+        id: access
+        run: |
+          mode="$(ssh vps 'if [ "$(id -u)" -eq 0 ]; then echo root; elif sudo -n true 2> /dev/null; then echo sudo; else echo none; fi')"
+          case "$mode" in
+            root) echo "sudo=" >> "$GITHUB_OUTPUT" ;;
+            sudo) echo "sudo=sudo -n" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "::error::$VPS_USER is not root and has no passwordless sudo on the server"
+              exit 1
+              ;;
+          esac
+
+      - name: Prepare the server
+        env:
+          SUDO: ${{ steps.access.outputs.sudo }}
+        run: |
+          # $SUDO and $APP_DIR expand locally on purpose.
+          # shellcheck disable=SC2029
+          ssh vps "$SUDO install -d -m 0755 /srv/repeater $APP_DIR && if ! command -v rsync > /dev/null; then $SUDO apt-get update -qq && $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq rsync; fi"
+
+      - name: Upload the code
+        env:
+          SUDO: ${{ steps.access.outputs.sudo }}
+        run: |
+          rsync_path="rsync"
+          if [ -n "$SUDO" ]; then rsync_path="sudo -n rsync"; fi
+          # Excluded paths are never deleted on the server, so deploy/.env survives --delete.
+          rsync -rlptz --delete --no-owner --no-group --chmod=D755,F644 \
+            --exclude=/.git/ --exclude=/.venv/ --exclude=__pycache__/ --exclude='*.pyc' \
+            --exclude=/.pytest_cache/ --exclude=/.ruff_cache/ --exclude='*.egg-info/' \
+            --exclude=/media/ --exclude=/.env --exclude=/deploy/.env \
+            --rsync-path="$rsync_path" -e ssh ./ "vps:$APP_DIR/"
+
+      - name: Install or update Repeater
+        env:
+          SUDO: ${{ steps.access.outputs.sudo }}
+          RESET_ADMIN: ${{ inputs.reset_admin && 'true' || 'false' }}
+          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          REPEATER_TIKTOK_CLIENT_KEY: ${{ secrets.REPEATER_TIKTOK_CLIENT_KEY }}
+          REPEATER_TIKTOK_CLIENT_SECRET: ${{ secrets.REPEATER_TIKTOK_CLIENT_SECRET }}
+          REPEATER_GOOGLE_CLIENT_ID: ${{ secrets.REPEATER_GOOGLE_CLIENT_ID }}
+          REPEATER_GOOGLE_CLIENT_SECRET: ${{ secrets.REPEATER_GOOGLE_CLIENT_SECRET }}
+          REPEATER_META_APP_ID: ${{ secrets.REPEATER_META_APP_ID }}
+          REPEATER_META_APP_SECRET: ${{ secrets.REPEATER_META_APP_SECRET }}
+          REPEATER_TELEGRAM_BOT_TOKEN: ${{ secrets.REPEATER_TELEGRAM_BOT_TOKEN }}
+          REPEATER_TELEGRAM_CHAT_ID: ${{ secrets.REPEATER_TELEGRAM_CHAT_ID }}
+          REPEATER_YTDLP_PROXY: ${{ secrets.REPEATER_YTDLP_PROXY }}
+        run: |
+          deploy_dir="$APP_DIR/deploy"
+          # $SUDO and $deploy_dir expand locally on purpose; they are not secrets.
+          # shellcheck disable=SC2029
+          remote() { ssh vps "$@"; }
+          # Secrets travel over SSH stdin, never on a command line.
+          credentials() {
+            local key
+            for key in REPEATER_TIKTOK_CLIENT_KEY REPEATER_TIKTOK_CLIENT_SECRET \
+              REPEATER_GOOGLE_CLIENT_ID REPEATER_GOOGLE_CLIENT_SECRET \
+              REPEATER_META_APP_ID REPEATER_META_APP_SECRET \
+              REPEATER_TELEGRAM_BOT_TOKEN REPEATER_TELEGRAM_CHAT_ID REPEATER_YTDLP_PROXY; do
+              if [ -n "${!key}" ]; then printf '%s=%s\n' "$key" "${!key}"; fi
+            done
+          }
+          admin() { printf 'ADMIN_EMAIL=%s\nADMIN_PASSWORD=%s\n' "$ADMIN_EMAIL" "$ADMIN_PASSWORD"; }
+
+          # bootstrap.sh runs until it has completed once: deploy/.env exists and its last step,
+          # the backup cron job, is installed. It is idempotent, so a half-finished run is resumed.
+          set +e
+          remote "$SUDO test -f $deploy_dir/.env -a -f /etc/cron.d/repeater-backup"
+          status=$?
+          set -e
+          if [ "$status" -eq 1 ]; then
+            echo "First deploy: running bootstrap.sh"
+            { credentials; admin; printf 'REPEATER_DOMAIN=%s\n' "$REPEATER_DOMAIN"; } |
+              remote "$SUDO bash $deploy_dir/bootstrap.sh --stdin-env"
+          elif [ "$status" -eq 0 ]; then
+            if [ -n "$(credentials)" ]; then
+              credentials | remote "$SUDO bash $deploy_dir/bootstrap.sh --update-env --stdin-env"
+            fi
+            remote "$SUDO bash $deploy_dir/deploy.sh"
+            if [ "$RESET_ADMIN" = "true" ]; then
+              admin | remote "$SUDO bash $deploy_dir/bootstrap.sh --create-admin --stdin-env"
+            fi
+          else
+            echo "::error::SSH to the server failed (exit $status)"
+            exit 1
+          fi
+
+      - name: Check https://REPEATER_DOMAIN/healthz
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsS --max-time 15 "https://$REPEATER_DOMAIN/healthz"; then
+              echo
+              echo "Repeater is live at https://$REPEATER_DOMAIN"
+              exit 0
+            fi
+            echo "attempt $attempt: not reachable yet"
+            sleep 10
+          done
+          echo "::warning::https://$REPEATER_DOMAIN/healthz is not reachable yet. Check the DNS A record (DNS only, grey cloud) and the reverse proxy: docs/ar/00-deploy.md"
+
+      - name: Remove SSH credentials
+        if: always()
+        run: rm -rf ~/.ssh

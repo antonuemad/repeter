@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block robots %}<meta name="robots" content="index, follow">{% endblock %}
+{% block title %}{{ t('footer.privacy') }}{% endblock %}
+{% block content %}
+<article class="card legal">
+  {% include "legal/privacy_" ~ lang ~ ".html" %}
+</article>
+{% endblock %}

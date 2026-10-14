@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('nav.rules') }}{% endblock %}
+{% block content %}
+<h1>{{ t('rules.title') }}</h1>
+<p class="muted">{{ t('rules.intro') }}</p>
+
+<section class="card">
+  <h2>{{ t('rules.accounts') }}</h2>
+  {% if rows %}
+  <ul class="rule-list">
+    {% for row in rows %}
+    {% set a = row.account %}
+    <li class="rule-row">
+      <div>
+        {{ m.platform(a.platform) }} <strong dir="auto">{{ a.display_name }}</strong>
+        {% if a.status != 'active' %}{{ m.badge('account_status', a.status) }}{% endif %}
+      </div>
+      {% if row.rule %}
+      <div class="muted small">
+        {{ t('rules.on') if row.rule.enabled else t('rules.off') }} ·
+        {{ t('rules.summary', cap=row.cap, gap=row.rule.min_gap_minutes, start=row.rule.window_start.strftime('%H:%M'), end=row.rule.window_end.strftime('%H:%M')) }}
+        {% if row.rule.evergreen_days %} · {{ t('rules.evergreen_summary', days=row.rule.evergreen_days) }}{% endif %}
+      </div>
+      {% if row.problems and row.rule.enabled %}<div class="flash flash-warning small">{{ t('rules.incomplete') }}</div>{% endif %}
+      {% else %}
+      <div class="muted small">{{ t('rules.not_set_up') }}</div>
+      {% endif %}
+      <a class="button small" href="/rules/{{ a.id }}">{{ t('common.edit') }}</a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">{{ t('rules.no_accounts') }} <a href="/accounts">{{ t('nav.accounts') }}</a></p>
+  {% endif %}
+</section>
+
+<section class="card" id="workspace">
+  <h2>{{ t('rules.workspace_title') }}</h2>
+  <form method="post" action="/settings/workspace" class="stack">
+    {{ m.csrf() }}
+    <label>{{ t('field.timezone') }}
+      <select name="timezone" required>
+        {% for z in timezones %}
+        <option value="{{ z }}"{% if z == ws_values.timezone %} selected{% endif %}>{{ z }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div class="grid-2">
+      <label>{{ t('field.cross_gap_hours') }}
+        <input type="number" name="cross_gap_hours" min="0" max="{{ limits.max_cross_gap }}" required value="{{ ws_values.cross_gap_hours | int }}">
+        <span class="muted small">{{ t('rules.cross_gap_help') }}</span>
+      </label>
+      <label>{{ t('field.horizon_hours') }}
+        <input type="number" name="horizon_hours" min="{{ limits.min_horizon }}" max="{{ limits.max_horizon }}" required value="{{ ws_values.horizon_hours }}">
+        <span class="muted small">{{ t('rules.horizon_help') }}</span>
+      </label>
+    </div>
+    <label class="check"><input type="checkbox" name="paused" value="1"{% if ws_values.paused %} checked{% endif %}> {{ t('rules.pause_all') }}</label>
+    <p class="muted small">{{ t('rules.pause_help') }}</p>
+    <button type="submit" class="button">{{ t('common.save') }}</button>
+  </form>
+</section>
+{% endblock %}

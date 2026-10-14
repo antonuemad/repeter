@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}{{ t('deletion.title') }}{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>{{ t('deletion.title') }}</h1>
+  <dl class="details">
+    <dt>{{ t('deletion.code') }}</dt><dd dir="ltr"><code>{{ record.confirmation_code }}</code></dd>
+    <dt>{{ t('deletion.received') }}</dt><dd>{{ fmt_dt(record.created_at, 'UTC') }} UTC</dd>
+    <dt>{{ t('deletion.status') }}</dt>
+    <dd>{% if record.status == 'completed' %}<span class="badge badge-published">{{ t('deletion.completed') }}</span>{% else %}<span class="badge badge-scheduled">{{ t('deletion.in_progress') }}</span>{% endif %}</dd>
+    {% if record.completed_at %}<dt>{{ t('deletion.completed_at') }}</dt><dd>{{ fmt_dt(record.completed_at, 'UTC') }} UTC</dd>{% endif %}
+  </dl>
+  <p>{{ t('deletion.explanation') }}</p>
+  <p class="muted">{{ t('deletion.contact') }} <a href="mailto:info@magic-lap.com">info@magic-lap.com</a></p>
+</section>
+{% endblock %}

@@ -65,6 +65,13 @@ class RateLimitedError(RetryableError):
     """Platform rate limit or daily cap hit."""
 
 
+class RestartPublish(RetryableError):
+    """Raised by Publisher.poll(): the platform-side upload is gone (expired, failed or refused)
+    and nothing was published, so the engine must call publish() again (after retry_after)
+    instead of polling the same upload. Any other RetryableError from poll() means "poll again":
+    the post may already be live, and re-publishing could post it twice."""
+
+
 class AuthError(PlatformError):
     """Token invalid, expired beyond refresh, or permission revoked: the user must reconnect."""
 
@@ -211,6 +218,8 @@ LIMITS: dict[Platform, PlatformLimits] = {
     # title up to 2200 UTF-16 units; ~15 posts/day/creator.
     Platform.TIKTOK: PlatformLimits(1, 600, 4 * 1024**3, 2200, None, 15),
     # YouTube Shorts: vertical/square up to 3 min; title <= 100 chars; description <= 5000 bytes.
+    # api_daily_cap 100 is the Google Cloud project's videos.insert quota shared by every channel,
+    # not a per-channel cap; repeater.engine.scheduler enforces it project-wide.
     Platform.YOUTUBE: PlatformLimits(1, 180, 256 * 1024**3, 5000, 100, 100),
     # Instagram Reels via API: 3 s - 15 min, 300 MB, caption 2200 chars / 30 hashtags.
     Platform.INSTAGRAM: PlatformLimits(3, 900, 300 * 1024**2, 2200, None, 50),
@@ -262,6 +271,7 @@ class PublishRequest:
     caption: str
     settings: dict[str, Any]
     thumbnail_path: Path | None = None
+    fps: float | None = None  # frame rate of the encoded file (Video.fps); None = unknown
 
 
 class PublishOutcome(enum.StrEnum):

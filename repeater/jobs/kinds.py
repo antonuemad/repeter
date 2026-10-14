@@ -9,8 +9,15 @@ plan_workspace    {"workspace_id": int}           plan_workspace:{id}     repeat
 publish_post      {"post_id": int}                publish_post:{id}       repeater.engine.jobs
 poll_post         {"post_id": int}                poll_post:{id}          repeater.engine.jobs
 refresh_tokens    {}                              refresh_tokens          repeater.engine.jobs
-maintenance       {}                              maintenance             repeater.engine.jobs
+maintenance       {}                              maintenance             repeater.jobs.maintenance
 delete_user_data  {"request_id": int}             delete_user_data:{id}   repeater.engine.jobs
+
+Optional payload keys written by the importer (repeater.sources.importer):
+    import_video   "download_url": str, "remote_extra": dict  listing details for the download
+                   (short-lived CDN URLs that have no column), "retries": int
+    process_video  "retries": int
+"retries" counts failed tries; the handlers keep it because RetryLater does not consume queue
+attempts.
 """
 
 from __future__ import annotations

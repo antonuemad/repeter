@@ -1,0 +1,174 @@
+name: Server inspect
+
+# Read-only diagnostics of the VPS, printed to this job's log: OS, resources, Docker, listening
+# ports, which reverse proxy owns 80/443, the state of /srv/repeater and Repeater's containers.
+# Changes nothing on the server and never prints deploy/.env. Same SSH secrets as deploy.yml.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    name: Inspect the VPS
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
+      REPEATER_DOMAIN: ${{ secrets.REPEATER_DOMAIN }}
+    steps:
+      - name: Check secrets
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          missing=()
+          for name in VPS_HOST VPS_USER VPS_SSH_KEY; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing repository secrets: ${missing[*]} (see docs/ar/00-deploy.md)"
+            exit 1
+          fi
+          [[ "$VPS_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "::error::VPS_PORT must be a number"; exit 1; }
+
+      - name: Set up SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          (umask 077 && printf '%s\n' "$VPS_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key)
+          if ! ssh-keygen -y -f ~/.ssh/deploy_key > /dev/null 2>&1; then
+            echo "::error::VPS_SSH_KEY is not a valid private key without a passphrase"
+            exit 1
+          fi
+          if [ -n "$VPS_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$VPS_KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts
+          else
+            echo "::warning::VPS_KNOWN_HOSTS is not set: trusting the host key the server presents right now. Save the ssh-keyscan output below as the VPS_KNOWN_HOSTS secret."
+            ssh-keyscan -T 20 -p "$VPS_PORT" "$VPS_HOST" > ~/.ssh/known_hosts 2> /dev/null || true
+            if [ ! -s ~/.ssh/known_hosts ]; then
+              echo "::error::cannot reach $VPS_HOST:$VPS_PORT over SSH"
+              exit 1
+            fi
+            cat ~/.ssh/known_hosts
+            ssh-keygen -lf ~/.ssh/known_hosts
+          fi
+          chmod 600 ~/.ssh/known_hosts
+          cat > ~/.ssh/config << EOF
+          Host vps
+            HostName $VPS_HOST
+            Port $VPS_PORT
+            User $VPS_USER
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+            UserKnownHostsFile ~/.ssh/known_hosts
+            StrictHostKeyChecking yes
+            BatchMode yes
+            ConnectTimeout 20
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Inspect (read-only)
+        run: |
+          ssh vps 'bash -s' << 'REMOTE'
+          set -u
+          S=""
+          if [ "$(id -u)" -ne 0 ]; then
+            if sudo -n true 2> /dev/null; then S="sudo -n"; else echo "(no passwordless sudo: some sections are partial)"; fi
+          fi
+          section() { printf '\n===== %s =====\n' "$*"; }
+          deploy_dir=/srv/repeater/app/deploy
+          # Only these non-secret keys are ever read from deploy/.env.
+          env_value() { $S awk -F= -v k="$1" '$1 == k {v = $2} END {print v}' "$deploy_dir/.env" 2> /dev/null; }
+
+          section "OS"
+          grep -E '^(PRETTY_NAME|VERSION_ID)=' /etc/os-release
+          uname -srm
+          uptime
+
+          section "CPU / RAM / disk"
+          echo "vCPU: $(nproc)"
+          free -h
+          df -h / /srv 2> /dev/null
+
+          section "Docker"
+          if command -v docker > /dev/null; then
+            $S docker version --format 'Engine {{.Server.Version}} (API {{.Server.APIVersion}})' 2>&1
+            $S docker compose version 2>&1
+            $S docker info --format 'Storage driver: {{.Driver}}, root dir: {{.DockerRootDir}}' 2>&1
+          else
+            echo "Docker is not installed (bootstrap.sh installs it)"
+          fi
+
+          section "Running containers"
+          command -v docker > /dev/null && $S docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+
+          section "Listening TCP ports"
+          $S ss -ltnp 2> /dev/null || ss -ltn
+
+          section "Who serves ports 80/443"
+          $S ss -H -ltnp '( sport = :80 or sport = :443 )' 2> /dev/null || true
+          if command -v docker > /dev/null; then
+            $S docker ps --format '{{.Names}} {{.Image}} {{.Ports}}' | grep -E ':(80|443)->' || echo "no container publishes 80/443"
+          fi
+          for unit in nginx caddy traefik apache2 httpd lsws; do
+            state="$(systemctl is-active "$unit" 2> /dev/null)"
+            [ "$state" = "active" ] && echo "systemd service $unit is active"
+          done
+          [ -d /data/coolify ] && echo "Coolify detected (/data/coolify)"
+          true
+
+          section "Firewall"
+          if command -v ufw > /dev/null; then $S ufw status 2>&1 | head -n 30; else echo "ufw not installed"; fi
+
+          section "/srv/repeater"
+          if [ -d /srv/repeater ]; then
+            ls -la /srv/repeater
+            $S du -sh /srv/repeater/media /srv/repeater/backups 2> /dev/null
+            if $S test -f "$deploy_dir/.env"; then
+              echo "deploy/.env exists (mode $($S stat -c '%a' "$deploy_dir/.env"), contents not shown)"
+              echo "COMPOSE_PROFILES=$(env_value COMPOSE_PROFILES)  REPEATER_WEB_BIND=$(env_value REPEATER_WEB_BIND)  REPEATER_WEB_PORT=$(env_value REPEATER_WEB_PORT)  REPEATER_DOMAIN=$(env_value REPEATER_DOMAIN)"
+            else
+              echo "deploy/.env missing: the next deploy runs bootstrap.sh"
+            fi
+            echo "latest backups:"
+            $S ls -lt /srv/repeater/backups 2> /dev/null | head -n 5
+            echo "backup cron:"
+            cat /etc/cron.d/repeater-backup 2> /dev/null || echo "(not installed)"
+          else
+            echo "/srv/repeater does not exist: Repeater is not installed yet"
+          fi
+
+          if [ -f "$deploy_dir/docker-compose.yml" ] && $S test -f "$deploy_dir/.env" && command -v docker > /dev/null; then
+            compose() { $S docker compose --project-directory "$deploy_dir" -f "$deploy_dir/docker-compose.yml" --env-file "$deploy_dir/.env" "$@"; }
+            section "Repeater containers"
+            compose ps -a
+            section "Repeater logs (last 100 lines of web and worker)"
+            compose logs --no-color --tail 100 web worker 2>&1
+            section "Health check from the server"
+            bind="$(env_value REPEATER_WEB_BIND)"
+            port="$(env_value REPEATER_WEB_PORT)"
+            curl -sS --max-time 10 "http://${bind:-127.0.0.1}:${port:-8090}/healthz" || echo "(no answer)"
+            echo
+          fi
+          REMOTE
+
+      - name: Public health check
+        if: always()
+        run: |
+          if [ -z "$REPEATER_DOMAIN" ]; then
+            echo "REPEATER_DOMAIN secret not set; skipping"
+            exit 0
+          fi
+          echo "DNS: $(getent hosts "$REPEATER_DOMAIN" || echo 'no A record yet')"
+          curl -sS --max-time 15 "https://$REPEATER_DOMAIN/healthz" || echo "https://$REPEATER_DOMAIN/healthz is not reachable"
+          echo
+
+      - name: Remove SSH credentials
+        if: always()
+        run: rm -rf ~/.ssh

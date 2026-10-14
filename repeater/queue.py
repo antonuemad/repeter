@@ -9,12 +9,15 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from repeater.models import Job, JobStatus
 from repeater.timeutil import utcnow
+
+# Must match the predicate of the uq_job_dedupe_active index in repeater.models.Job.
+_DEDUPE_INDEX_WHERE = text("status IN ('queued', 'running') AND dedupe_key IS NOT NULL")
 
 
 class RetryLater(Exception):  # noqa: N818 - control-flow signal, not an error
@@ -47,12 +50,9 @@ def enqueue(
     }
     stmt = pg_insert(Job).values(**values)
     if dedupe_key is not None:
-        stmt = stmt.on_conflict_do_nothing(
-            index_elements=["dedupe_key"],
-            index_where=and_(
-                Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]), Job.dedupe_key.isnot(None)
-            ),
-        )
+        # Literal SQL, not bound parameters: once psycopg prepares the statement (after a few
+        # executions) Postgres can no longer match parameterised predicates to the partial index.
+        stmt = stmt.on_conflict_do_nothing(index_elements=["dedupe_key"], index_where=_DEDUPE_INDEX_WHERE)
     stmt = stmt.returning(Job.id)
     return session.execute(stmt).scalar_one_or_none()
 

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('nav.activity') }}{% endblock %}
+{% block content %}
+<h1>{{ t('activity.title') }}</h1>
+<form method="get" action="/activity" class="filters">
+  <label>{{ t('activity.level') }}
+    <select name="level">
+      <option value="">{{ t('activity.all') }}</option>
+      {% for l in levels %}<option value="{{ l }}"{% if l == level %} selected{% endif %}>{{ t('level.' ~ l) }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>{{ t('activity.category') }}
+    <select name="category">
+      <option value="">{{ t('activity.all') }}</option>
+      {% for c in categories %}<option value="{{ c }}"{% if c == category %} selected{% endif %}>{{ t('category.' ~ c) }}</option>{% endfor %}
+    </select>
+  </label>
+  <button type="submit" class="button small">{{ t('activity.filter') }}</button>
+</form>
+<section class="card">
+  {% if entries %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>{{ t('activity.time') }}</th><th>{{ t('activity.level') }}</th><th>{{ t('activity.category') }}</th><th>{{ t('activity.message') }}</th><th>{{ t('activity.actor') }}</th></tr></thead>
+      <tbody>
+        {% for e in entries %}
+        <tr class="level-{{ e.level }}">
+          <td class="nowrap">{{ fmt_dt(e.created_at, zone) }}</td>
+          <td>{{ m.badge('level', e.level) }}</td>
+          <td>{{ t('category.' ~ e.category) if t.has('category.' ~ e.category) else e.category }}</td>
+          <td dir="auto">{{ e.message }}</td>
+          <td class="muted" dir="ltr">{{ e.actor }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">{{ t('activity.empty') }}</p>
+  {% endif %}
+</section>
+{{ m.pager(pager, '/activity', {'level': level, 'category': category}) }}
+{% endblock %}

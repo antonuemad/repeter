@@ -1,0 +1,52 @@
+{% macro csrf() %}<input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">{% endmacro %}
+
+{% macro badge(group, value) %}<span class="badge badge-{{ value }}">{{ t(group ~ '.' ~ value) }}</span>{% endmacro %}
+
+{% macro platform(value) %}<span class="platform platform-{{ value }}">{{ platform_name(value) }}</span>{% endmacro %}
+
+{% macro form_error(error) %}
+{% if error %}
+<div class="flash flash-error" role="alert">{{ t.error(error) }}</div>
+{% endif %}
+{% endmacro %}
+
+{% macro pager(p, path, params) %}
+{% if p.pages > 1 %}
+<nav class="pager" aria-label="{{ t('pager.label') }}">
+  {% if p.has_prev %}<a href="{{ p.link(path, p.number - 1, **params) }}">{{ t('pager.prev') }}</a>{% endif %}
+  <span class="muted">{{ t('pager.position', page=p.number, pages=p.pages) }}</span>
+  {% if p.has_next %}<a href="{{ p.link(path, p.number + 1, **params) }}">{{ t('pager.next') }}</a>{% endif %}
+</nav>
+{% endif %}
+{% endmacro %}
+
+{% macro post_actions(post, actionable, next) %}
+{% if post.status in actionable %}
+<div class="actions">
+  <form method="post" action="/schedule/{{ post.id }}/publish-now" class="inline">
+    {{ csrf() }}<input type="hidden" name="next" value="{{ next }}">
+    <button type="submit" class="button small">{{ t('schedule.publish_now') }}</button>
+  </form>
+  <form method="post" action="/schedule/{{ post.id }}/skip" class="inline" data-confirm="{{ t('schedule.skip_confirm') }}">
+    {{ csrf() }}<input type="hidden" name="next" value="{{ next }}">
+    <button type="submit" class="button small secondary">{{ t('schedule.skip') }}</button>
+  </form>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro video_title(video) %}{{ (video.overrides or {}).get('title') or video.title or (video.caption or '')[:60] or ('#' ~ video.id) }}{% endmacro %}
+
+{% macro activity_list(entries, zone) %}
+<ul class="activity">
+  {% for e in entries %}
+  <li class="activity-item level-{{ e.level }}">
+    <span class="badge badge-{{ e.level }}">{{ t('level.' ~ e.level) }}</span>
+    <span class="muted">{{ fmt_dt(e.created_at, zone) }} · {{ t('category.' ~ e.category) if t.has('category.' ~ e.category) else e.category }}</span>
+    <span class="activity-message" dir="auto">{{ e.message }}</span>
+  </li>
+  {% else %}
+  <li class="muted">{{ t('activity.empty') }}</li>
+  {% endfor %}
+</ul>
+{% endmacro %}

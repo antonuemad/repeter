@@ -41,7 +41,10 @@ def cmd_create_admin(args: argparse.Namespace) -> int:
     from repeater.models import User, Workspace, WorkspaceMember
     from repeater.security import hash_password
 
-    password = args.password or getpass.getpass("Password: ")
+    if args.password_stdin:
+        password = sys.stdin.readline().rstrip("\r\n")
+    else:
+        password = args.password or getpass.getpass("Password: ")
     if len(password) < 10:
         print("password must be at least 10 characters", file=sys.stderr)
         return 2
@@ -100,7 +103,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("check", help="validate configuration").set_defaults(fn=cmd_check)
     ca = sub.add_parser("create-admin", help="create/update the admin user and workspace")
     ca.add_argument("--email", required=True)
-    ca.add_argument("--password", help="omit to be prompted")
+    pw = ca.add_mutually_exclusive_group()
+    pw.add_argument("--password", help="omit to be prompted (visible to other users in `ps`)")
+    pw.add_argument(
+        "--password-stdin", action="store_true", help="read the password from the first line of stdin"
+    )
     ca.add_argument("--workspace", default="Magic Lab")
     ca.add_argument("--timezone", default="Africa/Cairo")
     ca.add_argument("--locale", default="ar", choices=["ar", "en"])

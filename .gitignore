@@ -8,6 +8,6 @@ build/
 dist/
 .env
 deploy/.env
-media/
+/media/
 *.log
 .coverage

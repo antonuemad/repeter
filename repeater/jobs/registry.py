@@ -14,6 +14,7 @@ HANDLERS: dict[str, Handler] = {}
 HANDLER_MODULES = (
     "repeater.sources.jobs",
     "repeater.engine.jobs",
+    "repeater.jobs.maintenance",
 )
 
 

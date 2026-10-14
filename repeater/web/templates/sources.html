@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('nav.sources') }}{% endblock %}
+{% block content %}
+<h1>{{ t('sources.title') }}</h1>
+<p class="muted">{{ t('sources.intro') }}</p>
+
+<div class="actions">
+  {% for k in kinds %}
+  <a class="button{{ ' secondary' if k == 'ytdlp' else '' }}" href="/sources/new?kind={{ k }}">{{ t('sources.add_' ~ k) }}</a>
+  {% endfor %}
+</div>
+
+{% if sources %}
+<ul class="source-list">
+  {% for s in sources %}
+  <li class="card source{{ ' source-off' if not s.enabled else '' }}">
+    <div class="source-head">
+      <strong dir="auto">{{ s.name or t('kind.' ~ s.kind) }}</strong>
+      <span class="badge">{{ t('kind.' ~ s.kind) }}</span>
+      {% if s.platform %}{{ m.platform(s.platform) }}{% endif %}
+      <span class="badge badge-{{ 'active' if s.enabled else 'disabled' }}">{{ t('sources.on') if s.enabled else t('sources.off') }}</span>
+    </div>
+    {% if s.kind != 'manual' %}
+    <dl class="details compact">
+      {% if s.connected_account %}<dt>{{ t('sources.account') }}</dt><dd dir="auto">{{ s.connected_account.display_name }}</dd>{% endif %}
+      {% if s.config.get('profile_url') %}<dt>{{ t('field.profile_url') }}</dt><dd dir="ltr">{{ s.config.get('profile_url') }}</dd>{% endif %}
+      {% if s.config.get('folder_id') %}<dt>{{ t('field.folder') }}</dt><dd dir="ltr">{{ s.config.get('folder_id') }}</dd>{% endif %}
+      <dt>{{ t('field.poll_interval_minutes') }}</dt><dd>{{ t('sources.every_minutes', minutes=s.poll_interval_minutes) }}</dd>
+      <dt>{{ t('sources.last_polled') }}</dt><dd>{{ fmt_dt(s.last_polled_at, zone) }}</dd>
+      <dt>{{ t('sources.last_success') }}</dt><dd>{{ fmt_dt(s.last_success_at, zone) }}</dd>
+      {% if s.kind == 'ytdlp' %}<dt>{{ t('sources.ack') }}</dt><dd>{{ fmt_dt(s.unofficial_ack_at, zone) if s.unofficial_ack_at else t('sources.not_acknowledged') }}</dd>{% endif %}
+    </dl>
+    {% if s.last_error %}
+    <div class="flash flash-error small" dir="auto">{{ t('sources.last_error') }}: {{ s.last_error }}{% if s.consecutive_failures %} ({{ t('sources.failures', count=s.consecutive_failures) }}){% endif %}</div>
+    {% endif %}
+    <div class="actions">
+      <a class="button small secondary" href="/sources/{{ s.id }}/edit">{{ t('common.edit') }}</a>
+      {% if s.enabled %}
+      <form method="post" action="/sources/{{ s.id }}/poll" class="inline">
+        {{ m.csrf() }}<button type="submit" class="button small">{{ t('sources.poll_now') }}</button>
+      </form>
+      {% endif %}
+      <form method="post" action="/sources/{{ s.id }}/toggle" class="inline">
+        {{ m.csrf() }}<button type="submit" class="button small secondary">{{ t('sources.turn_off') if s.enabled else t('sources.turn_on') }}</button>
+      </form>
+    </div>
+    {% else %}
+    <p class="muted small">{{ t('sources.manual_help') }} <a href="/library">{{ t('nav.library') }}</a></p>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="card muted">{{ t('sources.empty') }}</p>
+{% endif %}
+{% endblock %}

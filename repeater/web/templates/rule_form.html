@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('rules.edit_title') }}{% endblock %}
+{% block content %}
+<p><a href="/rules">← {{ t('nav.rules') }}</a></p>
+<h1>{{ m.platform(account.platform) }} <span dir="auto">{{ account.display_name }}</span></h1>
+{{ m.form_error(error) }}
+{% if problems %}
+<div class="flash flash-warning" role="status">
+  {{ t('rules.problems_intro') }}
+  <ul>{% for p in problems %}<li dir="auto">{{ p }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+<form method="post" action="/rules/{{ account.id }}" class="stack"{% if platform == 'tiktok' %} data-tiktok-form{% endif %}>
+  {{ m.csrf() }}
+
+  <section class="card">
+    <h2>{{ t('rules.general') }}</h2>
+    {% set cannot_enable = platform == 'tiktok' and creator_error %}
+    <label class="check"><input type="checkbox" name="enabled" value="1" data-rule-enabled{% if values.enabled and not cannot_enable %} checked{% endif %}{% if cannot_enable %} disabled{% endif %}> {{ t('rules.enabled_label') }}</label>
+    {% if cannot_enable %}<p class="muted small">{{ t('rules.tiktok_cannot_enable') }}</p>{% endif %}
+    <div class="grid-2">
+      <label>{{ t('field.daily_cap') }}
+        <input type="number" name="daily_cap" min="1" max="{{ engine_cap }}" required value="{{ values.daily_cap }}">
+        <span class="muted small">{{ t('rules.daily_cap_help', max=engine_cap) }}</span>
+      </label>
+      <label>{{ t('field.min_gap_minutes') }}
+        <input type="number" name="min_gap_minutes" min="0" max="{{ max_gap }}" required value="{{ values.min_gap_minutes }}">
+      </label>
+      <label>{{ t('field.window_start') }}
+        <input type="time" name="window_start" required value="{{ values.window_start }}">
+      </label>
+      <label>{{ t('field.window_end') }}
+        <input type="time" name="window_end" required value="{{ values.window_end }}">
+      </label>
+    </div>
+    <p class="muted small">{{ t('rules.window_help', zone=workspace.timezone) }}</p>
+    <label>{{ t('field.caption_template') }}
+      <textarea name="caption_template" rows="4" maxlength="5000" dir="auto">{{ values.caption_template }}</textarea>
+      <span class="muted small">{{ t('rules.template_help') }}</span>
+    </label>
+    <label>{{ t('field.hashtags') }}
+      <input type="text" name="hashtags" maxlength="1000" value="{{ values.hashtags }}" dir="auto">
+    </label>
+    <div class="grid-2">
+      <label class="check"><input type="checkbox" name="evergreen" value="1"{% if values.evergreen %} checked{% endif %}> {{ t('rules.evergreen_label') }}</label>
+      <label>{{ t('field.evergreen_days') }}
+        <input type="number" name="evergreen_days" min="{{ min_evergreen }}" max="{{ max_evergreen }}" value="{{ values.evergreen_days }}">
+      </label>
+    </div>
+    <label class="check"><input type="checkbox" name="only_new" value="1"{% if values.only_new %} checked{% endif %}> {{ t('rules.only_new_label') }}</label>
+    {% if rule.only_after %}<p class="muted small">{{ t('rules.only_new_since', date=fmt_dt(rule.only_after, zone)) }}</p>{% endif %}
+  </section>
+
+  {% if platform == 'tiktok' %}
+  <section class="card tiktok-settings">
+    <h2>{{ t('rules.tiktok_title') }}</h2>
+    {% if creator_error %}
+    <div class="flash flash-error" role="alert">{{ t('rules.tiktok_creator_error') }} <span dir="auto">{{ t(creator_error) if t.has(creator_error) else creator_error }}</span></div>
+    {% elif creator %}
+    <div class="creator">
+      {% if creator.avatar_url and creator.avatar_url.startswith('https://') %}<img class="avatar" src="{{ creator.avatar_url }}" alt="" width="48" height="48" referrerpolicy="no-referrer">{% endif %}
+      <div>
+        <div>{{ t('rules.tiktok_posting_as') }} <strong dir="auto">{{ creator.nickname }}</strong>{% if creator.username %} <span class="muted" dir="ltr">@{{ creator.username }}</span>{% endif %}</div>
+        <div class="muted small">{{ t('rules.tiktok_max_duration', minutes=(creator.max_video_post_duration_sec // 60), seconds=creator.max_video_post_duration_sec) }}</div>
+      </div>
+    </div>
+
+    <fieldset>
+      <legend>{{ t('rules.tiktok_mode') }}</legend>
+      <label class="check"><input type="radio" name="mode" value="direct" data-mode{% if values.settings.mode != 'inbox' %} checked{% endif %}> {{ t('rules.tiktok_mode_direct') }}</label>
+      <label class="check"><input type="radio" name="mode" value="inbox" data-mode{% if values.settings.mode == 'inbox' %} checked{% endif %}> {{ t('rules.tiktok_mode_inbox') }}</label>
+    </fieldset>
+
+    <label>{{ t('rules.tiktok_privacy') }}
+      <select name="privacy_level" data-privacy>
+        <option value="" disabled{% if not selected_privacy %} selected{% endif %}>{{ t('rules.tiktok_privacy_placeholder') }}</option>
+        {% for opt in privacy_options %}
+        <option value="{{ opt }}"{% if opt == selected_privacy %} selected{% endif %}{% if opt == 'SELF_ONLY' %} data-private title="{{ t('rules.error_branded_private') }}"{% endif %}>{{ t('tiktok_privacy.' ~ opt) if t.has('tiktok_privacy.' ~ opt) else opt }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <fieldset>
+      <legend>{{ t('rules.tiktok_interactions') }}</legend>
+      {% for key, off in [('allow_comment', creator.comment_disabled), ('allow_duet', creator.duet_disabled), ('allow_stitch', creator.stitch_disabled)] %}
+      <label class="check{{ ' is-disabled' if off else '' }}"><input type="checkbox" name="{{ key }}" value="1"{% if values.settings[key] and not off %} checked{% endif %}{% if off %} disabled{% endif %}> {{ t('rules.tiktok_' ~ key) }}{% if off %} <span class="muted small">({{ t('rules.tiktok_disabled_by_creator') }})</span>{% endif %}</label>
+      {% endfor %}
+    </fieldset>
+
+    <fieldset data-disclosure>
+      <legend>{{ t('rules.tiktok_disclosure') }}</legend>
+      <label class="check"><input type="checkbox" name="disclose" value="1" data-disclose{% if values.disclose %} checked{% endif %}> {{ t('rules.tiktok_disclose_label') }}</label>
+      <p class="muted small">{{ t('rules.tiktok_disclose_help') }}</p>
+      <div class="indent" data-disclose-options>
+        <label class="check"><input type="checkbox" name="brand_organic" value="1" data-brand-organic{% if values.disclose and values.settings.brand_organic_toggle %} checked{% endif %}> {{ t('rules.tiktok_your_brand') }}</label>
+        <p class="muted small">{{ t('rules.tiktok_your_brand_help') }}</p>
+        <label class="check"><input type="checkbox" name="brand_content" value="1" data-brand-content{% if values.disclose and values.settings.brand_content_toggle %} checked{% endif %}> {{ t('rules.tiktok_branded') }}</label>
+        <p class="muted small">{{ t('rules.tiktok_branded_help') }}</p>
+        <p class="muted small" data-label-preview></p>
+      </div>
+    </fieldset>
+
+    <label class="check"><input type="checkbox" name="is_aigc" value="1"{% if values.settings.is_aigc %} checked{% endif %}> {{ t('rules.tiktok_aigc') }}</label>
+
+    {% set branded = values.disclose and values.settings.brand_content_toggle %}
+    <div class="consent">
+      <label class="check"><input type="checkbox" name="music_consent" value="1" required data-consent{% if values.music_consent %} checked{% endif %}>
+        <span>
+          <span data-consent-text="music"{% if branded %} hidden{% endif %} lang="en" dir="ltr">By posting, you agree to TikTok's <a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noopener noreferrer">Music Usage Confirmation</a></span>
+          <span data-consent-text="branded"{% if not branded %} hidden{% endif %} lang="en" dir="ltr">By posting, you agree to TikTok's <a href="https://www.tiktok.com/legal/page/global/bc-policy/en" target="_blank" rel="noopener noreferrer">Branded Content Policy</a> and <a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noopener noreferrer">Music Usage Confirmation</a>.</span>
+          {% if lang != 'en' %}<span class="consent-translation">{{ t('rules.tiktok_consent_translation') }}</span>{% endif %}
+        </span>
+      </label>
+      {% if values.settings.music_consent_at %}<p class="muted small">{{ t('rules.tiktok_consent_given', date=values.settings.music_consent_at[:16].replace('T', ' ')) }}</p>{% endif %}
+    </div>
+    <p class="muted">{{ t('rules.tiktok_processing_note') }}</p>
+    <p class="muted small">{{ t('rules.tiktok_preview_note') }}</p>
+    {% endif %}
+  </section>
+
+  {% elif platform == 'youtube' %}
+  <section class="card">
+    <h2>{{ t('rules.youtube_title') }}</h2>
+    <p class="muted">{{ t('rules.youtube_text_note') }}</p>
+    <label>{{ t('field.privacy_status') }}
+      <select name="privacy_status" required>
+        {% for p in youtube_privacy %}
+        <option value="{{ p }}"{% if values.settings.privacy_status == p %} selected{% endif %}>{{ t('youtube_privacy.' ~ p) }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <fieldset>
+      <legend>{{ t('rules.youtube_made_for_kids') }}</legend>
+      <label class="check"><input type="radio" name="made_for_kids" value="yes" required{% if values.settings.self_declared_made_for_kids %} checked{% endif %}> {{ t('rules.youtube_kids_yes') }}</label>
+      <label class="check"><input type="radio" name="made_for_kids" value="no" required{% if not values.settings.self_declared_made_for_kids %} checked{% endif %}> {{ t('rules.youtube_kids_no') }}</label>
+    </fieldset>
+    <label>{{ t('field.category_id') }}
+      <select name="category_id" required>
+        {% for c in youtube_categories %}
+        <option value="{{ c }}"{% if values.settings.category_id == c %} selected{% endif %}>{{ t('youtube_category.' ~ c) }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="check"><input type="checkbox" name="notify_subscribers" value="1"{% if values.settings.notify_subscribers %} checked{% endif %}> {{ t('rules.youtube_notify') }}</label>
+    <label class="check"><input type="checkbox" name="contains_synthetic_media" value="1"{% if values.settings.contains_synthetic_media %} checked{% endif %}> {{ t('rules.youtube_synthetic') }}</label>
+    <label>{{ t('field.tags') }}
+      <input type="text" name="tags" maxlength="1000" value="{{ values.tags_text }}" dir="auto">
+      <span class="muted small">{{ t('rules.youtube_tags_help') }}</span>
+    </label>
+    <p class="muted small">{{ t('rules.youtube_terms') }} <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer">YouTube Terms of Service</a></p>
+  </section>
+
+  {% elif platform == 'instagram' %}
+  <section class="card">
+    <h2>{{ t('rules.instagram_title') }}</h2>
+    <label class="check"><input type="checkbox" name="share_to_feed" value="1"{% if values.settings.share_to_feed %} checked{% endif %}> {{ t('rules.instagram_share_to_feed') }}</label>
+    <label class="check"><input type="checkbox" name="is_ai_generated" value="1"{% if values.settings.is_ai_generated %} checked{% endif %}> {{ t('rules.ai_generated') }}</label>
+  </section>
+
+  {% elif platform == 'facebook' %}
+  <section class="card">
+    <h2>{{ t('rules.facebook_title') }}</h2>
+    <p class="muted small">{{ t('rules.facebook_note') }}</p>
+    <label class="check"><input type="checkbox" name="is_ai_generated" value="1"{% if values.settings.is_ai_generated %} checked{% endif %}> {{ t('rules.ai_generated') }}</label>
+  </section>
+  {% endif %}
+
+  <div class="actions">
+    <button type="submit" class="button">{{ t('common.save') }}</button>
+    <a class="button secondary" href="/rules">{{ t('common.cancel') }}</a>
+  </div>
+</form>
+{% endblock %}

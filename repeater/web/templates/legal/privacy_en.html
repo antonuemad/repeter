@@ -1,0 +1,73 @@
+<h1>Privacy Policy</h1>
+<p class="muted">Effective date: {{ effective_date }}</p>
+
+<h2 id="who">1. Who we are</h2>
+<p>Repeater ("Repeater", "we", "us") is a service operated by <strong>Magic Lap</strong>. Repeater helps creators and businesses re-publish their own short videos to TikTok, YouTube Shorts, Instagram Reels and Facebook Reels on a schedule they control. The service is available at <a href="{{ base_url }}">{{ base_url }}</a>.</p>
+<p>Questions about this policy or your data: <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>.</p>
+
+<h2 id="collect">2. Information we collect</h2>
+<ul>
+  <li><strong>Your dashboard account:</strong> your email address, a salted hash of your password (we never store the password itself), your language preference and the time of your last sign-in.</li>
+  <li><strong>Connected accounts:</strong> when you connect TikTok, YouTube, Google Drive, Facebook or Instagram, we store the account identifiers and public profile details the platform returns (account, channel or Page ID, display name, username, profile picture link), the permissions you granted, and the <strong>OAuth access and refresh tokens</strong>. Tokens are <strong>encrypted</strong> with AES-256-GCM before they are stored and are never written to logs.</li>
+  <li><strong>Videos and captions you import:</strong> the video files you upload or that Repeater imports from the sources you configure, their titles, captions, original publish dates and links, technical details (duration, resolution, file size), thumbnails, and fingerprints (SHA-256 and perceptual hashes) used only to avoid publishing the same video twice.</li>
+  <li><strong>Publishing records:</strong> your rotation rules and post settings, the schedule, the status of each post, and the post IDs and links returned by the platforms.</li>
+  <li><strong>Activity logs:</strong> a log of events in your workspace (imports, publishes, errors, connections, sign-ins) and which user performed them.</li>
+  <li><strong>Technical data:</strong> our servers record request details such as IP address and browser user agent for security, abuse prevention (for example sign-in rate limiting) and to detect leaks of temporary video links.</li>
+  <li><strong>Cookies:</strong> one essential session cookie (to keep you signed in and protect forms) and one cookie that remembers your language. We do not use advertising or analytics cookies.</li>
+</ul>
+
+<h2 id="use">3. Why we use it</h2>
+<p>We use this information only to provide the features you ask for: importing videos from the sources you choose, preparing them for each platform, publishing them to the accounts you connected according to your schedule and settings, showing you their status, and alerting you about problems. We also use it to keep the service secure. We do not use it for advertising, we do not build profiles about you, and we do not use your content or platform data to train machine-learning models.</p>
+
+<h2 id="share">4. When we share it</h2>
+<ul>
+  <li><strong>With the platforms you choose:</strong> when Repeater publishes, it sends the video, title, caption and post settings to the platform account you selected. Instagram, Facebook and TikTok may download the video from a temporary signed link that expires within hours.</li>
+  <li><strong>With service providers</strong> that host our servers and storage on our behalf, under confidentiality and security obligations.</li>
+  <li><strong>When required by law</strong>, or to protect the rights and safety of our users and the service.</li>
+</ul>
+<p><strong>We do not sell, rent or trade your personal data or your platform data.</strong></p>
+
+<h2 id="youtube">5. YouTube API Services</h2>
+<p>Repeater uses <strong>YouTube API Services</strong>. When you connect a YouTube channel, Repeater accesses your channel ID, channel title, custom URL and uploads playlist, reads the list of your channel's uploads (only if you choose the channel as a source, to detect your new videos), and uploads the videos you scheduled with the title, description, privacy status and other settings you chose. By using the YouTube features of Repeater you agree to be bound by the <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer">YouTube Terms of Service</a>. Google's handling of your data is described in the <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google Privacy Policy</a>.</p>
+<p>You can revoke Repeater's access to your Google and YouTube data at any time from the Google security settings page: <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer">https://myaccount.google.com/permissions</a> (also reachable at <a href="https://security.google.com/settings/security/permissions" target="_blank" rel="noopener noreferrer">security.google.com/settings/security/permissions</a>), or by disconnecting the channel in the Repeater dashboard. YouTube data we store is refreshed or deleted at least every {{ platform_retention_days }} days.</p>
+
+<h2 id="google">6. Google API Services User Data Policy (Limited Use)</h2>
+<p>Repeater's use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener noreferrer">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+<p>In particular: we use Google user data (YouTube and Google Drive) only to provide and improve the user-facing features described above; we do not transfer it to others except as needed to provide those features, to comply with the law, or as part of a merger or acquisition with your notice; we do not use or transfer it for advertising; and no person at Magic Lap reads it unless you give us permission for a specific support request, it is needed for security purposes (such as investigating abuse), or the law requires it. If you connect Google Drive, Repeater reads only the folder you select and downloads only the video files in it.</p>
+
+<h2 id="tiktok">7. TikTok</h2>
+<p>When you connect TikTok, we receive your TikTok account identifier (open_id), display name, profile picture and username, and tokens that allow Repeater to publish on your behalf. Each time you open your TikTok post settings, Repeater asks TikTok for your current creator settings (nickname, allowed privacy options, whether comments, duets and stitches are allowed, and the maximum video length). Repeater publishes only with the privacy level, interaction settings, content disclosure and Music Usage Confirmation that you approved in those settings, and you can turn TikTok publishing off at any time. Disconnecting TikTok in the dashboard revokes Repeater's access at TikTok and deletes the stored tokens; you can also remove Repeater from the app permissions in your TikTok account settings.</p>
+
+<h2 id="meta">8. Facebook and Instagram (Meta)</h2>
+<p>When you connect with Facebook, we receive your app-scoped Facebook user ID, the Facebook Pages you chose and their access tokens, and the Instagram professional accounts linked to those Pages (ID and username). We use them to list and download your own videos when you choose a Page or Instagram account as a source, and to publish Reels to the accounts you selected.</p>
+<p>You can remove Repeater from your Facebook account settings (Apps and Websites, or Business Integrations for Pages). When you do, Meta notifies us and we mark those accounts as disconnected and stop all publishing for them. If you ask Meta to delete your data, Meta sends us a deletion request; we delete the data we hold about those accounts and give you a confirmation code and a status page at <code dir="ltr">{{ base_url }}/meta/deletion-status/&lt;code&gt;</code>.</p>
+
+<h2 id="unofficial">9. Optional unofficial import (TikTok and YouTube)</h2>
+<p>TikTok and YouTube do not offer an official way to download your own videos. Repeater offers an <strong>optional</strong> import from a public TikTok or YouTube profile using the open-source tool yt-dlp. It is <strong>off by default</strong>; you must switch it on for each source and confirm that the profile and its content are yours and that you accept the risk. This import is <strong>not part of our TikTok or Google API integrations</strong> and never uses the tokens of your connected accounts. Downloading content this way may conflict with those platforms' terms, and you are responsible for using it. The safer alternatives are uploading the original file in the dashboard or using a Google Drive folder.</p>
+
+<h2 id="retention">10. How long we keep data</h2>
+<ul>
+  <li><strong>Original files</strong> are deleted {{ original_retention_days }} days after the video was imported or last published, once the prepared copy exists.</li>
+  <li><strong>Prepared copies and thumbnails</strong> stay in your library until you ask us to delete them or close your workspace.</li>
+  <li><strong>OAuth tokens</strong> are kept until you disconnect the account (or the platform revokes access), and are deleted immediately when you disconnect.</li>
+  <li><strong>Platform data</strong> (for example YouTube channel details and publishing statuses) is refreshed or deleted within {{ platform_retention_days }} days; data of a disconnected account is deleted within 7 days.</li>
+  <li><strong>Activity logs</strong> are deleted after 90 days. <strong>Publishing records</strong> are kept while your workspace exists and are deleted with it.</li>
+  <li><strong>Server logs</strong> are rotated and kept only as long as needed for security and troubleshooting.</li>
+</ul>
+
+<h2 id="delete">11. Deleting your data and your choices</h2>
+<ul>
+  <li><strong>Disconnect</strong> any account in the dashboard (Accounts page). Repeater revokes access where the platform allows it, deletes the tokens and stops all work for that account.</li>
+  <li><strong>Email us</strong> at <a href="mailto:{{ contact_email }}">{{ contact_email }}</a> to access, correct or delete your data, or to close your workspace. We reply within 30 days.</li>
+  <li><strong>Meta:</strong> remove the app in Facebook, or use Facebook's data deletion request; we process it through our data deletion callback as described above.</li>
+  <li><strong>Google:</strong> revoke access at <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer">https://myaccount.google.com/permissions</a>.</li>
+</ul>
+
+<h2 id="security">12. Security</h2>
+<p>All traffic uses HTTPS. Tokens are encrypted at rest with AES-256-GCM using keys stored separately from the database. Links to video files are signed and expire. Access to production systems is restricted to the people who operate the service, and tokens are never shown to anyone, including our staff.</p>
+
+<h2 id="other">13. Other information</h2>
+<p>Repeater is a tool for adults managing their own or their organization's accounts; it is not directed to children. Our servers may be located outside your country. If we change this policy we will update this page and its effective date, and tell you in the dashboard about important changes.</p>
+
+<h2 id="contact">14. Contact</h2>
+<p>Magic Lap — <a href="mailto:{{ contact_email }}">{{ contact_email }}</a></p>
