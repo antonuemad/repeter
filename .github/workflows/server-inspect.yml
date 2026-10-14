@@ -49,7 +49,7 @@ jobs:
           if [ -n "$VPS_KNOWN_HOSTS" ]; then
             printf '%s\n' "$VPS_KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts
           else
-            echo "::warning::VPS_KNOWN_HOSTS is not set: trusting the host key the server presents right now. Save the ssh-keyscan output below as the VPS_KNOWN_HOSTS secret."
+            echo "::warning::VPS_KNOWN_HOSTS is not set: trusting the host key the server presents right now. This workflow only reads and sends no secret, but deploy.yml refuses to run without VPS_KNOWN_HOSTS: save the ssh-keyscan output below as that secret after comparing the fingerprint with ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the server."
             ssh-keyscan -T 20 -p "$VPS_PORT" "$VPS_HOST" > ~/.ssh/known_hosts 2> /dev/null || true
             if [ ! -s ~/.ssh/known_hosts ]; then
               echo "::error::cannot reach $VPS_HOST:$VPS_PORT over SSH"
@@ -114,11 +114,19 @@ jobs:
           section "Who serves ports 80/443"
           $S ss -H -ltnp '( sport = :80 or sport = :443 )' 2> /dev/null || true
           if command -v docker > /dev/null; then
-            $S docker ps --format '{{.Names}} {{.Image}} {{.Ports}}' | grep -E ':(80|443)->' || echo "no container publishes 80/443"
+            $S docker ps --format '{{.Names}} {{.Image}} {{.Ports}}' | grep -E ':(80|443)->' || echo "no running container publishes 80/443"
+            # A stopped or restarting container shows no ports in `docker ps`, yet claims its bindings
+            # again when it starts: bootstrap.sh counts those too.
+            ids="$($S docker ps -aq 2> /dev/null)"
+            if [ -n "$ids" ]; then
+              $S docker inspect --format '{{.Name}} ({{.State.Status}}) host ports: {{range $p, $b := .HostConfig.PortBindings}}{{range $b}}{{.HostPort}} {{end}}{{end}}' $ids 2> /dev/null | grep -E ' (80|443) ' || echo "no container, running or not, is configured to publish 80/443"
+            fi
           fi
-          for unit in nginx caddy traefik apache2 httpd lsws; do
+          for unit in nginx caddy traefik apache2 httpd lsws openresty haproxy; do
             state="$(systemctl is-active "$unit" 2> /dev/null)"
             [ "$state" = "active" ] && echo "systemd service $unit is active"
+            enabled="$(systemctl is-enabled "$unit" 2> /dev/null)"
+            case "$enabled" in enabled*) echo "systemd service $unit is enabled (binds 80/443 at boot)" ;; esac
           done
           [ -d /data/coolify ] && echo "Coolify detected (/data/coolify)"
           true

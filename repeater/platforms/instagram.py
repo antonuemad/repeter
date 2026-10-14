@@ -7,7 +7,12 @@ Publishing is pull-based: Instagram cURLs the encoded file from Repeater's signe
     3. GET  /{container-id}?fields=status_code,status                          (poll)
     4. POST /{ig-user-id}/media_publish creation_id  -> media id               (poll, once FINISHED)
 A container can be published only once, so after step 4 has been sent the adapter never creates
-a new container for the same post unless Instagram reports the old one EXPIRED or ERROR.
+a new container for the same post unless Instagram reports the old one EXPIRED or ERROR, or
+refused every attempt to publish it with answers that prove nothing went live (container not
+found, not ready ...). Step 4 can fail with an unknown outcome (network error, 5xx, code 1/2):
+the container keeps its id in the saved state, every poll reads the container status BEFORE any
+media_publish (PUBLISHED means it landed), and after MAX_PUBLISH_ATTEMPTS unconfirmed calls the
+post goes to needs-attention ("check the account") instead of being sent again.
 
 Official references (checked 2026-10-14):
     https://developers.facebook.com/docs/instagram-platform/content-publishing
@@ -21,8 +26,10 @@ Official references (checked 2026-10-14):
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
+from collections.abc import Iterator
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -70,7 +77,11 @@ _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})  # noqa: 
 _HASHTAG_RE = re.compile(r"(?<![\w#&])#\w")
 _MENTION_RE = re.compile(r"(?<![\w@])@[\w.]")
 _SUBCODE_RE = re.compile(r"\b(\d{7})\b")
-_STATE_CONTAINER_KEYS = ("container_id", "created_at", "media_id", "publish_attempts")
+_STATE_CONTAINER_KEYS = ("container_id", "created_at", "media_id", "publish_attempts", "publish_unknown")
+# media_publish refusals that prove the call did not publish: the container is not ready, not found
+# or expired (Instagram error table). Anything else (5xx, code 1/2, 2207001, network errors) may
+# have landed although the answer was an error.
+_DEFINITIVE_REFUSALS = frozenset({"2207027", "2207006", "2207008", "2207020", "2207052", "2207053"})
 
 
 # --------------------------------------------------------------------------- helpers
@@ -156,6 +167,21 @@ def _processing(state: dict[str, Any], message: str, seconds: int = POLL_SECONDS
     )
 
 
+@contextlib.contextmanager
+def _permission_hint(account: AccountContext) -> Iterator[None]:
+    """A permission error on a publishing endpoint is, for a user whose Page role comes from a
+    business portfolio, the missing ads_read / ads_management permission (Meta's own message rarely
+    says so): add that hint when the account was not granted either."""
+    try:
+        yield
+    except meta.PermissionDeniedError as exc:
+        granted = set(account.tokens.scopes or [])
+        if not granted & meta.ADS_SCOPES and "ads_" not in exc.message:
+            exc.message = f"{exc.message} {meta.ADS_PERMISSION_HINT}"
+            exc.args = (exc.message,)
+        raise
+
+
 # --------------------------------------------------------------------------- publish steps
 
 
@@ -227,6 +253,39 @@ def _published(graph: meta.Graph, state: dict[str, Any], media_id: str) -> Publi
     )
 
 
+def _refused_before_publishing(exc: RetryableError) -> bool:
+    """Whether Instagram's answer proves this media_publish call did not publish: a 4xx whose
+    subcode says the container is not ready, not found or expired."""
+    return exc.status is not None and 400 <= exc.status < 500 and exc.code in _DEFINITIVE_REFUSALS
+
+
+def _count_failed_publish(state: dict[str, Any], *, unknown: bool) -> None:
+    state["publish_attempts"] = int(state.get("publish_attempts") or 0) + 1
+    if unknown:
+        state["publish_unknown"] = int(state.get("publish_unknown") or 0) + 1
+
+
+def _publish_given_up(state: dict[str, Any]) -> PlatformError:
+    """media_publish failed MAX_PUBLISH_ATTEMPTS times and the container still reads FINISHED (the
+    status was read right before this decision, so a call that landed would show PUBLISHED).
+
+    If every refusal proved nothing went live, the prepared upload is useless: send the video again.
+    If any call had an unknown outcome, sending again could post it twice: ask the user to check."""
+    if state.get("publish_unknown"):
+        return PermanentError(
+            "Instagram did not confirm whether the reel was published (its answers to the publish "
+            "request were errors or never arrived) and the upload is still waiting. The reel may be "
+            "live: check the Instagram account before publishing this video again.",
+            code="publish_unconfirmed",
+        )
+    _reset_container(state)
+    return RestartPublish(
+        "Instagram kept refusing to publish the prepared upload; Repeater will send the video again.",
+        code="publish_refused",
+        retry_after=meta.TRANSIENT_RETRY,
+    )
+
+
 def _publish_container(
     graph: meta.Graph, ig_user_id: str, container_id: str, state: dict[str, Any]
 ) -> PublishResult:
@@ -240,21 +299,14 @@ def _publish_container(
         raise  # rejected before publishing: nothing went live
     except RetryableError as exc:
         # Not ready yet, or an outcome we cannot know (network error, 5xx). The next poll reads the
-        # container status first, so a reel that did go live is found instead of posted twice.
+        # container status first, so a reel that did go live is found instead of posted twice. This
+        # call never starts over by itself: only the next poll can, after reading that status.
         log.info("Instagram media_publish for container %s not confirmed: %s", container_id, exc.code)
-        attempts = int(state.get("publish_attempts") or 0) + 1
-        state["publish_attempts"] = attempts
-        if exc.code is not None and attempts >= MAX_PUBLISH_ATTEMPTS:
-            # Instagram answered with an error every time, so nothing went live: start over.
-            _reset_container(state)
-            raise RestartPublish(
-                "Instagram kept refusing to publish the prepared upload; Repeater will send the video again.",
-                code="publish_refused",
-                retry_after=meta.TRANSIENT_RETRY,
-            ) from exc
+        _count_failed_publish(state, unknown=not _refused_before_publishing(exc))
         return _processing(state, "Instagram has not confirmed the publish yet; checking again shortly.")
     media_id = body.get("id")
     if not media_id:
+        _count_failed_publish(state, unknown=True)
         return _processing(state, "Instagram did not return the new post id yet; checking again shortly.")
     # Saved before any further call so a later poll never publishes the container again.
     state["media_id"] = str(media_id)
@@ -357,12 +409,22 @@ class InstagramPublisher:
         return problems
 
     def publish(self, account: AccountContext, req: PublishRequest) -> PublishResult:
+        container_id = req.state.get("container_id")
+        if container_id:
+            # An earlier attempt already created this post's container (and may have tried to
+            # publish it): never create a second one. poll() publishes it, finds it published, or
+            # restarts when Instagram reports it expired or broken.
+            return _processing(
+                req.state,
+                "An earlier upload to Instagram exists; checking what became of it.",
+                FIRST_POLL_SECONDS,
+            )
         problems = self.validate(account, req)
         if problems:
             raise PermanentError(" ".join(problems), code="invalid_video")
         ig_user_id = _ig_user_id(account)
         settings = _settings(req.settings)
-        with meta.Graph(account.tokens.access_token) as graph:
+        with _permission_hint(account), meta.Graph(account.tokens.access_token) as graph:
             _check_publishing_quota(graph, ig_user_id)
             created_at = utcnow()
             container_id = _create_container(graph, ig_user_id, req, settings)
@@ -381,14 +443,16 @@ class InstagramPublisher:
 
     def poll(self, account: AccountContext, state: dict[str, Any]) -> PublishResult:
         """Note: on EXPIRED (and retryable ERRORs) the container keys are removed from `state` in
-        place and RestartPublish(code="container_expired") is raised: publish() must run again."""
+        place and RestartPublish(code="container_expired") is raised: publish() must run again.
+        The same restart happens after MAX_PUBLISH_ATTEMPTS media_publish refusals that all prove
+        nothing went live; any unknown outcome among them ends in a PermanentError instead."""
         container_id = state.get("container_id")
         if not container_id:
             raise PermanentError(
                 "The Instagram upload id is missing; the post cannot be tracked.", code="missing_container"
             )
         ig_user_id = str(state.get("ig_user_id") or _ig_user_id(account))
-        with meta.Graph(account.tokens.access_token) as graph:
+        with _permission_hint(account), meta.Graph(account.tokens.access_token) as graph:
             if state.get("media_id"):
                 return _published(graph, state, str(state["media_id"]))
             info = graph.get(
@@ -398,6 +462,8 @@ class InstagramPublisher:
             )
             status_code = str(info.get("status_code") or "").upper()
             if status_code == "FINISHED":
+                if int(state.get("publish_attempts") or 0) >= MAX_PUBLISH_ATTEMPTS:
+                    raise _publish_given_up(state)
                 return _publish_container(graph, ig_user_id, str(container_id), state)
             if status_code == "PUBLISHED":
                 return _recover_published(graph, ig_user_id, state)

@@ -641,15 +641,19 @@ def test_maintenance(db, workspace, admin_user, make_account, monkeypatch):
 
     from repeater.media import retention
 
-    def not_ready(session, *, older_than_days, now=None):
-        assert older_than_days == settings.original_retention_days
-        raise NotImplementedError
+    purged: list[int] = []
 
-    monkeypatch.setattr(retention, "purge_expired_originals", not_ready)
+    def purge(session, *, older_than_days, now=None):
+        assert older_than_days == settings.original_retention_days
+        purged.append(older_than_days)
+        return 4
+
+    monkeypatch.setattr(retention, "purge_expired_originals", purge)
     result = maintenance.run_maintenance(db)
     db.commit()
     assert result["requeued_jobs"] == 1 and result["purged_jobs"] == 1
-    assert result["oauth_states"] == 1 and result["activity"] == 1 and result["originals"] == 0
+    assert result["oauth_states"] == 1 and result["activity"] == 1 and result["originals"] == 4
+    assert purged == [settings.original_retention_days]
     assert result["stuck_uploads"] == 1 and result["youtube_posts"] == 1
     assert result["disconnected_accounts"] == 0
     db.expire_all()
@@ -756,12 +760,30 @@ def test_notify_sends_escaped_details_only_when_opted_in(telegram, monkeypatch):
     )
 
 
-def test_notify_details_flag_reads_the_environment(monkeypatch):
-    monkeypatch.delenv("REPEATER_TELEGRAM_INCLUDE_DETAILS", raising=False)
+def test_notify_minimal_message_has_a_category_for_a_nearly_full_disk():
+    text = notify.format_minimal(workspace_id=2, level="warning", category="disk_low")
+    assert "disk is nearly full" in text and "https://rotator.test/library" in text
+    assert "Something needs your attention" not in text
+
+
+def test_notify_details_are_off_by_default_and_follow_the_setting(monkeypatch):
+    from repeater.config import Settings, get_settings
+
+    assert Settings.model_fields["telegram_include_details"].default is False
+    settings = get_settings()
+    monkeypatch.setattr(settings, "telegram_include_details", False)
     assert notify.details_enabled() is False
-    for value, expected in (("true", True), ("1", True), ("no", False), ("", False)):
-        monkeypatch.setenv("REPEATER_TELEGRAM_INCLUDE_DETAILS", value)
-        assert notify.details_enabled() is expected
+    monkeypatch.setattr(settings, "telegram_include_details", True)
+    assert notify.details_enabled() is True
+
+
+def test_notify_details_flag_is_read_from_the_environment(monkeypatch):
+    from repeater.config import Settings
+
+    monkeypatch.setenv("REPEATER_TELEGRAM_INCLUDE_DETAILS", "true")
+    assert Settings(_env_file=None).telegram_include_details is True
+    monkeypatch.setenv("REPEATER_TELEGRAM_INCLUDE_DETAILS", "no")
+    assert Settings(_env_file=None).telegram_include_details is False
 
 
 def test_notify_truncates_long_text(telegram, monkeypatch):
@@ -1400,7 +1422,7 @@ def youtube_refresher(monkeypatch):
     from repeater.platforms import youtube
 
     def install(fake):
-        monkeypatch.setattr(youtube, "refresh_account_info", fake, raising=False)
+        monkeypatch.setattr(youtube, "refresh_account_info", fake)
         return fake
 
     return install
@@ -1442,16 +1464,10 @@ def test_refresh_youtube_channels_re_reads_old_channel_data(db, workspace, make_
     assert engine_jobs.refresh_youtube_channels(db) == {"refreshed": 0, "failed": 0}  # fresh now
 
 
-def test_refresh_youtube_channels_handles_failures_and_a_missing_adapter_function(
-    db, make_account, youtube_refresher, monkeypatch, notifications
-):
-    from repeater.platforms import youtube
-
+def test_refresh_youtube_channels_handles_failures(db, make_account, youtube_refresher, notifications):
     acc = make_account("youtube", display_name="Title", extra={"channel_id": "UC1"})
     acc.extra = {**acc.extra, "_refreshed_at": (utcnow() - timedelta(days=26)).isoformat()}
     db.commit()
-    monkeypatch.delattr(youtube, "refresh_account_info", raising=False)
-    assert engine_jobs.refresh_youtube_channels(db) == {"refreshed": 0, "failed": 0}  # guarded by hasattr
     youtube_refresher(FakeChannels(error=RuntimeError("boom")))
     assert engine_jobs.refresh_youtube_channels(db) == {"refreshed": 0, "failed": 1}
     youtube_refresher(FakeChannels({"display_name": "", "avatar_url": None, "extra": {}}))

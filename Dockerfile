@@ -1,6 +1,7 @@
 # Repeater application image: web (uvicorn), worker and one-shot commands share it.
 #
 #   docker build -t repeater:test .
+#   docker build --target test -t repeater:ci-test .   # CI: the media tests run on the shipped ffmpeg
 #
 # Behind a TLS-intercepting proxy, pass its CA bundle as an optional build secret
 # (never baked into the image):
@@ -36,8 +37,9 @@ RUN --mount=type=secret,id=build_ca \
     rm /tmp/deno.zip; \
     /usr/local/bin/deno --version
 
-# --------------------------------------------------------------------------- app
-FROM ${PYTHON_IMAGE} AS app
+# --------------------------------------------------------------------------- base
+# Everything the web, the worker and the tests need; the last stage ("app") is the default target.
+FROM ${PYTHON_IMAGE} AS base
 
 LABEL org.opencontainers.image.title="repeater" \
       org.opencontainers.image.description="Repeater: short-video rotation (web, worker, migrations)" \
@@ -90,6 +92,24 @@ RUN pip install --no-deps --no-build-isolation -e . \
     && python -m compileall -q /app/repeater /app/migrations \
     && rm -rf /tmp/build
 
+# --------------------------------------------------------------------------- test (CI only, never deployed)
+# The same Debian ffmpeg, Python and libraries as the shipped image, plus the dev tools. Tests are
+# not copied in; CI bind-mounts them:
+#   docker run --rm --network host -e REPEATER_TEST_PG=... -v "$PWD/tests:/app/tests:ro" repeater:ci-test
+FROM base AS test
+RUN --mount=type=secret,id=build_ca \
+    --mount=type=cache,target=/root/.cache/pip \
+    set -eu; \
+    if [ -s /run/secrets/build_ca ]; then export PIP_CERT=/run/secrets/build_ca; fi; \
+    python -c "import tomllib; print('\n'.join(tomllib.load(open('/app/pyproject.toml', 'rb'))['project']['optional-dependencies']['dev']))" \
+        > /tmp/dev-requirements.txt; \
+    pip install -r /tmp/dev-requirements.txt; \
+    rm /tmp/dev-requirements.txt
+USER 10001:10001
+CMD ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/test_media.py", "tests/test_sources.py"]
+
+# --------------------------------------------------------------------------- app
+FROM base AS app
 USER 10001:10001
 EXPOSE 8000
 
@@ -98,5 +118,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --start-interval=3s -
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 # Access logs are off: request lines carry OAuth codes and signed media links.
+# X-Forwarded-For/Proto are honoured only from the addresses in $FORWARDED_ALLOW_IPS (uvicorn reads
+# it; its default is loopback). docker-compose.yml sets it to loopback plus Docker's private ranges
+# (REPEATER_FORWARDED_ALLOW_IPS). Never "*": uvicorn would then trust the LEFTMOST X-Forwarded-For
+# entry, which the client controls whenever the proxy appends instead of overwriting.
 CMD ["uvicorn", "repeater.web.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", \
-     "--proxy-headers", "--forwarded-allow-ips", "*", "--no-access-log", "--timeout-graceful-shutdown", "20"]
+     "--proxy-headers", "--no-access-log", "--timeout-graceful-shutdown", "20"]

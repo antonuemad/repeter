@@ -34,7 +34,10 @@
 | `pages_manage_posts` | نشر الريلز على الصفحة |
 | `instagram_basic` | قراءة حساب انستجرام المرتبط ووسائطه |
 | `instagram_content_publish` | نشر الريلز على انستجرام |
-| `business_management` | الوصول للصفحات والحسابات المملوكة عبر Business Portfolio |
+| `ads_read` | **شرط لنشر انستجرام حين يكون دورك على الصفحة عبر Business Portfolio** (وهذه حالة Magic Lap): نقاط نشر انستجرام التي يستدعيها Repeater (`content_publishing_limit` وإنشاء الحاوية وقراءة حالتها و`media_publish`) تنص مراجع ميتا على أن التطبيق يحتاج حينها `ads_management` أو `ads_read`، وبدونهما يرد 403 كود 200 ("App lacks ads_management permission for the target") فيتأرجح الحساب بين "مربوط" و"يحتاج إعادة ربط". اخترنا الأصغر (`ads_read`)؛ Repeater **لا يستدعي أي نقطة إعلانات** |
+| `business_management` | الوصول للصفحات والحسابات المملوكة عبر Business Portfolio، وقراءة وسائط انستجرام للاستيراد (البديل الموثّق لـ `ads_read` / `ads_management` في تلك النقطة) |
+
+القائمة نفسها في الكود: `SCOPES` داخل `repeater/platforms/meta.py` (والاختبار `test_meta_doc_lists_every_requested_scope` يفشل لو اختلفت عن هذا الجدول). عند App Review تطلب ميتا لقطة شاشة وتبريرًا لكل صلاحية بوصول متقدم؛ لـ `ads_read` اكتب: "مطلوب لنقاط نشر ريلز انستجرام حين تُدار الصفحة عبر Business Portfolio، ولا يقرأ التطبيق بيانات إعلانات".
 
 ملاحظة: Facebook Login for Business يفضّل "إعدادات تسجيل الدخول" (`config_id`) بدل تمرير `scope`؛ Repeater حاليًا يمرّر `scope` (مدعوم لتوكنات المستخدم). لو رفض حوار الدخول الصلاحيات، أنشئ Configuration بنوع User access token بنفس الصلاحيات وأبلغ فريق التطوير.
 

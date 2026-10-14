@@ -5,11 +5,17 @@
 #   sudo bash /srv/repeater/app/deploy/deploy.sh [options]
 #
 # Options:
-#   --pull            also pull newer base images (python, postgres, caddy) before building
+#   --pull            also pull newer base images: python (rebuilds the app image), and the postgres
+#                     and caddy images (the database restarts briefly when its image changed)
 #   --refresh-ytdlp   force the newest yt-dlp now (otherwise refreshed on the first deploy of each day)
 #   --no-build        restart with the existing image (rollback: REPEATER_IMAGE_TAG=previous ... --no-build)
 # Environment:
 #   HEALTH_TIMEOUT    seconds to wait for the containers to become healthy (default 240)
+#   SKIP_PREDEPLOY_BACKUP=1   migrate without the pre-deploy database dump (not recommended)
+#
+# Before migrating, a dump of the running database is taken (backup.sh pre-deploy, the newest 5 are
+# kept). The previous release stays available as repeater-app:previous (it moves only when a build
+# produces a different image) and as repeater-app:build-<time> (the newest 4).
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,6 +24,7 @@ COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
 IMAGE_REPO="repeater-app"
 APP_UID=10001
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-240}"
+BUILD_TAGS_KEEP=4
 REQUIRED_KEYS=(POSTGRES_PASSWORD REPEATER_SECRET_KEY REPEATER_TOKEN_ENCRYPTION_KEYS REPEATER_BASE_URL)
 
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
@@ -42,8 +49,18 @@ env_get() {
         }' "$file"
 }
 
+# The worker's stop_grace_period is its in-flight job grace (REPEATER_WORKER_SHUTDOWN_GRACE_S,
+# default 600) plus 60 s; compose cannot add, so the scripts hand it the sum.
+worker_stop_grace() {
+    local grace
+    grace="$(env_get REPEATER_WORKER_SHUTDOWN_GRACE_S "$ENV_FILE")"
+    [[ "$grace" =~ ^[0-9]+$ ]] || grace=600
+    printf '%s' "$((grace + 60))"
+}
+
 compose() {
-    docker compose --project-directory "$SCRIPT_DIR" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
+    WORKER_STOP_GRACE_S="$(worker_stop_grace)" \
+        docker compose --project-directory "$SCRIPT_DIR" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
 }
 
 preflight() {
@@ -77,11 +94,48 @@ ensure_media_dir() {
         warn "$dir belongs to uid $owner, not $APP_UID: the worker cannot write videos there (fix: chown -R $APP_UID:$APP_UID $dir)"
 }
 
-build_image() {
-    local pull="$1" refresh="$2"
-    if docker image inspect "$IMAGE_REPO:latest" >/dev/null 2>&1; then
-        docker image tag "$IMAGE_REPO:latest" "$IMAGE_REPO:previous"
+image_id() { docker image inspect --format '{{.Id}}' "$1" 2>/dev/null || true; }
+
+# What an image IS: its filesystem layers and the settings that matter at run time. The image ID is
+# no use for this: with the containerd image store (Docker 28+ on a fresh install) every build gets
+# a new ID, because the manifest carries build provenance, even when every layer came from cache.
+# Compose labels (they name the service that was built last) are left out on purpose.
+image_content() {
+    local info
+    info="$(docker image inspect --format '{{json .RootFS.Layers}} {{json .Config.Env}} {{json .Config.Cmd}} {{json .Config.Entrypoint}} {{json .Config.Healthcheck}}' "$1" 2>/dev/null)" || return 0
+    printf '%s' "$info" | sha256sum | cut -d' ' -f1
+}
+
+# :previous moves only when a build really produced a different release. Re-running a deploy (a
+# retry after a failed health check, a credentials update, a docs-only push) rebuilds the identical
+# image from cache and must never turn the rollback target into the current release.
+# The image :latest pointed to is pinned with a temporary tag before the build: an image that loses
+# its last tag is deleted at once by the containerd image store, and with it the rollback target.
+record_release() {
+    local old_content="$1" new_content="$2" tag candidate="$IMAGE_REPO:rollback-candidate"
+    if [[ -n "$old_content" && "$old_content" == "$new_content" ]]; then
+        log "the build produced the same image as before: $IMAGE_REPO:previous is left as it is"
+    else
+        if docker image inspect "$candidate" >/dev/null 2>&1; then
+            if docker image tag "$candidate" "$IMAGE_REPO:previous"; then
+                log "the release before this one is $IMAGE_REPO:previous"
+            else
+                warn "could not tag $IMAGE_REPO:previous"
+            fi
+        fi
+        docker image tag "$IMAGE_REPO:latest" "$IMAGE_REPO:build-$(date -u +%Y%m%d%H%M%S)" || warn "could not tag this release"
+        while read -r tag; do
+            docker rmi "$IMAGE_REPO:$tag" >/dev/null 2>&1 || true
+        done < <(docker image ls "$IMAGE_REPO" --format '{{.Tag}}' | grep '^build-' | sort -r | tail -n "+$((BUILD_TAGS_KEEP + 1))")
     fi
+    docker rmi "$candidate" >/dev/null 2>&1 || true
+}
+
+build_image() {
+    local pull="$1" refresh="$2" old_id old_content
+    old_id="$(image_id "$IMAGE_REPO:latest")"
+    old_content="$(image_content "$IMAGE_REPO:latest")"
+    if [[ -n "$old_id" ]]; then docker image tag "$old_id" "$IMAGE_REPO:rollback-candidate"; fi
     # Changes once a day (or now with --refresh-ytdlp): rebuilds only the yt-dlp layer.
     if [[ "$refresh" == 1 ]]; then
         YTDLP_REFRESH="$(date -u +%Y%m%d%H%M%S)"
@@ -93,6 +147,35 @@ build_image() {
     if [[ "$pull" == 1 ]]; then args+=(--pull); fi
     log "building the image (yt-dlp refresh key $YTDLP_REFRESH)"
     compose "${args[@]}" migrate web worker
+    record_release "$old_content" "$(image_content "$IMAGE_REPO:latest")"
+}
+
+# Images without a build section (postgres, and caddy when its profile is on) are only ever pulled
+# when missing; --pull refreshes them. `up -d` then recreates the containers whose image changed.
+pull_images() {
+    log "pulling newer images for the services that are not built here (db, caddy)"
+    compose pull --ignore-buildable ||
+        die "could not pull the newer images (network, or the registry's rate limit); nothing was changed"
+}
+
+# A dump of the live database before the migrations touch it. This is the restore point for
+# rolling back a release that changed the schema (backup.sh restore ... --yes).
+predeploy_backup() {
+    if [[ "${SKIP_PREDEPLOY_BACKUP:-0}" == 1 ]]; then
+        warn "SKIP_PREDEPLOY_BACKUP=1: migrating without a pre-deploy database dump"
+        return 0
+    fi
+    if [[ -z "$(compose ps --status running -q db 2>/dev/null)" ]]; then
+        if ! docker volume inspect "${COMPOSE_PROJECT_NAME:-repeater}_pg_data" >/dev/null 2>&1; then
+            log "no database yet (first install): no pre-deploy backup"
+            return 0
+        fi
+        log "the database container is stopped: starting it for the pre-deploy backup"
+        compose up -d --wait db || die "could not start the database for the pre-deploy backup"
+    fi
+    log "taking the pre-deploy database backup"
+    bash "$SCRIPT_DIR/backup.sh" pre-deploy ||
+        die "the pre-deploy backup failed, so nothing was migrated. Fix it (disk space? the error above), or deploy anyway with SKIP_PREDEPLOY_BACKUP=1"
 }
 
 container_health() {
@@ -174,6 +257,7 @@ main() {
     cd "$SCRIPT_DIR"
     preflight
     ensure_media_dir
+    if ((pull)); then pull_images; fi
     if ((build)); then
         export REPEATER_IMAGE_TAG=latest
         build_image "$pull" "$refresh"
@@ -181,8 +265,10 @@ main() {
         log "skipping the build; using image $IMAGE_REPO:${REPEATER_IMAGE_TAG:-latest}"
     fi
 
+    predeploy_backup
     log "applying database migrations"
-    compose run --rm --no-TTY migrate || die "migrations failed; the running version was left untouched"
+    compose run --rm --no-TTY migrate ||
+        die "migrations failed; the running version was left untouched. If this release is older than the database schema (a rollback), restore the pre-deploy dump instead: REPEATER_IMAGE_TAG=${REPEATER_IMAGE_TAG:-latest} bash $SCRIPT_DIR/backup.sh restore <dump> --yes"
 
     log "starting the new version"
     compose up -d --remove-orphans
@@ -191,7 +277,7 @@ main() {
     check_http
     prune_images
     compose ps --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
-    log "deploy complete"
+    log "deploy complete. Roll back with: REPEATER_IMAGE_TAG=previous bash $SCRIPT_DIR/deploy.sh --no-build"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

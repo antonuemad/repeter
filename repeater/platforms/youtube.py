@@ -5,6 +5,10 @@ or square video of up to 3 minutes as a Short, so there is no Shorts flag to set
 the channel's uploads playlist (playlistItems.list, 1 quota unit per page) instead of
 search.list, which has its own 100-calls/day bucket and indexing delays.
 
+Once the last byte of the file has been sent, a lost answer no longer proves that no video exists:
+publish() then raises UnknownOutcomeError carrying the resumable session URI, and poll() asks the
+session (a finished one repeats its original response) instead of uploading the file again.
+
 Docs: https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol
       https://developers.google.com/youtube/v3/docs/videos
 """
@@ -523,8 +527,12 @@ class _ResumableUpload:
     path: Path
     total: int
     # True once the request carrying the file's last byte has been issued (or the server reports
-    # it has every byte): from then on a failure no longer proves that no video was created.
+    # it has every byte): from then on the video may exist.
     final_sent: bool = field(default=False, init=False)
+    # True once, after that, a reply was lost (network error, 5xx) or never asked for: from then on
+    # a failure no longer proves that no video was created. A clear 4xx answer to the final chunk
+    # itself still does (YouTube refused it).
+    ambiguous: bool = field(default=False, init=False)
 
     def start(self, metadata: dict[str, Any], notify_subscribers: bool) -> str:
         """Open a resumable session and return its URI (Location header). The URI is a
@@ -565,11 +573,11 @@ class _ResumableUpload:
         status query, so finished or partly delivered sessions are never re-sent from byte 0.
         Raises _SessionExpired on 404 and _OutcomeUnknown when the last byte may have been
         delivered and the answer was lost."""
-        self.final_sent = resume
+        self.final_sent = self.ambiguous = resume
         try:
             return self._loop(session_uri, resume)
-        except RetryableError as exc:
-            if self.final_sent:
+        except (RetryableError, AuthError) as exc:  # a rejected token on a probe proves nothing either
+            if self.ambiguous:
                 raise _OutcomeUnknown(session_uri, exc.message) from exc
             raise
 
@@ -580,11 +588,13 @@ class _ResumableUpload:
             while True:
                 try:
                     if probe or offset >= self.total:
-                        self.final_sent = self.final_sent or offset >= self.total
+                        if offset >= self.total:  # YouTube holds every byte: only its answer is missing
+                            self.final_sent = self.ambiguous = True
                         resp = self._query_status(session_uri)
                     else:
                         resp = self._send_chunk(session_uri, fh, offset)
                 except httpx.TransportError as exc:
+                    self.ambiguous = self.ambiguous or self.final_sent
                     backoff.fail(f"network error {type(exc).__name__}")
                     probe = True
                     continue
@@ -603,6 +613,7 @@ class _ResumableUpload:
                     offset, probe = new_offset, False
                     continue
                 if status in RESUMABLE_STATUSES:
+                    self.ambiguous = self.ambiguous or self.final_sent
                     backoff.fail(f"HTTP {status}", resp)
                     probe = True
                     continue

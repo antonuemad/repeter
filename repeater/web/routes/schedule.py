@@ -109,12 +109,6 @@ def skip(request: Request, db: DB, ctx: CurrentWorkspace, form: Form, post_id: i
     return _redirect(form)
 
 
-def may_be_live(post: ScheduledPost) -> bool:
-    """A post that needs attention after bytes may have reached the platform (it kept a platform
-    post id or an upload state): publishing it again can create a second copy."""
-    return post.status == PostStatus.NEEDS_ATTENTION and bool(post.platform_post_id or post.publish_state)
-
-
 @router.get("/schedule/{post_id}/publish-now")
 def confirm_publish_now(
     request: Request, db: DB, ctx: CurrentWorkspace, post_id: int, next: str = ""
@@ -135,7 +129,7 @@ def confirm_publish_now(
 @router.post("/schedule/{post_id}/publish-now")
 def publish_now(request: Request, db: DB, ctx: CurrentWorkspace, form: Form, post_id: int) -> Response:
     post = _get_post(db, ctx, post_id)
-    if may_be_live(post) and not form_bool(form, "confirm_duplicate"):
+    if actions.may_be_live(post) and not form_bool(form, "confirm_duplicate"):
         flash(request, "error", "schedule.confirm_required")
         return _redirect(form)
     try:

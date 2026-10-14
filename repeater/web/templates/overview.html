@@ -4,6 +4,10 @@
 {% block content %}
 <h1>{{ t('overview.title', name=workspace.name) }}</h1>
 
+{% if backup_stale_hours %}
+<div class="flash flash-warning" role="alert">{{ t('overview.backup_stale', hours=backup_stale_hours) }}</div>
+{% endif %}
+
 {% if not setup.done %}
 <section class="card setup" aria-labelledby="setup-title">
   <h2 id="setup-title">{{ t('overview.setup_title') }}</h2>

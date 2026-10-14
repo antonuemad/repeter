@@ -498,6 +498,33 @@ def test_poll_paused_or_disconnected(db, setup, workspace, notifications):
     assert publisher.poll_post(db, post.id).status == PostStatus.NEEDS_ATTENTION  # no-op now
 
 
+def test_poll_permanent_error_that_may_have_published_is_flagged_may_be_live(db, setup, notifications):
+    """Instagram gives up on an unanswered media_publish with code publish_unconfirmed: the reel may
+    be live, so the post is flagged (the planner counts it, the dashboard asks before a republish)."""
+    from repeater.engine import actions
+
+    post, _video, _acc, _rule = setup("instagram")
+    post.status = PostStatus.PROCESSING
+    now = utcnow()
+    post.publish_state = {"container_id": "c1", "_engine": {"processing_since": now.isoformat()}}
+    db.commit()
+    pub = fake("instagram", poll_script=[PermanentError("The reel may be live.", code="publish_unconfirmed")])
+    with override("publisher", "instagram", pub):
+        step = publisher.poll_post(db, post.id, now=now)
+    assert step.status == PostStatus.NEEDS_ATTENTION
+    assert publisher.engine_state(post.publish_state)["may_be_live"] is True
+    assert actions.may_be_live(post)
+    # Any other permanent poll error stays a plain needs-attention (nothing hints at a live post).
+    other, _v, _a, _r = setup("instagram")
+    other.status = PostStatus.PROCESSING
+    other.publish_state = {"_engine": {}}
+    db.commit()
+    pub = fake("instagram", poll_script=[PermanentError("Rejected.", code="policy")])
+    with override("publisher", "instagram", pub):
+        publisher.poll_post(db, other.id, now=now)
+    assert "may_be_live" not in publisher.engine_state(other.publish_state)
+
+
 # =========================================================================== publish errors
 
 

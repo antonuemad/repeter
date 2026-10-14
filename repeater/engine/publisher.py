@@ -128,6 +128,9 @@ EARLY_TOLERANCE = timedelta(seconds=30)
 # being published in a burst that would break the gaps between posts.
 STALE_SLOT = timedelta(hours=3)
 ENGINE_STATE_KEY = "_engine"
+# PermanentError codes from poll() that mean "the request may have been carried out" (Instagram:
+# media_publish never got a clear answer).
+UNCONFIRMED_OUTCOME_CODES = frozenset({"publish_unconfirmed"})
 PUBLISHABLE = (PostStatus.SCHEDULED, PostStatus.FAILED)
 
 _URL_RE = re.compile(r"https?://\S+")
@@ -584,7 +587,11 @@ def _poll_error(session: Session, target: _Target, exc: Exception, now: datetime
             may_be_live=True,
         )
     if isinstance(exc, PermanentError | NotSupportedError):
-        return _needs_attention(session, target, _scrub(exc.message))
+        # An adapter that gave up on confirming a request that may have been carried out says so
+        # in its error code: the video may be live.
+        return _needs_attention(
+            session, target, _scrub(exc.message), may_be_live=exc.code in UNCONFIRMED_OUTCOME_CODES
+        )
     if isinstance(exc, PlatformError):
         message = _scrub(exc.message)
     else:

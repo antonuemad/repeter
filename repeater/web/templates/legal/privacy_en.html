@@ -56,6 +56,7 @@
   <li><strong>YouTube data:</strong> while a YouTube channel is connected, the YouTube API data we store (the channel title and picture, the video IDs and links on published, canceled, failed and needs-attention posts, and the same identifiers in the activity log) is refreshed or removed within {{ platform_retention_days }} days.</li>
   <li><strong>Meta data deletion requests</strong> are completed within 24 hours, as described in section 8.</li>
   <li><strong>Activity logs</strong> are deleted after 90 days. <strong>Publishing records</strong> are kept while your workspace exists and are deleted with it.</li>
+  <li><strong>Backups:</strong> we keep database backups for disaster recovery: daily copies for 14 days on the server and up to 30 days off-site, and a few safety copies made before a software update or a restore for at most 30 days. Data you deleted, or that a retention rule above removed, can remain in those copies until they expire (within 30 days at the latest); they are used only to recover the service.</li>
   <li><strong>Server logs</strong> are rotated and kept only as long as needed for security and troubleshooting.</li>
 </ul>
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 from datetime import timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -29,7 +31,8 @@ NEW_ACCESS = "ya29.new-access-SECRET"
 REDIRECT = "https://rotator.test/oauth/google/callback"
 VERIFIER = "v" * 64
 CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels"
-YT_SCOPES = f"{google.YOUTUBE_UPLOAD} {google.YOUTUBE_READONLY}"
+YT_SCOPES = f"openid {google.YOUTUBE_UPLOAD} {google.YOUTUBE_READONLY}"
+GOOGLE_SUB = "117000000000000000001"
 DRIVE_SCOPES = f"openid https://www.googleapis.com/auth/userinfo.email {google.DRIVE_READONLY}"
 
 
@@ -39,6 +42,17 @@ def mock() -> Any:
         yield m
 
 
+def make_id_token(
+    sub: str = GOOGLE_SUB, *, aud: Any = "g-id", iss: str = "https://accounts.google.com"
+) -> str:
+    """An unsigned JWT shaped like Google's id_token (the adapter reads the claims only)."""
+
+    def part(data: dict[str, Any]) -> str:
+        return base64.urlsafe_b64encode(json.dumps(data).encode()).decode().rstrip("=")
+
+    return f"{part({'alg': 'RS256'})}.{part({'iss': iss, 'aud': aud, 'sub': sub})}.signature"
+
+
 def token_response(**overrides: Any) -> httpx.Response:
     body = {
         "access_token": ACCESS,
@@ -46,7 +60,7 @@ def token_response(**overrides: Any) -> httpx.Response:
         "refresh_token": REFRESH,
         "scope": YT_SCOPES,
         "token_type": "Bearer",
-        "id_token": "header.payload.sig",
+        "id_token": make_id_token(),
     }
     body.update(overrides)
     return httpx.Response(200, json={k: v for k, v in body.items() if v is not None})
@@ -115,7 +129,7 @@ def test_provider_contract_and_registry():
 @pytest.mark.parametrize(
     ("purpose", "scopes"),
     [
-        ("youtube", [google.YOUTUBE_UPLOAD, google.YOUTUBE_READONLY]),
+        ("youtube", ["openid", google.YOUTUBE_UPLOAD, google.YOUTUBE_READONLY]),
         ("gdrive", ["openid", "email", google.DRIVE_READONLY]),
     ],
 )
@@ -133,7 +147,6 @@ def test_authorize_url(purpose: str, scopes: list[str]):
         "scope": " ".join(scopes),
         "access_type": "offline",
         "prompt": "consent",
-        "include_granted_scopes": "true",
         "state": "st4te",
         "code_challenge": "ch4llenge",
         "code_challenge_method": "S256",
@@ -188,11 +201,21 @@ def test_exchange_youtube_returns_one_account_per_channel(mock: Any):
     assert first.platform == Platform.YOUTUBE and first.external_id == "UCabc"
     assert first.display_name == "Magic Lap"
     assert first.avatar_url == "https://yt3.ggpht.com/UCabc=s240"
-    assert first.extra == {"channel_id": "UCabc", "uploads_playlist_id": "UUabc", "custom_url": "@magiclap"}
-    assert second.extra == {"channel_id": "UCxyz", "uploads_playlist_id": "UUxyz", "custom_url": None}
+    assert first.extra == {
+        "channel_id": "UCabc",
+        "uploads_playlist_id": "UUabc",
+        "custom_url": "@magiclap",
+        "google_sub": GOOGLE_SUB,
+    }
+    assert second.extra == {
+        "channel_id": "UCxyz",
+        "uploads_playlist_id": "UUxyz",
+        "custom_url": None,
+        "google_sub": GOOGLE_SUB,
+    }
     tokens = first.tokens
     assert tokens.access_token == ACCESS and tokens.refresh_token == REFRESH
-    assert tokens.scopes == [google.YOUTUBE_UPLOAD, google.YOUTUBE_READONLY]
+    assert tokens.scopes == ["openid", google.YOUTUBE_UPLOAD, google.YOUTUBE_READONLY]
     assert timedelta(minutes=58) < tokens.expires_at - utcnow() <= timedelta(seconds=3599)
     assert "id_token" not in tokens.extra
     assert first.tokens is not second.tokens and first.tokens.scopes is not second.tokens.scopes
@@ -241,7 +264,7 @@ def test_exchange_without_scope_field_assumes_requested_scopes(mock: Any):
     (account,) = google.oauth.exchange_code(
         code="c", redirect_uri=REDIRECT, code_verifier=VERIFIER, purpose="youtube"
     )
-    assert account.tokens.scopes == [google.YOUTUBE_UPLOAD, google.YOUTUBE_READONLY]
+    assert account.tokens.scopes == ["openid", google.YOUTUBE_UPLOAD, google.YOUTUBE_READONLY]
 
 
 def test_exchange_without_refresh_token_is_rejected(mock: Any):
@@ -284,7 +307,7 @@ def test_exchange_gdrive_uses_userinfo(mock: Any):
     assert account.platform == Platform.GDRIVE
     assert account.external_id == "1098765"
     assert account.display_name == "studio@magic-lap.com"
-    assert account.extra == {"email": "studio@magic-lap.com"}
+    assert account.extra == {"email": "studio@magic-lap.com", "google_sub": "1098765"}
     assert account.avatar_url is None
     assert google.DRIVE_READONLY in account.tokens.scopes
 
@@ -310,6 +333,109 @@ def test_exchange_gdrive_userinfo_failures(mock: Any, response: httpx.Response, 
     with pytest.raises(exc_type) as ei:
         google.oauth.exchange_code(code="c", redirect_uri=REDIRECT, code_verifier=VERIFIER, purpose="gdrive")
     assert_no_secrets(ei.value)
+
+
+# --------------------------------------------------------------------------- separate grants (api-tiktok-youtube-6)
+
+
+@pytest.mark.parametrize("purpose", ["youtube", "gdrive"])
+def test_authorize_url_never_merges_earlier_grants(purpose: str):
+    url = google.oauth.authorize_url(state="s", redirect_uri=REDIRECT, code_challenge="c", purpose=purpose)
+    assert "include_granted_scopes" not in parse_qs(urlsplit(url).query)
+    assert "include_granted_scopes" not in url
+
+
+def test_purposes_request_disjoint_resource_scopes():
+    youtube_scopes, drive_scopes = set(google.PURPOSE_SCOPES["youtube"]), set(google.PURPOSE_SCOPES["gdrive"])
+    assert google.DRIVE_READONLY not in youtube_scopes
+    assert not {google.YOUTUBE_UPLOAD, google.YOUTUBE_READONLY} & drive_scopes
+    assert "openid" in youtube_scopes  # the id_token carries the Google account id
+
+
+def test_youtube_and_drive_accounts_of_one_google_user_share_the_google_sub(mock: Any):
+    token = mock.post(google.TOKEN_URL)
+    mock.get(CHANNELS_URL).mock(return_value=httpx.Response(200, json={"items": [channel()]}))
+    mock.get(google.USERINFO_URL).mock(
+        return_value=httpx.Response(200, json={"sub": GOOGLE_SUB, "email": "studio@magic-lap.com"})
+    )
+    token.mock(return_value=token_response())
+    (yt,) = google.oauth.exchange_code(
+        code="c", redirect_uri=REDIRECT, code_verifier=VERIFIER, purpose="youtube"
+    )
+    token.mock(return_value=token_response(scope=DRIVE_SCOPES, refresh_token="1//another-refresh"))
+    (drive,) = google.oauth.exchange_code(
+        code="c", redirect_uri=REDIRECT, code_verifier=VERIFIER, purpose="gdrive"
+    )
+
+    # Different refresh tokens (prompt=consent issues a new one each time) but one Google identity:
+    # this id, not the token string, tells the dashboard that revoking one revokes both.
+    assert yt.tokens.refresh_token != drive.tokens.refresh_token
+    assert yt.extra["google_sub"] == drive.extra["google_sub"] == GOOGLE_SUB
+
+
+def test_youtube_exchange_reads_the_sub_from_the_id_token_without_extra_requests(mock: Any):
+    mock.post(google.TOKEN_URL).mock(return_value=token_response(id_token=make_id_token("42")))
+    mock.get(CHANNELS_URL).mock(return_value=httpx.Response(200, json={"items": [channel()]}))
+    userinfo = mock.get(google.USERINFO_URL)
+    (account,) = google.oauth.exchange_code(
+        code="c", redirect_uri=REDIRECT, code_verifier=VERIFIER, purpose="youtube"
+    )
+    assert account.extra["google_sub"] == "42" and not userinfo.called
+
+
+@pytest.mark.parametrize(
+    "id_token",
+    [
+        None,
+        "not-a-jwt",
+        "a.b.c",
+        make_id_token(aud="someone-else"),
+        make_id_token(iss="https://evil.example"),
+    ],
+)
+def test_youtube_exchange_falls_back_to_userinfo_for_an_unusable_id_token(mock: Any, id_token: str | None):
+    mock.post(google.TOKEN_URL).mock(return_value=token_response(id_token=id_token))
+    mock.get(CHANNELS_URL).mock(return_value=httpx.Response(200, json={"items": [channel()]}))
+    userinfo = mock.get(google.USERINFO_URL).mock(return_value=httpx.Response(200, json={"sub": "777"}))
+    (account,) = google.oauth.exchange_code(
+        code="c", redirect_uri=REDIRECT, code_verifier=VERIFIER, purpose="youtube"
+    )
+    assert account.extra["google_sub"] == "777"
+    assert userinfo.calls.last.request.headers["authorization"] == f"Bearer {ACCESS}"
+
+
+def test_youtube_exchange_accepts_an_audience_list(mock: Any):
+    mock.post(google.TOKEN_URL).mock(
+        return_value=token_response(id_token=make_id_token("8", aud=["other", "g-id"]))
+    )
+    mock.get(CHANNELS_URL).mock(return_value=httpx.Response(200, json={"items": [channel()]}))
+    (account,) = google.oauth.exchange_code(
+        code="c", redirect_uri=REDIRECT, code_verifier=VERIFIER, purpose="youtube"
+    )
+    assert account.extra["google_sub"] == "8"
+
+
+@pytest.mark.parametrize(
+    "userinfo",
+    [
+        httpx.Response(503, text="down"),
+        httpx.Response(200, text="not json"),
+        httpx.Response(200, json={"email": "x@y.z"}),
+        httpx.ConnectError("offline"),
+    ],
+)
+def test_youtube_exchange_connects_without_a_sub_when_nothing_provides_one(mock: Any, userinfo: Any):
+    mock.post(google.TOKEN_URL).mock(return_value=token_response(id_token=None))
+    mock.get(CHANNELS_URL).mock(return_value=httpx.Response(200, json={"items": [channel()]}))
+    route = mock.get(google.USERINFO_URL)
+    route.mock(side_effect=userinfo) if isinstance(userinfo, Exception) else route.mock(return_value=userinfo)
+
+    (account,) = google.oauth.exchange_code(
+        code="c", redirect_uri=REDIRECT, code_verifier=VERIFIER, purpose="youtube"
+    )
+
+    assert "google_sub" not in account.extra  # a legacy-style account: the dashboard stays cautious
+    assert account.external_id == "UCabc"
 
 
 # --------------------------------------------------------------------------- refresh

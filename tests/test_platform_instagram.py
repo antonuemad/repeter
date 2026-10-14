@@ -29,6 +29,8 @@ from repeater.platforms.base import (
     RestartPublish,
     RetryableError,
 )
+from repeater.timeutil import utcnow
+from tests import test_platform_meta as meta_tests
 
 GRAPH = "https://graph.facebook.com/v26.0"
 TOKEN = "ig-page-token-SECRET"
@@ -51,6 +53,11 @@ def mock() -> Any:
         assert_signed(m)
 
 
+@pytest.fixture
+def engine_post(db, workspace, make_account, sample_video, monkeypatch):
+    return meta_tests.build_engine_post(db, workspace, make_account, sample_video, monkeypatch)
+
+
 def proof(token: str) -> str:
     return hmac.new(b"m-secret", token.encode(), hashlib.sha256).hexdigest()
 
@@ -71,12 +78,12 @@ def assert_signed(mock: Any) -> None:
         assert params["appsecret_proof"] == proof(TOKEN)
 
 
-def ctx(**extra: Any) -> AccountContext:
+def ctx(scopes: list[str] | None = None, **extra: Any) -> AccountContext:
     return AccountContext(
         account_id=5,
         platform=Platform.INSTAGRAM,
         external_id=IG_ID,
-        tokens=OAuthTokens(access_token=TOKEN),
+        tokens=OAuthTokens(access_token=TOKEN, scopes=scopes or []),
         extra={"ig_user_id": IG_ID, "page_id": "111", "username": "magiclap", "fb_user_id": "u1", **extra},
     )
 
@@ -384,12 +391,15 @@ def test_poll_publish_rejections(mock, publish_response, cls):
 
 
 def test_poll_repeated_refusals_start_over(mock):
+    """Every media_publish answer proves nothing went live (container not found): after
+    MAX_PUBLISH_ATTEMPTS the next poll sends the video again, without another media_publish."""
     mock.get(CONTAINER_URL).mock(return_value=container("FINISHED"))
     publish_route = mock.post(PUBLISH_URL).mock(return_value=graph_error(400, 24, 2207008))
     current = state()
-    for _ in range(instagram.MAX_PUBLISH_ATTEMPTS - 1):
+    for _ in range(instagram.MAX_PUBLISH_ATTEMPTS):
         current = instagram.publisher.poll(ctx(), current).state
-    assert current["publish_attempts"] == instagram.MAX_PUBLISH_ATTEMPTS - 1
+    assert current["publish_attempts"] == instagram.MAX_PUBLISH_ATTEMPTS
+    assert "publish_unknown" not in current
     with pytest.raises(RestartPublish) as exc:
         instagram.publisher.poll(ctx(), current)
     assert exc.value.code == "publish_refused"
@@ -399,13 +409,143 @@ def test_poll_repeated_refusals_start_over(mock):
 
 def test_poll_ambiguous_publish_failures_never_start_over(mock):
     mock.get(CONTAINER_URL).mock(return_value=container("FINISHED"))
-    mock.post(PUBLISH_URL).mock(side_effect=httpx.ReadTimeout("lost"))
+    publish_route = mock.post(PUBLISH_URL).mock(side_effect=httpx.ReadTimeout("lost"))
     current = state()
-    for _ in range(instagram.MAX_PUBLISH_ATTEMPTS + 2):
+    for _ in range(instagram.MAX_PUBLISH_ATTEMPTS):
         result = instagram.publisher.poll(ctx(), current)
         assert result.outcome == PublishOutcome.PROCESSING
         current = result.state
     assert current["container_id"] == CONTAINER
+    with pytest.raises(PermanentError) as exc:  # never RestartPublish: a second container could double-post
+        instagram.publisher.poll(ctx(), current)
+    assert not isinstance(exc.value, RestartPublish) and exc.value.code == "publish_unconfirmed"
+    assert "may be live" in exc.value.message
+    assert publish_route.call_count == instagram.MAX_PUBLISH_ATTEMPTS  # not sent a 6th time
+
+
+@pytest.mark.parametrize(
+    "publish_response",
+    [
+        graph_error(500, 2, None, "Service temporarily unavailable"),
+        httpx.Response(502, text="bad gateway"),
+        graph_error(400, 1, None, "An unknown error occurred"),
+        graph_error(400, -1, 2207001),
+        graph_error(400, -1, 2207032),
+        httpx.Response(200, json={}),
+        httpx.Response(200, text="not json"),
+    ],
+)
+def test_poll_unknown_outcomes_never_start_over(mock, publish_response):
+    """api-meta-missed-1: errors whose outcome is unknown (5xx, code 1/2, 2207001, ...) must not lead
+    to a new container, however often they repeat."""
+    mock.get(CONTAINER_URL).mock(return_value=container("FINISHED"))
+    mock.post(PUBLISH_URL).mock(return_value=publish_response)
+    current = state()
+    for _ in range(instagram.MAX_PUBLISH_ATTEMPTS):
+        current = instagram.publisher.poll(ctx(), current).state
+    assert current["publish_unknown"] == instagram.MAX_PUBLISH_ATTEMPTS
+    with pytest.raises(PermanentError) as exc:
+        instagram.publisher.poll(ctx(), current)
+    assert exc.value.code == "publish_unconfirmed" and not isinstance(exc.value, RestartPublish)
+
+
+def test_poll_one_unknown_outcome_among_refusals_still_never_starts_over(mock):
+    mock.get(CONTAINER_URL).mock(return_value=container("FINISHED"))
+    mock.post(PUBLISH_URL).mock(
+        side_effect=[httpx.Response(500, text="x")]
+        + [graph_error(400, 24, 2207008)] * (instagram.MAX_PUBLISH_ATTEMPTS - 1)
+    )
+    current = state()
+    for _ in range(instagram.MAX_PUBLISH_ATTEMPTS):
+        current = instagram.publisher.poll(ctx(), current).state
+    with pytest.raises(PermanentError) as exc:
+        instagram.publisher.poll(ctx(), current)
+    assert exc.value.code == "publish_unconfirmed"
+
+
+def test_poll_fifth_publish_lands_but_answers_an_error_and_is_recovered(mock):
+    """The reviewer's scenario: four calls fail without effect, the fifth publishes the reel but
+    answers 500. The next poll reads PUBLISHED and recovers it; there is exactly one reel."""
+    live = {"published": False}
+    calls = {"n": 0}
+
+    def publish_response(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        live["published"] = calls["n"] == instagram.MAX_PUBLISH_ATTEMPTS
+        return graph_error(500, 2, None, "Service temporarily unavailable")
+
+    def container_response(request: httpx.Request) -> httpx.Response:
+        return container("PUBLISHED" if live["published"] else "FINISHED")
+
+    mock.get(CONTAINER_URL).mock(side_effect=container_response)
+    mock.post(PUBLISH_URL).mock(side_effect=publish_response)
+    mock.get(MEDIA_URL).respond(
+        json={
+            "data": [
+                {
+                    "id": MEDIA_ID,
+                    "caption": "Watch this @friend #magic #trick",
+                    "timestamp": "2026-10-14T10:05:00+0000",
+                    "permalink": "https://www.instagram.com/reel/abc/",
+                }
+            ]
+        }
+    )
+    current = state()
+    for _ in range(instagram.MAX_PUBLISH_ATTEMPTS):
+        result = instagram.publisher.poll(ctx(), current)
+        assert result.outcome == PublishOutcome.PROCESSING
+        current = result.state
+    result = instagram.publisher.poll(ctx(), current)
+    assert result.outcome == PublishOutcome.PUBLISHED and result.platform_post_id == MEDIA_ID
+    assert calls["n"] == instagram.MAX_PUBLISH_ATTEMPTS
+
+
+def test_publish_with_saved_container_never_creates_another(mock):
+    saved = state(publish_attempts=2, publish_unknown=1)
+    result = instagram.publisher.publish(ctx(), request(state=dict(saved)))
+    assert result.outcome == PublishOutcome.PROCESSING and result.state == saved
+    assert mock.calls.call_count == 0
+
+
+@pytest.mark.parametrize("scopes", [[], ["instagram_basic", "business_management"]])
+def test_publish_permission_error_hints_at_ads_read(mock, scopes):
+    """api-meta-2: without ads_read/ads_management, a permission refusal on the first publishing
+    call is most likely the business-portfolio case; say so."""
+    mock.get(LIMIT_URL).mock(
+        return_value=graph_error(403, 10, None, "(#10) Application does not have permission")
+    )
+    with pytest.raises(meta.PermissionDeniedError) as exc:
+        instagram.publisher.publish(ctx(scopes), request())
+    assert "ads_read" in exc.value.message and "Business portfolio" in exc.value.message
+    assert TOKEN not in exc.value.message
+
+
+def test_publish_permission_error_no_hint_when_ads_read_was_granted(mock):
+    mock.get(LIMIT_URL).mock(
+        return_value=graph_error(403, 10, None, "(#10) Application does not have permission")
+    )
+    with pytest.raises(meta.PermissionDeniedError) as exc:
+        instagram.publisher.publish(ctx(["ads_read"]), request())
+    assert "ads_read" not in exc.value.message
+
+
+def test_publish_ads_permission_error_names_the_permission_once(mock):
+    mock.get(LIMIT_URL).mock(
+        return_value=graph_error(
+            403, 200, None, "(#200) Requires ads_management permission to manage the object"
+        )
+    )
+    with pytest.raises(meta.PermissionDeniedError) as exc:
+        instagram.publisher.publish(ctx(), request())
+    assert exc.value.message.count("Business portfolio") == 1  # the specific text, no extra hint
+
+
+def test_poll_permission_error_hints_at_ads_read(mock):
+    mock.get(CONTAINER_URL).mock(return_value=graph_error(403, 200, None, "Permissions error"))
+    with pytest.raises(AuthError) as exc:
+        instagram.publisher.poll(ctx(), state())
+    assert "ads_read" in exc.value.message
 
 
 def recent_media(*items: dict[str, Any]) -> httpx.Response:
@@ -667,3 +807,119 @@ def test_download_cdn_failures(mock, tmp_path, status, cls):
     with pytest.raises(cls):
         instagram.lister.download(ctx(), remote(), tmp_path / "x.mp4")
     assert not (tmp_path / "x.mp4").exists()
+
+
+# --------------------------------------------------------------------------- engine (end to end)
+
+
+class FakeInstagram:
+    """respx handlers for one Instagram account: containers C1, C2 ...; media_publish answers come
+    from `publish_answer(container_id, call_number)`; a container reads PUBLISHED once it went live."""
+
+    def __init__(self, account: Any, publish_answer: Any) -> None:
+        self.ig = account.external_id
+        self.created: list[str] = []
+        self.live: list[str] = []
+        self.publish_calls: list[str] = []
+        self._answer = publish_answer
+
+    def media(self, request: httpx.Request) -> httpx.Response:
+        self.created.append(f"C{len(self.created) + 1}")
+        return httpx.Response(200, json={"id": self.created[-1]})
+
+    def media_publish(self, request: httpx.Request) -> httpx.Response:
+        container_id = form(request)["creation_id"]
+        self.publish_calls.append(container_id)
+        lands, response = self._answer(container_id, self.publish_calls.count(container_id))
+        if lands:
+            self.live.append(container_id)
+        return response
+
+    def container(self, request: httpx.Request) -> httpx.Response:
+        cid = request.url.path.rsplit("/", 1)[-1]
+        code = "PUBLISHED" if cid in self.live else "FINISHED"
+        return httpx.Response(200, json={"status_code": code, "status": "Finished: x"})
+
+    def router(self) -> Any:
+        mock = respx.mock(assert_all_called=False)
+        mock.get(f"{GRAPH}/{self.ig}/content_publishing_limit").mock(return_value=quota(0))
+        mock.post(f"{GRAPH}/{self.ig}/media").mock(side_effect=self.media)
+        mock.post(f"{GRAPH}/{self.ig}/media_publish").mock(side_effect=self.media_publish)
+        mock.get(url__regex=rf"{GRAPH}/C\d.*").mock(side_effect=self.container)
+        mock.get(url__regex=rf"{GRAPH}/M\d.*").respond(
+            json={"permalink": "https://www.instagram.com/reel/M/"}
+        )
+        mock.get(f"{GRAPH}/{self.ig}/media").respond(
+            json={
+                "data": [{"id": "M1", "caption": "Watch this coin vanish", "timestamp": utcnow().isoformat()}]
+            }
+        )
+        return mock
+
+
+def engine_polls(db, post, publisher, now, count):
+    for i in range(1, count + 1):
+        publisher.poll_post(db, post.id, now=now + timedelta(minutes=i))
+        db.refresh(post)
+
+
+def test_engine_fifth_publish_lands_with_an_error_and_is_not_posted_twice(db, engine_post):
+    """api-meta-missed-1 end to end (the reviewer's scenario): one container, one reel, PUBLISHED."""
+    from repeater.engine import publisher
+    from repeater.models import PostStatus
+
+    post, account = engine_post("instagram")
+
+    def answer(container_id, call):
+        lands = call == instagram.MAX_PUBLISH_ATTEMPTS  # published, but the answer is a 500
+        return lands, graph_error(500, 2, None, "Service temporarily unavailable")
+
+    fake = FakeInstagram(account, answer)
+    now = utcnow()
+    with fake.router():
+        publisher.publish_post(db, post.id, now=now)
+        engine_polls(db, post, publisher, now, instagram.MAX_PUBLISH_ATTEMPTS)
+        assert post.status == PostStatus.PROCESSING
+        engine_polls(db, post, publisher, now + timedelta(minutes=instagram.MAX_PUBLISH_ATTEMPTS), 1)
+    assert post.status == PostStatus.PUBLISHED
+    assert fake.created == ["C1"] and fake.live == ["C1"]
+
+
+def test_engine_unknown_publish_outcomes_end_in_needs_attention_not_a_second_container(db, engine_post):
+    from repeater.engine import publisher
+    from repeater.models import PostStatus
+
+    post, account = engine_post("instagram")
+    fake = FakeInstagram(account, lambda cid, call: (False, graph_error(500, 2, None, "unavailable")))
+    now = utcnow()
+    with fake.router():
+        publisher.publish_post(db, post.id, now=now)
+        engine_polls(db, post, publisher, now, instagram.MAX_PUBLISH_ATTEMPTS + 1)
+    assert post.status == PostStatus.NEEDS_ATTENTION and "may be live" in (post.error or "")
+    assert fake.created == ["C1"]
+    assert fake.publish_calls == ["C1"] * instagram.MAX_PUBLISH_ATTEMPTS
+
+
+def test_engine_definitive_refusals_send_the_video_again_with_a_new_container(db, engine_post):
+    from repeater.engine import publisher
+    from repeater.models import PostStatus
+
+    post, account = engine_post("instagram")
+
+    def answer(container_id, call):
+        if container_id == "C1":
+            return False, graph_error(400, 24, 2207008)  # container not found: proves nothing went live
+        return True, httpx.Response(200, json={"id": "M1"})
+
+    fake = FakeInstagram(account, answer)
+    now = utcnow()
+    with fake.router():
+        publisher.publish_post(db, post.id, now=now)
+        engine_polls(db, post, publisher, now, instagram.MAX_PUBLISH_ATTEMPTS + 1)
+        assert post.status == PostStatus.FAILED and fake.created == ["C1"] and fake.live == []
+        later = now + timedelta(hours=1)
+        publisher.publish_post(db, post.id, now=later)
+        publisher.poll_post(db, post.id, now=later + timedelta(minutes=1))
+        db.refresh(post)
+    assert post.status == PostStatus.PUBLISHED
+    assert fake.created == ["C1", "C2"] and fake.live == ["C2"]

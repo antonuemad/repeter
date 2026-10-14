@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import errno
 import io
 import shutil
+import threading
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -11,7 +14,7 @@ from typing import Any
 import httpx
 import pytest
 import respx
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from yt_dlp.networking import Response as YtResponse
 from yt_dlp.networking.exceptions import HTTPError as YtHTTPError
 from yt_dlp.networking.exceptions import TransportError
@@ -19,10 +22,11 @@ from yt_dlp.utils import DownloadError, ExtractorError, GeoRestrictedError, Unsu
 
 from repeater import queue
 from repeater.config import get_settings
+from repeater.db import get_engine, get_sessionmaker
 from repeater.jobs import kinds
 from repeater.jobs.registry import HANDLERS
 from repeater.media import encode, storage
-from repeater.media.fingerprint import phash_frames, sha256_file
+from repeater.media.fingerprint import phash_frames, sha256_file, unpack
 from repeater.media.probe import ProbeResult, probe
 from repeater.models import (
     AccountStatus,
@@ -31,6 +35,8 @@ from repeater.models import (
     Job,
     JobStatus,
     Platform,
+    PostStatus,
+    ScheduledPost,
     Source,
     SourceKind,
     Video,
@@ -50,6 +56,7 @@ from repeater.queue import RetryLater
 from repeater.sources import drive, importer, manual, ytdlp
 from repeater.sources import jobs as source_jobs
 from repeater.timeutil import utcnow
+from tests.test_media import MELODY_A, MELODY_B, _picture_audio_clip, ffmpeg
 
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 FOLDER_ID = "1AbCdEfGhIjKlMnOpQrStUvWxYz012345"
@@ -69,9 +76,7 @@ def clean_media() -> None:
 @pytest.fixture
 def fast_encode(monkeypatch):
     """Same profile, ultrafast preset: keeps end-to-end tests quick."""
-    args = list(encode.VIDEO_CODEC_ARGS)
-    args[args.index("slow")] = "ultrafast"
-    monkeypatch.setattr(encode, "VIDEO_CODEC_ARGS", tuple(args))
+    monkeypatch.setattr(get_settings(), "encode_preset", "ultrafast")
 
 
 @pytest.fixture
@@ -258,11 +263,13 @@ def test_drive_list_recent_paginates_and_maps_files():
 
     req = route.calls[0].request
     params = dict(req.url.params)
-    assert params["q"] == f"'{FOLDER_ID}' in parents and trashed = false and mimeType contains 'video/'"
-    assert params["orderBy"] == "createdTime desc"
-    assert (
-        params["fields"] == "nextPageToken,files(id,name,mimeType,createdTime,size,description,webViewLink)"
+    assert params["q"] == (
+        f"'{FOLDER_ID}' in parents and trashed = false and "
+        "(mimeType contains 'video/' or mimeType = 'application/vnd.google-apps.shortcut')"
     )
+    assert params["orderBy"] == "createdTime desc"
+    assert params["fields"].startswith("nextPageToken,files(id,name,mimeType,createdTime,size,description,")
+    assert "shortcutDetails(targetId,targetMimeType,targetResourceKey)" in params["fields"]
     assert params["supportsAllDrives"] == "true" and params["includeItemsFromAllDrives"] == "true"
     assert params["pageSize"] == "10"
     assert req.headers["Authorization"] == "Bearer drive-token"
@@ -270,13 +277,14 @@ def test_drive_list_recent_paginates_and_maps_files():
 
 
 @respx.mock
-def test_drive_list_recent_stops_at_since_and_limit():
+def test_drive_list_recent_ignores_since_and_honours_limit():
+    """createdTime is not "added to the folder", so `since` never cuts the listing short."""
     files = [_drive_file(i, T0 - timedelta(hours=i)) for i in range(5)]
     respx.get(FILES_URL).mock(return_value=httpx.Response(200, json={"files": files}))
     since_items = drive.lister.list_recent(
         ctx(), since=T0 - timedelta(hours=2, minutes=30), config={"folder_id": FOLDER_ID}
     )
-    assert len(since_items) == 3
+    assert len(since_items) == 5
     assert len(drive.lister.list_recent(ctx(), limit=2, config={"folder_id": FOLDER_ID})) == 2
     assert drive.lister.list_recent(ctx(), limit=0, config={"folder_id": FOLDER_ID}) == []
 
@@ -352,12 +360,28 @@ def test_drive_download(tmp_path):
     route = respx.get(f"{FILES_URL}/file1xxxxxxxxxx").mock(
         return_value=httpx.Response(200, content=b"video-bytes")
     )
-    rv = RemoteVideo(external_id="file1xxxxxxxxxx", download_url=None)
+    rv = RemoteVideo(external_id="file1xxxxxxxxxx", download_url=drive.file_download_url("file1xxxxxxxxxx"))
     out = drive.lister.download(ctx(), rv, tmp_path / "original.mov")
     assert out.read_bytes() == b"video-bytes"
     req = route.calls[0].request
     assert req.url.params["alt"] == "media" and req.url.params["supportsAllDrives"] == "true"
     assert req.headers["Authorization"] == "Bearer drive-token"
+    assert "X-Goog-Drive-Resource-Keys" not in req.headers
+
+
+@respx.mock
+def test_drive_download_without_listing_hint_resolves_the_file_first(tmp_path):
+    """A retried import has no download link; the file (or the target of a shortcut) is looked up."""
+    route = respx.get(f"{FILES_URL}/file1xxxxxxxxxx").mock(
+        side_effect=[
+            httpx.Response(200, json={"id": "file1xxxxxxxxxx", "mimeType": "video/mp4"}),
+            httpx.Response(200, content=b"video-bytes"),
+        ]
+    )
+    rv = RemoteVideo(external_id="file1xxxxxxxxxx", download_url=None)
+    assert drive.lister.download(ctx(), rv, tmp_path / "original.mov").read_bytes() == b"video-bytes"
+    assert route.calls[0].request.url.params["fields"].startswith("id,mimeType,shortcutDetails")
+    assert route.calls[1].request.url.params["alt"] == "media"
 
 
 @respx.mock
@@ -813,22 +837,62 @@ def test_ytdlp_source_matches_own_account_to_avoid_reposting(
     assert videos(db)[0].source_account_id == own.id
 
 
-def test_ytdlp_source_with_linked_account_uses_official_listing(
+def test_ytdlp_source_with_linked_account_never_uses_the_account(
     db, workspace, make_account, make_source, monkeypatch
 ):
-    acc = make_account("youtube", extra={"channel_id": "UC1", "uploads_playlist_id": "UU1"})
+    """C6: detection and download of a yt-dlp source use yt-dlp only, even when the row still has
+    a connected account (legacy data): no token, no official lister."""
+    acc = make_account(
+        "youtube", extra={"channel_id": "UC1", "uploads_playlist_id": "UU1", "custom_url": "@m"}
+    )
     src = make_source(
-        SourceKind.YTDLP, Platform.YOUTUBE, account=acc, config={"backfill_count": 1}, unofficial_ack_at=T0
+        SourceKind.YTDLP,
+        Platform.YOUTUBE,
+        account=acc,
+        config={"profile_url": "https://www.youtube.com/@m", "backfill_count": 1},
+        unofficial_ack_at=T0,
     )
+    monkeypatch.setattr(importer, "fresh_context", lambda *a, **k: pytest.fail("must not load tokens"))
     monkeypatch.setattr(
-        importer.ytdlp, "list_profile", lambda *a, **k: pytest.fail("must not scrape the listing")
+        importer, "get_lister", lambda *a, **k: pytest.fail("must not use an official lister")
     )
-    fake = FakeLister(Platform.YOUTUBE, [remote("yt1", T0 - timedelta(hours=1), download_url=None)])
-    with override("lister", "youtube", fake):
-        out = importer.poll_source(db, src.id, now=T0)
-    assert out.created == 1 and fake.calls
-    assert videos(db)[0].source_account_id == acc.id
-    assert jobs_of(db, kinds.IMPORT_VIDEO)[0].payload == {"video_id": videos(db)[0].id}
+    listed = []
+
+    def fake_list(url, *, limit, proxy, cookies_file):
+        listed.append(url)
+        return [remote("yt1", None, download_url=None, permalink="https://www.youtube.com/shorts/yt1")]
+
+    monkeypatch.setattr(importer.ytdlp, "list_profile", fake_list)
+    out = importer.poll_source(db, src.id, now=T0)
+    assert out.status == "ok" and out.created == 1
+    assert listed == ["https://www.youtube.com/@m"]
+    video = videos(db)[0]
+    assert video.source_account_id == acc.id  # matched by the channel handle, not by the link
+    assert jobs_of(db, kinds.IMPORT_VIDEO)[0].payload == {"video_id": video.id}
+
+    downloads = []
+    monkeypatch.setattr(
+        importer.ytdlp,
+        "download",
+        lambda url, d, **kw: downloads.append(url) or (_ for _ in ()).throw(PermanentError("stop here")),
+    )
+    importer.import_video(db, video.id, {"video_id": video.id})
+    assert downloads == ["https://www.youtube.com/shorts/yt1"]
+
+
+def test_ytdlp_source_linked_to_another_platform_account_is_still_just_ytdlp(
+    db, workspace, make_account, make_source, monkeypatch
+):
+    acc = make_account("facebook")
+    src = make_source(
+        SourceKind.YTDLP,
+        Platform.TIKTOK,
+        account=acc,
+        config={"profile_url": "https://www.tiktok.com/@m"},
+        unofficial_ack_at=T0,
+    )
+    monkeypatch.setattr(importer.ytdlp, "list_profile", lambda *a, **k: [])
+    assert importer.poll_source(db, src.id, now=T0).status == "ok"
 
 
 def test_unofficial_source_needs_acknowledgement(db, workspace, make_source, monkeypatch):
@@ -873,7 +937,11 @@ def test_repeated_failures_pause_the_source_and_notify(
     assert len(activities(db, ActivityLevel.WARNING)) == 1
     errors = activities(db, ActivityLevel.ERROR)
     assert len(errors) == 1 and "Magic IG" in errors[0].message and errors[0].data == {"source_id": src.id}
-    assert len(notifications) == 1 and notifications[0][1] == {"workspace_id": workspace.id, "level": "error"}
+    assert len(notifications) == 1 and notifications[0][1] == {
+        "workspace_id": workspace.id,
+        "level": "error",
+        "category": "source_failing",
+    }
     # Paused sources are no longer polled.
     assert importer.poll_source(db, src.id).status == "skipped"
 
@@ -1064,7 +1132,15 @@ def test_import_video_drive_keeps_extension(db, workspace, make_account, make_so
         respx.get(f"{FILES_URL}/file1xxxxxxxxxx").mock(
             return_value=httpx.Response(200, content=sample_video.read_bytes())
         )
-        importer.import_video(db, v.id, {"video_id": v.id, "remote_extra": {"ext": "mov"}})
+        importer.import_video(
+            db,
+            v.id,
+            {
+                "video_id": v.id,
+                "download_url": drive.file_download_url("file1xxxxxxxxxx"),
+                "remote_extra": {"ext": "mov"},
+            },
+        )
     db.refresh(v)
     assert v.status == VideoStatus.PROCESSING and v.original_path.endswith("/original.mov")
 
@@ -1613,3 +1689,929 @@ def test_real_youtubedl_prefers_1080p_h264_mp4(tmp_path):
         ydl.sort_formats(info)
     assert info["formats"][-1]["format_id"] == "1080-h264"  # best last
     assert info["formats"][0]["format_id"] == "1080-h264-watermarked"
+
+
+# =========================================================================== review fixes: detection
+
+
+def _drive_poll_setup(make_account, make_source, **config):
+    acc = make_account("gdrive")
+    return make_source(
+        SourceKind.DRIVE, Platform.GDRIVE, account=acc, config={"folder_id": FOLDER_ID, **config}
+    )
+
+
+@respx.mock
+def test_drive_video_moved_into_the_folder_after_setup_is_imported(db, workspace, make_account, make_source):
+    """import-media-7: createdTime is when a file was created, not when it entered the folder."""
+    src = _drive_poll_setup(make_account, make_source)
+    route = respx.get(FILES_URL)
+    route.mock(return_value=httpx.Response(200, json={"files": [_drive_file(1, T0 - timedelta(days=2))]}))
+    assert importer.poll_source(db, src.id, now=T0).created == 0  # baseline
+    route.mock(
+        return_value=httpx.Response(
+            200,
+            json={"files": [_drive_file(1, T0 - timedelta(days=2)), _drive_file(2, T0 - timedelta(days=7))]},
+        )
+    )
+    second = importer.poll_source(db, src.id, now=T0 + timedelta(hours=1))
+    third = importer.poll_source(db, src.id, now=T0 + timedelta(hours=2))
+    assert (second.created, third.created) == (1, 0)
+    assert [v.external_id for v in videos(db)] == ["file2xxxxxxxxxx"]
+    assert "since" not in dict(route.calls[-1].request.url.params)  # the listing is never cut by age
+
+
+@respx.mock
+def test_big_drive_folders_are_remembered_beyond_the_usual_seen_cap(db, workspace, make_account, make_source):
+    src = _drive_poll_setup(make_account, make_source)
+    files = [_drive_file(i, T0 - timedelta(minutes=i)) for i in range(700)]
+    respx.get(FILES_URL).mock(return_value=httpx.Response(200, json={"files": files}))
+    assert importer.poll_source(db, src.id, now=T0).created == 0
+    assert importer.poll_source(db, src.id, now=T0 + timedelta(hours=1)).created == 0  # no flood of "new"
+    db.refresh(src)
+    assert len(src.config["seen_ids"]) == 700 and videos(db) == []
+
+
+@respx.mock
+def test_drive_shortcut_to_a_video_is_imported_through_its_target(
+    db, workspace, make_account, make_source, sample_video
+):
+    """import-media-15: a shortcut is the only way to show a teammate's video in your own folder."""
+    src = _drive_poll_setup(make_account, make_source, backfill_count=5)
+    shortcut = {
+        "id": "shortcut1xxxxxxx",
+        "name": "Finished edit.mp4",
+        "mimeType": drive.SHORTCUT_MIME,
+        "createdTime": "2026-10-01T09:00:00Z",
+        "webViewLink": "https://drive.google.com/file/d/shortcut1/view",
+        "shortcutDetails": {
+            "targetId": "target1xxxxxxxxx",
+            "targetMimeType": "video/mp4",
+            "targetResourceKey": "rk-77",
+        },
+    }
+    folder_shortcut = {
+        **shortcut,
+        "id": "shortcut2xxxxxxx",
+        "shortcutDetails": {"targetId": "folderxxxxxxxx", "targetMimeType": drive.FOLDER_MIME},
+    }
+    doc_shortcut = {
+        **shortcut,
+        "id": "shortcut3xxxxxxx",
+        "shortcutDetails": {"targetId": "docxxxxxxxxxxx", "targetMimeType": "application/pdf"},
+    }
+    respx.get(FILES_URL).mock(
+        return_value=httpx.Response(200, json={"files": [shortcut, folder_shortcut, doc_shortcut]})
+    )
+    out = importer.poll_source(db, src.id, now=T0)
+    assert out.created == 1 and out.listed == 1
+    video = videos(db)[0]
+    assert video.external_id == "shortcut1xxxxxxx" and video.title == "Finished edit"
+    payload = jobs_of(db, kinds.IMPORT_VIDEO)[0].payload
+    assert payload["download_url"].startswith(f"{FILES_URL}/target1xxxxxxxxx?alt=media")
+    assert payload["remote_extra"]["resource_key"] == "rk-77"
+
+    target = respx.get(f"{FILES_URL}/target1xxxxxxxxx").mock(
+        return_value=httpx.Response(200, content=sample_video.read_bytes())
+    )
+    importer.import_video(db, video.id, payload)
+    db.refresh(video)
+    assert video.status == VideoStatus.PROCESSING and target.called
+    assert target.calls[0].request.headers["X-Goog-Drive-Resource-Keys"] == "target1xxxxxxxxx/rk-77"
+    assert not any(
+        "shortcut1xxxxxxx" in str(c.request.url) and "alt=media" in str(c.request.url) for c in respx.calls
+    )
+
+
+@respx.mock
+def test_retried_shortcut_import_looks_up_its_target(db, tmp_path):
+    respx.get(f"{FILES_URL}/shortcut1xxxxxxx").mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "id": "shortcut1xxxxxxx",
+                    "mimeType": drive.SHORTCUT_MIME,
+                    "shortcutDetails": {"targetId": "target1xxxxxxxxx", "targetResourceKey": "rk"},
+                },
+            )
+        ]
+    )
+    target = respx.get(f"{FILES_URL}/target1xxxxxxxxx").mock(
+        return_value=httpx.Response(200, content=b"bytes")
+    )
+    out = drive.lister.download(ctx(), RemoteVideo(external_id="shortcut1xxxxxxx"), tmp_path / "original.mp4")
+    assert out.read_bytes() == b"bytes"
+    assert target.calls[0].request.headers["X-Goog-Drive-Resource-Keys"] == "target1xxxxxxxxx/rk"
+
+
+def _youtube_listing(monkeypatch, state: dict):
+    monkeypatch.setattr(
+        importer.ytdlp,
+        "list_profile",
+        lambda url, *, limit, proxy, cookies_file: [
+            RemoteVideo(external_id=i, created_at=None, permalink=f"https://www.youtube.com/shorts/{i}")
+            for i in state["ids"][:limit]
+        ],
+    )
+
+
+def test_deleting_a_recent_short_does_not_import_an_old_one(db, workspace, make_source, monkeypatch):
+    """import-media-5: flat YouTube Shorts listings have no timestamps; when the creator deletes one
+    of the 30 newest, the 31st (old, never listed) slides into the window."""
+    state = {"ids": []}
+    _youtube_listing(monkeypatch, state)
+    src = make_source(
+        SourceKind.YTDLP,
+        Platform.YOUTUBE,
+        config={"profile_url": "https://www.youtube.com/@magiclap/shorts"},
+        unofficial_ack_at=T0,
+    )
+    channel = [f"s{n:03d}" for n in range(100, 0, -1)]  # newest first
+    state["ids"] = channel
+    assert importer.poll_source(db, src.id, now=T0).created == 0
+    state["ids"] = [x for x in channel if x != "s095"]  # the creator deletes a recent Short
+    assert importer.poll_source(db, src.id, now=T0 + timedelta(hours=1)).created == 0
+    assert videos(db) == []
+    state["ids"] = ["s101", *[x for x in channel if x != "s095"]]  # ...and posts a new one
+    assert importer.poll_source(db, src.id, now=T0 + timedelta(hours=2)).created == 1
+    assert [v.external_id for v in videos(db)] == ["s101"]
+    # The newest known Short itself disappearing does not matter either.
+    state["ids"] = ["s102", "s101", *[x for x in channel if x not in ("s095", "s100")]]
+    assert importer.poll_source(db, src.id, now=T0 + timedelta(hours=3)).created == 1
+    assert [v.external_id for v in videos(db)] == ["s101", "s102"]
+
+
+def test_listing_that_shares_nothing_with_the_seen_ids_imports_nothing(
+    db, workspace, make_source, monkeypatch
+):
+    state = {"ids": ["a3", "a2", "a1"]}
+    _youtube_listing(monkeypatch, state)
+    src = make_source(
+        SourceKind.YTDLP,
+        Platform.YOUTUBE,
+        config={"profile_url": "https://www.youtube.com/@m"},
+        unofficial_ack_at=T0,
+    )
+    importer.poll_source(db, src.id, now=T0)
+    state["ids"] = ["z9", "z8", "z7"]  # yt-dlp changed its ids, or the channel was replaced: ambiguous
+    assert importer.poll_source(db, src.id, now=T0 + timedelta(hours=1)).created == 0
+    state["ids"] = ["z10", "z9", "z8", "z7"]  # next poll has an overlap again and can tell what is new
+    assert importer.poll_source(db, src.id, now=T0 + timedelta(hours=2)).created == 1
+
+
+def test_first_video_of_an_empty_channel_is_imported(db, workspace, make_source, monkeypatch):
+    state = {"ids": []}
+    _youtube_listing(monkeypatch, state)
+    src = make_source(
+        SourceKind.YTDLP,
+        Platform.YOUTUBE,
+        config={"profile_url": "https://www.youtube.com/@m"},
+        unofficial_ack_at=T0,
+    )
+    assert importer.poll_source(db, src.id, now=T0).created == 0
+    state["ids"] = ["first"]
+    assert importer.poll_source(db, src.id, now=T0 + timedelta(hours=1)).created == 1
+
+
+def test_posts_repeater_published_itself_are_not_imported_again(db, workspace, make_account, make_source):
+    """import-media-2: an account that is source and target lists the Reels Repeater posted."""
+    acc = make_account("instagram")
+    src = make_source(SourceKind.PLATFORM_API, Platform.INSTAGRAM, account=acc)
+    original = Video(workspace_id=workspace.id, status=VideoStatus.READY, title="Original")
+    db.add(original)
+    db.flush()
+    db.add(
+        ScheduledPost(
+            workspace_id=workspace.id,
+            video_id=original.id,
+            connected_account_id=acc.id,
+            platform=Platform.INSTAGRAM,
+            idempotency_key=f"{original.id}:{acc.id}:0",
+            scheduled_at=T0,
+            status=PostStatus.PUBLISHED,
+            platform_post_id="ig-own-reel",
+        )
+    )
+    db.commit()
+    fake = FakeLister(Platform.INSTAGRAM, [remote("old", T0 - timedelta(days=1))])
+    with override("lister", "instagram", fake):
+        importer.poll_source(db, src.id, now=T0)
+        fake.items = [
+            remote("ig-own-reel", T0 + timedelta(hours=1)),
+            remote("ig-hand-made", T0 + timedelta(hours=2)),
+            remote("old", T0 - timedelta(days=1)),
+        ]
+        out = importer.poll_source(db, src.id, now=T0 + timedelta(hours=3))
+    assert out.created == 1 and [v.external_id for v in videos(db) if v.id != original.id] == ["ig-hand-made"]
+    db.refresh(src)
+    assert "ig-own-reel" in src.config["seen_ids"]  # remembered, so it is not looked at again
+    # Backfilling a new source does not import them either.
+    backfill = make_source(
+        SourceKind.PLATFORM_API, Platform.INSTAGRAM, account=acc, config={"backfill_count": 5}
+    )
+    with override(
+        "lister", "instagram", FakeLister(Platform.INSTAGRAM, [remote("ig-own-reel", T0), remote("mine", T0)])
+    ):
+        assert importer.poll_source(db, backfill.id, now=T0 + timedelta(hours=4)).created == 1
+
+
+def test_source_edit_during_a_poll_is_not_reverted_by_the_poll(db, workspace, make_account, make_source):
+    """import-media-13: the poll wrote its stale copy of the config back over the user's edit."""
+    acc = make_account("gdrive")
+    src = make_source(
+        SourceKind.DRIVE,
+        Platform.GDRIVE,
+        account=acc,
+        config={"folder_id": "OLDfolder0000000", "baseline_at": T0.isoformat(), "seen_ids": ["x"]},
+    )
+
+    class Lister:
+        platform = Platform.GDRIVE
+
+        def list_recent(self, account, *, since=None, limit=50, config=None):
+            with get_sessionmaker()() as web:  # the user saves the edit form while the listing runs
+                edited = web.get(Source, src.id)
+                edited.config = {"folder_id": "NEWfolder0000000"}  # the web form drops baseline_at/seen_ids
+                web.commit()
+            return [RemoteVideo(external_id="old-folder-file", created_at=T0 - timedelta(days=1))]
+
+    with override("lister", "gdrive", Lister()):
+        out = importer.poll_source(db, src.id, now=T0 + timedelta(hours=1))
+    db.expire_all()
+    stored = db.get(Source, src.id)
+    assert out.status == "skipped"
+    assert stored.config == {"folder_id": "NEWfolder0000000"}
+    assert stored.last_polled_at is None  # due again on the next tick, with the new folder
+    assert videos(db) == []
+
+
+def test_source_disabled_during_a_poll_creates_no_videos(db, workspace, make_account, make_source):
+    acc = make_account("instagram")
+    src = make_source(SourceKind.PLATFORM_API, Platform.INSTAGRAM, account=acc)
+
+    class Lister(FakeLister):
+        def list_recent(self, account, *, since=None, limit=50, config=None):
+            with get_sessionmaker()() as web:
+                web.get(Source, src.id).enabled = False
+                web.commit()
+            return super().list_recent(account, since=since, limit=limit, config=config)
+
+    fake = Lister(Platform.INSTAGRAM, [remote("m1", T0 + timedelta(hours=1))])
+    with override("lister", "instagram", fake):
+        importer.poll_source(db, src.id, now=T0)  # first poll: baseline
+        out = importer.poll_source(db, src.id, now=T0 + timedelta(hours=2))
+    assert out.status == "skipped" and videos(db) == []
+
+
+def test_poll_holds_no_row_lock_while_the_listing_runs(db, workspace, make_account, make_source):
+    """The web form must be able to save the source while a slow listing is in flight."""
+    acc = make_account("instagram")
+    src = make_source(SourceKind.PLATFORM_API, Platform.INSTAGRAM, account=acc)
+
+    class Lister(FakeLister):
+        def list_recent(self, account, *, since=None, limit=50, config=None):
+            with get_sessionmaker()() as web:
+                web.execute(text("SET LOCAL lock_timeout = '2s'"))
+                web.get(Source, src.id).name = "renamed"
+                web.commit()  # would raise OperationalError if the poll still held the row lock
+            return []
+
+    with override("lister", "instagram", Lister(Platform.INSTAGRAM)):
+        assert importer.poll_source(db, src.id, now=T0).status == "ok"
+    db.expire_all()
+    assert db.get(Source, src.id).name == "renamed"
+
+
+# =========================================================================== review fixes: import and processing
+
+
+def test_archive_during_download_is_kept(db, workspace, make_account, make_source, sample_video):
+    """import-media-4: import_video wrote status=processing over the user's archive."""
+    acc = make_account("instagram")
+    src = make_source(SourceKind.PLATFORM_API, Platform.INSTAGRAM, account=acc)
+    v = _importing_video(db, workspace, src)
+
+    class Lister(FakeLister):
+        def download(self, account, remote_video, dest):
+            with get_sessionmaker()() as web:  # a stale tab or a direct POST archives it meanwhile
+                web.get(Video, v.id).status = VideoStatus.ARCHIVED
+                web.commit()
+            return super().download(account, remote_video, dest)
+
+    with override("lister", "instagram", Lister(Platform.INSTAGRAM, sample=sample_video)):
+        importer.import_video(db, v.id, {"video_id": v.id})
+    db.expire_all()
+    v = db.get(Video, v.id)
+    assert v.status == VideoStatus.ARCHIVED
+    assert v.original_path is not None and storage.abs_path(v.original_path).is_file()  # restorable
+    assert jobs_of(db, kinds.PROCESS_VIDEO) == []
+    importer.process_video(db, v.id)  # and processing it is a no-op
+    db.refresh(v)
+    assert v.status == VideoStatus.ARCHIVED and v.encoded_path is None
+
+
+def test_failure_after_an_archive_does_not_overwrite_it(db, workspace, make_account, make_source):
+    acc = make_account("instagram")
+    src = make_source(SourceKind.PLATFORM_API, Platform.INSTAGRAM, account=acc)
+    v = _importing_video(db, workspace, src)
+
+    class Lister(FakeLister):
+        def download(self, account, remote_video, dest):
+            with get_sessionmaker()() as web:
+                web.get(Video, v.id).status = VideoStatus.ARCHIVED
+                web.commit()
+            raise PermanentError("The media was deleted on Instagram.")
+
+    with override("lister", "instagram", Lister(Platform.INSTAGRAM)):
+        importer.import_video(db, v.id, {"video_id": v.id})
+    db.expire_all()
+    assert db.get(Video, v.id).status == VideoStatus.ARCHIVED
+    assert activities(db, ActivityLevel.ERROR) == []
+
+    w = _importing_video(db, workspace, src, external_id="ext-2")
+    fake = Lister(Platform.INSTAGRAM)
+    fake.download = lambda *a, **k: (
+        get_sessionmaker()()
+        .__enter__()
+        .execute(text("UPDATE videos SET status = 'archived' WHERE id = :i"), {"i": w.id}),
+        (_ for _ in ()).throw(RetryableError("CDN timeout")),
+    )
+    # a retryable error after an archive: no attempt text on the archived video, no retry
+    with override("lister", "instagram", FakeLister(Platform.INSTAGRAM)):
+        w.status = VideoStatus.ARCHIVED
+        db.commit()
+        importer.import_video(db, w.id, {"video_id": w.id})  # not importing any more: no-op
+    db.refresh(w)
+    assert w.status == VideoStatus.ARCHIVED and w.error is None
+
+
+# ---- disk space
+
+
+def test_low_disk_space_defers_the_download_without_using_attempts(
+    db, workspace, make_account, make_source, monkeypatch, notifications
+):
+    """import-media-10: nothing checked free space before downloads of up to 4 GB."""
+    monkeypatch.setattr(storage, "disk_usage", lambda: (100 * 1024**3, 99 * 1024**3, 1024**3))
+    acc = make_account("instagram")
+    src = make_source(SourceKind.PLATFORM_API, Platform.INSTAGRAM, account=acc)
+    v = _importing_video(db, workspace, src)
+    kinds.enqueue_import_video(db, v.id)
+    db.commit()
+    fake = FakeLister(Platform.INSTAGRAM)
+    with override("lister", "instagram", fake):
+        for _ in range(6):  # far more than the 4 attempts a real failure would be allowed
+            job, retry = run_next_job(db, kinds.IMPORT_VIDEO)
+            assert retry is not None and retry.seconds == importer.DISK_WAIT_S
+            assert job.status == JobStatus.QUEUED and "retries" not in job.payload
+    db.refresh(v)
+    assert v.status == VideoStatus.IMPORTING and v.error.startswith("Waiting for free disk space")
+    assert fake.downloads == []
+    assert len(activities(db, ActivityLevel.WARNING)) == 1 and len(notifications) == 1  # said once
+    monkeypatch.undo()
+
+
+def test_download_needs_twice_its_known_size_free(db, workspace, make_account, make_source, monkeypatch):
+    free = importer.MIN_FREE_BYTES + 1024
+    monkeypatch.setattr(storage, "disk_usage", lambda: (10**12, 10**12 - free, free))
+    acc = make_account("gdrive")
+    src = make_source(SourceKind.DRIVE, Platform.GDRIVE, account=acc, config={"folder_id": FOLDER_ID})
+    v = _importing_video(db, workspace, src, external_id="file1xxxxxxxxxx")
+    with pytest.raises(RetryLater):
+        importer.import_video(db, v.id, {"video_id": v.id, "remote_extra": {"size": importer.MIN_FREE_BYTES}})
+
+
+def test_disk_full_while_downloading_waits_instead_of_failing(db, workspace, make_account, make_source):
+    acc = make_account("instagram")
+    src = make_source(SourceKind.PLATFORM_API, Platform.INSTAGRAM, account=acc)
+    v = _importing_video(db, workspace, src)
+    kinds.enqueue_import_video(db, v.id)
+    db.commit()
+    fake = FakeLister(Platform.INSTAGRAM)
+    fake.download_error = OSError(errno.ENOSPC, "No space left on device")
+    with override("lister", "instagram", fake):
+        for _ in range(5):
+            _, retry = run_next_job(db, kinds.IMPORT_VIDEO)
+            assert retry is not None and retry.seconds == importer.DISK_WAIT_S
+    db.refresh(v)
+    assert v.status == VideoStatus.IMPORTING and "Attempt" not in v.error
+
+
+def test_yt_dlp_disk_full_waits_instead_of_failing(db, workspace, make_source, monkeypatch):
+    def full(*a, **k):
+        raise RetryableError("The server's disk is full", code="disk_full", retry_after=1800)
+
+    monkeypatch.setattr(importer.ytdlp, "download", full)
+    src = make_source(
+        SourceKind.YTDLP,
+        Platform.TIKTOK,
+        config={"profile_url": "https://www.tiktok.com/@m"},
+        unofficial_ack_at=T0,
+    )
+    v = _importing_video(db, workspace, src, external_id="7400")
+    for _ in range(5):
+        with pytest.raises(RetryLater) as retry:
+            importer.import_video(db, v.id, {"video_id": v.id})
+        assert retry.value.seconds == importer.DISK_WAIT_S
+    db.refresh(v)
+    assert v.status == VideoStatus.IMPORTING
+
+
+def test_yt_dlp_maps_a_full_disk_to_a_retryable_error(monkeypatch):
+    err = ytdlp.classify_error(DownloadError("unable to write data: [Errno 28] No space left on device"))
+    assert isinstance(err, RetryableError) and err.code == "disk_full" and err.retry_after == 1800
+
+    class FullDisk:
+        def __init__(self, params):
+            pass
+
+        def __enter__(self):
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(ytdlp, "YoutubeDL", FullDisk)
+    with pytest.raises(RetryableError) as exc:
+        ytdlp._run(lambda ydl: None, {}, None)
+    assert exc.value.code == "disk_full"
+
+
+def test_process_defers_encoding_when_the_disk_is_nearly_full(db, workspace, sample_video, monkeypatch):
+    monkeypatch.setattr(
+        importer, "encode_for_platforms", lambda *a, **k: pytest.fail("must not encode without space")
+    )
+    monkeypatch.setattr(storage, "disk_usage", lambda: (10**12, 10**12 - 1024, 1024))
+    v = _processing_video(db, workspace, sample_video)
+    with pytest.raises(RetryLater) as retry:
+        importer.process_video(db, v.id, {"video_id": v.id})
+    assert retry.value.seconds == importer.DISK_WAIT_S
+    db.refresh(v)
+    assert v.status == VideoStatus.PROCESSING and v.sha256 is not None and "disk space" in v.error
+
+
+def test_disk_full_while_encoding_is_retried_not_failed(db, workspace, sample_video, monkeypatch):
+    """A tmp-full disk used to fail every video processed meanwhile, permanently."""
+
+    def full(*a, **k):
+        raise encode.DiskFullError("encoding failed: the disk is full")
+
+    monkeypatch.setattr(importer, "encode_for_platforms", full)
+    v = _processing_video(db, workspace, sample_video)
+    kinds.enqueue_process_video(db, v.id)
+    db.commit()
+    for _ in range(5):  # does not count as a failed attempt
+        job, retry = run_next_job(db, kinds.PROCESS_VIDEO)
+        assert retry is not None and retry.seconds == importer.DISK_WAIT_S
+    db.refresh(v)
+    assert v.status == VideoStatus.PROCESSING and "disk space" in v.error
+    monkeypatch.undo()
+
+
+def test_oserror_enospc_in_processing_waits(db, workspace, sample_video, monkeypatch):
+    monkeypatch.setattr(
+        importer, "fingerprint_video", lambda *a, **k: (_ for _ in ()).throw(OSError(errno.ENOSPC, "full"))
+    )
+    v = _processing_video(db, workspace, sample_video)
+    with pytest.raises(RetryLater):
+        importer.process_video(db, v.id, {"video_id": v.id})
+    db.refresh(v)
+    assert v.status == VideoStatus.PROCESSING and "disk space" in v.error
+
+
+# ---- one encode at a time, duration-based timeout
+
+
+def test_only_one_video_is_processed_at_a_time(db, workspace, sample_video, monkeypatch):
+    """import-media-6: two encodes shared one CPU and both job threads."""
+    monkeypatch.setattr(
+        importer, "encode_for_platforms", lambda *a, **k: pytest.fail("must wait for the other video")
+    )
+    v = _processing_video(db, workspace, sample_video)
+    assert importer.ENCODE_CONCURRENCY == 1
+    assert importer._ENCODE_SLOTS.acquire(blocking=False)  # another video is being processed
+    try:
+        with pytest.raises(RetryLater) as retry:
+            importer.process_video(db, v.id, {"video_id": v.id})
+    finally:
+        importer._ENCODE_SLOTS.release()
+    assert retry.value.seconds == importer.ENCODE_BUSY_RETRY_S
+    db.refresh(v)
+    assert v.status == VideoStatus.PROCESSING and v.error is None and v.sha256 is None  # nothing used up
+
+
+def test_process_releases_the_slot_even_when_it_fails(db, workspace, sample_video, monkeypatch):
+    monkeypatch.setattr(importer, "probe", lambda p: (_ for _ in ()).throw(ZeroDivisionError("bug")))
+    v = _processing_video(db, workspace, sample_video)
+    with pytest.raises(RetryLater):
+        importer.process_video(db, v.id, {"video_id": v.id})
+    assert importer._ENCODE_SLOTS.acquire(blocking=False)
+    importer._ENCODE_SLOTS.release()
+
+
+def test_process_uses_the_duration_based_encode_timeout(db, workspace, sample_video, monkeypatch):
+    captured = {}
+
+    def fake_encode(src, dst, **kw):
+        captured.update(kw)
+        shutil.copyfile(sample_video, dst)
+        return probe(dst)
+
+    monkeypatch.setattr(importer, "encode_for_platforms", fake_encode)
+    v = _processing_video(db, workspace, sample_video)
+    importer.process_video(db, v.id)
+    duration = captured["source_probe"].duration_s
+    assert duration == pytest.approx(4.0, abs=0.2)
+    assert captured["timeout_s"] == encode.encode_timeout(duration)  # settings: base + per second, capped
+    settings = get_settings()
+    assert captured["timeout_s"] == min(
+        settings.encode_timeout_max_s,
+        settings.encode_timeout_base_s + duration * settings.encode_timeout_per_media_s,
+    )
+    db.refresh(v)
+    assert v.status == VideoStatus.READY and v.fps == 30.0
+
+
+def test_retries_after_a_timeout_use_a_faster_preset(db, workspace, sample_video, monkeypatch):
+    """import-media-6: three identical timeouts burned 45 minutes of CPU; now each retry is faster."""
+    monkeypatch.setattr(get_settings(), "encode_preset", "slow")
+    presets: list[str | None] = []
+
+    def timeout(*a, preset=None, **k):
+        presets.append(preset)
+        raise encode.EncodeTimeout("encoding timed out after 900 s")
+
+    monkeypatch.setattr(importer, "encode_for_platforms", timeout)
+    v = _processing_video(db, workspace, sample_video)
+    for _ in range(2):
+        with pytest.raises(RetryLater):
+            importer.process_video(db, v.id, {"video_id": v.id})
+    importer.process_video(db, v.id, {"video_id": v.id})  # third try: gives up
+    assert presets == [None, "veryfast", "ultrafast"]
+    db.refresh(v)
+    assert v.status == VideoStatus.FAILED
+    # A configured preset that is already faster than the fallback is never made slower.
+    monkeypatch.setattr(get_settings(), "encode_preset", "ultrafast")
+    assert encode.faster_preset(encode.encode_preset(), "veryfast") == "ultrafast"
+    assert importer._retry_preset({"retries": 1}, v) == "ultrafast"
+    assert importer._retry_preset({}, Video(error=None)) is None
+
+
+# ---- duplicates
+
+
+def _same_clip_twice(db, workspace, sample_video, make_account):
+    ig, tt = make_account("instagram"), make_account("tiktok")
+    a = _processing_video(
+        db,
+        workspace,
+        sample_video,
+        title="from IG",
+        source_platform=Platform.INSTAGRAM,
+        source_account_id=ig.id,
+        external_id="ig1",
+    )
+    b = _processing_video(
+        db,
+        workspace,
+        sample_video,
+        title="from TikTok",
+        source_platform=Platform.TIKTOK,
+        source_account_id=tt.id,
+        external_id="tt1",
+    )
+    return a, b
+
+
+def test_same_clip_processed_in_parallel_becomes_one_video(
+    db, workspace, make_account, sample_video, fast_encode, monkeypatch
+):
+    """import-media-1: while A encoded, B's check found nothing (READY/ARCHIVED only): two READY videos."""
+    monkeypatch.setattr(importer, "_ENCODE_SLOTS", threading.BoundedSemaphore(2))  # two worker threads
+    a, b = _same_clip_twice(db, workspace, sample_video, make_account)
+    real = importer.encode_for_platforms
+    ran_b = {"done": False}
+
+    def encode_a_while_b_runs(src, dst, **kw):
+        if not ran_b["done"]:
+            ran_b["done"] = True
+            with get_sessionmaker()() as other:  # the second worker thread, its own session
+                importer.process_video(other, b.id)
+        return real(src, dst, **kw)
+
+    monkeypatch.setattr(importer, "encode_for_platforms", encode_a_while_b_runs)
+    importer.process_video(db, a.id)
+    first, second = (v for v in videos(db) if v.id in (a.id, b.id))
+    assert first.status == VideoStatus.READY and first.sha256 == second.sha256
+    assert second.status == VideoStatus.DUPLICATE and second.duplicate_of_id == first.id
+
+
+def _waiting_on_advisory_lock() -> bool:
+    with get_engine().connect() as conn:
+        return bool(
+            conn.execute(
+                text("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted")
+            ).scalar()
+        )
+
+
+def test_duplicate_checks_of_a_workspace_are_serialised(
+    db, workspace, make_account, sample_video, fast_encode, monkeypatch
+):
+    """The check and the claim of the fingerprints are one step per workspace (advisory lock)."""
+    monkeypatch.setattr(importer, "_ENCODE_SLOTS", threading.BoundedSemaphore(2))
+    a, b = _same_clip_twice(db, workspace, sample_video, make_account)
+    real_find = importer.find_duplicate
+    threads: list[threading.Thread] = []
+    errors: list[BaseException] = []
+
+    def run_b():
+        try:
+            with get_sessionmaker()() as other:
+                importer.process_video(other, b.id)
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    def find_then_let_b_arrive(session, video, *args, **kw):
+        result = real_find(session, video, *args, **kw)
+        if video.id == a.id and not threads:
+            thread = threading.Thread(target=run_b)
+            threads.append(thread)
+            thread.start()
+            deadline = time.monotonic() + 90
+            while not _waiting_on_advisory_lock():  # B fingerprints, then waits for A's lock
+                assert time.monotonic() < deadline, "B never waited for the lock: checks are not serialised"
+                time.sleep(0.05)
+        return result
+
+    monkeypatch.setattr(importer, "find_duplicate", find_then_let_b_arrive)
+    importer.process_video(db, a.id)
+    threads[0].join(timeout=60)
+    assert not errors
+    first, second = (v for v in videos(db) if v.id in (a.id, b.id))
+    assert first.status == VideoStatus.READY
+    assert second.status == VideoStatus.DUPLICATE and second.duplicate_of_id == first.id
+
+
+def test_duplicates_of_a_video_that_fails_are_processed_again(
+    db, workspace, make_account, sample_video, fast_encode, monkeypatch
+):
+    monkeypatch.setattr(importer, "_ENCODE_SLOTS", threading.BoundedSemaphore(2))
+    a, b = _same_clip_twice(db, workspace, sample_video, make_account)
+    real = importer.encode_for_platforms
+    calls = []
+
+    def encode(src, dst, **kw):
+        calls.append(dst)
+        if len(calls) == 1:
+            with get_sessionmaker()() as other:
+                importer.process_video(other, b.id)  # B becomes a duplicate of A, which then fails
+            raise encode_module.EncodeError(
+                "encoding failed (ffmpeg exit code 1)", stderr_tail="Invalid data"
+            )
+        return real(src, dst, **kw)
+
+    encode_module = __import__("repeater.media.encode", fromlist=["x"])
+    monkeypatch.setattr(importer, "encode_for_platforms", encode)
+    importer.process_video(db, a.id)
+    first, second = (v for v in videos(db) if v.id in (a.id, b.id))
+    assert first.status == VideoStatus.FAILED
+    assert second.status == VideoStatus.PROCESSING and second.duplicate_of_id is None
+    assert {j.payload["video_id"] for j in jobs_of(db, kinds.PROCESS_VIDEO)} >= {b.id}
+    importer.process_video(db, b.id)  # its own turn now
+    db.refresh(second)
+    assert second.status == VideoStatus.READY
+
+
+def test_failed_original_without_files_fails_its_dependents_cleanly(db, workspace, sample_video):
+    a = _processing_video(db, workspace, sample_video)
+    b = _processing_video(db, workspace, sample_video)
+    b.status, b.duplicate_of_id = VideoStatus.DUPLICATE, a.id
+    storage.abs_path(b.original_path).unlink()
+    db.commit()
+    importer._fail_video(db, a, "boom")
+    db.commit()
+    db.refresh(b)
+    assert b.status == VideoStatus.FAILED and "upload it again" in b.error and b.duplicate_of_id is None
+
+
+LETTERBOX_SIZES = {"16:9": "640x360", "4:5": "640x800", "1:1": "640x640"}
+
+
+@pytest.mark.parametrize("shape", sorted(LETTERBOX_SIZES))
+def test_letterboxed_repost_from_another_platform_is_a_duplicate(
+    shape, db, workspace, make_account, tmp_path, fast_encode
+):
+    """import-media-2: what Repeater posts is padded to 1080x1920; the IG copy of it is not the same
+    shape as the library's original and was imported as a new video (16:9, 4:5 and 1:1 originals)."""
+    original = _picture_audio_clip(tmp_path / "original.mp4", size=LETTERBOX_SIZES[shape], notes=MELODY_A)
+    first = _processing_video(db, workspace, original, title="Original")
+    importer.process_video(db, first.id)
+    db.refresh(first)
+    assert first.status == VideoStatus.READY
+    # The platform's copy of Repeater's post: the padded encode, re-encoded at 720p and CRF 28.
+    ffmpeg("-i", str(storage.abs_path(first.encoded_path)), "-vf", "scale=720:1280", "-c:v", "libx264",
+           "-crf", "28", "-preset", "veryfast", "-c:a", "aac", "-b:a", "128k", str(tmp_path / "ig.mp4"))  # fmt: skip
+    ig = make_account("instagram")
+    copy = _processing_video(
+        db,
+        workspace,
+        tmp_path / "ig.mp4",
+        title="IG copy",
+        source_platform=Platform.INSTAGRAM,
+        source_account_id=ig.id,
+        external_id="ig-9",
+    )
+    importer.process_video(db, copy.id)
+    db.refresh(copy)
+    assert copy.status == VideoStatus.DUPLICATE and copy.duplicate_of_id == first.id
+
+
+def test_same_pictures_with_another_voice_over_are_published_not_merged(db, workspace, tmp_path, fast_encode):
+    """import-media-8: Episode 2 over the same b-roll was silently dropped as a duplicate."""
+    ep1 = _picture_audio_clip(tmp_path / "ep1.mp4", size="360x640", notes=MELODY_A)
+    ep2 = _picture_audio_clip(tmp_path / "ep2.mp4", size="360x640", notes=MELODY_B)
+    one = _processing_video(db, workspace, ep1, title="Episode 1")
+    two = _processing_video(db, workspace, ep2, title="Episode 2")
+    importer.process_video(db, one.id)
+    importer.process_video(db, two.id)
+    db.refresh(one)
+    db.refresh(two)
+    assert one.status == VideoStatus.READY and two.status == VideoStatus.READY and two.duplicate_of_id is None
+    assert unpack(two.phash)[1] and unpack(two.phash)[1] != unpack(one.phash)[1]
+
+
+def test_not_a_duplicate_override_skips_the_check(db, workspace, sample_video, fast_encode):
+    """import-media-8: a video taken for a duplicate can be released (overrides or job payload)."""
+    first = _ready_video(db, workspace, sample_video, sha256=sha256_file(sample_video))
+    v = _processing_video(db, workspace, sample_video, title="Corrected re-upload")
+    importer.process_video(db, v.id)
+    db.refresh(v)
+    assert v.status == VideoStatus.DUPLICATE and v.duplicate_of_id == first.id
+    v.status, v.duplicate_of_id = VideoStatus.PROCESSING, None
+    v.overrides = {"skip_duplicate_check": True}
+    db.commit()
+    importer.process_video(db, v.id)
+    db.refresh(v)
+    assert v.status == VideoStatus.READY and v.duplicate_of_id is None
+
+    w = _processing_video(db, workspace, sample_video, title="Second re-upload")
+    importer.process_video(db, w.id, {"video_id": w.id, "skip_duplicate_check": True})
+    db.refresh(w)
+    assert w.status == VideoStatus.READY
+
+
+def test_release_duplicate_is_the_not_a_duplicate_action(db, workspace, sample_video, fast_encode):
+    first = _ready_video(db, workspace, sample_video, sha256=sha256_file(sample_video))
+    v = _processing_video(db, workspace, sample_video, title="Corrected re-upload")
+    importer.process_video(db, v.id)
+    db.refresh(v)
+    assert v.status == VideoStatus.DUPLICATE and v.duplicate_of_id == first.id
+    importer.release_duplicate(db, v, actor="admin@magic-lap.com")
+    db.commit()
+    assert v.status == VideoStatus.PROCESSING and v.duplicate_of_id is None
+    assert v.overrides["skip_duplicate_check"] is True
+    assert activities(db)[-1].actor == "admin@magic-lap.com"
+    run_next_job(db, kinds.PROCESS_VIDEO)
+    db.refresh(v)
+    assert v.status == VideoStatus.READY
+    with pytest.raises(ValueError, match="Only videos marked as duplicates"):
+        importer.release_duplicate(db, v)
+    gone = _processing_video(db, workspace, sample_video)
+    gone.status = VideoStatus.DUPLICATE
+    storage.abs_path(gone.original_path).unlink()
+    db.commit()
+    with pytest.raises(ValueError, match="original file is gone"):
+        importer.release_duplicate(db, gone)
+
+
+def test_duplicate_cancels_the_originals_scheduled_posts_where_the_copy_came_from(
+    db, workspace, make_account, sample_video, monkeypatch
+):
+    """import-media-missed-1: the duplicate's origin is where the original must not be posted."""
+    calls = []
+
+    def recorder(session, video_id, *, actor="system"):
+        duplicate = session.execute(select(Video).where(Video.duplicate_of_id == video_id)).scalar_one()
+        calls.append((video_id, actor, duplicate.status))  # the duplicate row is already visible
+        return 1
+
+    from repeater.engine import actions
+
+    monkeypatch.setattr(actions, "cancel_conflicting_posts", recorder)
+    first = _ready_video(db, workspace, sample_video, sha256=sha256_file(sample_video))
+    v = _processing_video(db, workspace, sample_video, source_platform=Platform.TIKTOK, external_id="tt-1")
+    importer.process_video(db, v.id)
+    assert calls == [(first.id, "system", VideoStatus.DUPLICATE)]
+
+
+def test_duplicate_really_cancels_the_scheduled_post_to_its_origin(db, workspace, make_account, sample_video):
+    tiktok = make_account("tiktok")
+    youtube = make_account("youtube")
+    first = _ready_video(db, workspace, sample_video, sha256=sha256_file(sample_video))
+    posts = {}
+    for acc in (tiktok, youtube):
+        post = ScheduledPost(
+            workspace_id=workspace.id,
+            video_id=first.id,
+            connected_account_id=acc.id,
+            platform=Platform(acc.platform),
+            idempotency_key=f"{first.id}:{acc.id}:0",
+            scheduled_at=utcnow() + timedelta(hours=3),
+            status=PostStatus.SCHEDULED,
+        )
+        db.add(post)
+        posts[acc.platform] = post
+    db.commit()
+    v = _processing_video(
+        db,
+        workspace,
+        sample_video,
+        source_platform=Platform.TIKTOK,
+        source_account_id=tiktok.id,
+        external_id="tt-2",
+    )
+    importer.process_video(db, v.id)
+    db.expire_all()
+    assert db.get(Video, v.id).status == VideoStatus.DUPLICATE
+    assert db.get(ScheduledPost, posts[Platform.TIKTOK].id).status == PostStatus.CANCELED
+    assert db.get(ScheduledPost, posts[Platform.YOUTUBE].id).status == PostStatus.SCHEDULED
+
+
+def test_process_marks_perceptual_duplicate_of_a_video_still_processing(
+    db, workspace, sample_video, monkeypatch
+):
+    monkeypatch.setattr(
+        importer, "encode_for_platforms", lambda *a, **k: pytest.fail("duplicates are not encoded")
+    )
+    winner = _ready_video(
+        db, workspace, sample_video, status=VideoStatus.PROCESSING, sha256="f" * 64,
+        phash=" ".join(importer.fingerprint_video(sample_video, probe(sample_video)).frames),
+    )  # fmt: skip
+    v = _processing_video(db, workspace, sample_video)
+    importer.process_video(db, v.id)
+    db.refresh(v)
+    assert v.status == VideoStatus.DUPLICATE and v.duplicate_of_id == winner.id
+
+
+# ---- damaged files
+
+
+def _truncated_copy(sample: Path, tmp_path: Path, share: float) -> Path:
+    full = tmp_path / "full.mp4"
+    ffmpeg("-i", str(sample), "-c", "copy", "-movflags", "+faststart", str(full))
+    cut = tmp_path / f"cut_{share}.mp4"
+    cut.write_bytes(full.read_bytes()[: int(full.stat().st_size * share)])
+    return cut
+
+
+def test_a_file_whose_end_is_missing_is_failed_not_published_short(
+    db, workspace, sample_video, tmp_path, monkeypatch
+):
+    """import-media-11: ffprobe reads the full duration from the front, ffmpeg exits 0 on the part
+    it can read, and the cut-off video became READY."""
+    monkeypatch.setattr(
+        importer, "encode_for_platforms", lambda *a, **k: pytest.fail("a damaged file is not encoded")
+    )
+    v = _processing_video(db, workspace, _truncated_copy(sample_video, tmp_path, 0.3))
+    importer.process_video(db, v.id)
+    db.refresh(v)
+    assert v.status == VideoStatus.FAILED and "damaged or incomplete" in v.error
+
+
+def test_an_encode_much_shorter_than_the_source_is_failed(db, workspace, sample_video, tmp_path, fast_encode):
+    cut = _truncated_copy(sample_video, tmp_path, 0.75)
+    info = probe(cut)
+    assert info.duration_s > 3.9  # the moov atom says 4 s
+    v = _processing_video(db, workspace, cut)
+    importer.process_video(db, v.id)
+    db.refresh(v)
+    assert v.status == VideoStatus.FAILED and "damaged or incomplete" in v.error and "ends after" in v.error
+    assert v.encoded_path is None and not storage.abs_path(f"ws{workspace.id}/v{v.id}/encoded.mp4").exists()
+    assert jobs_of(db, kinds.PLAN_WORKSPACE) == []
+
+
+def test_failed_import_removes_partial_downloads(db, workspace, make_account, make_source):
+    acc = make_account("instagram")
+    src = make_source(SourceKind.PLATFORM_API, Platform.INSTAGRAM, account=acc)
+    v = _importing_video(db, workspace, src)
+    part = storage.ensure_video_dir(workspace.id, v.id) / "original.mp4.part"
+    part.write_bytes(b"x" * 100)
+    fake = FakeLister(Platform.INSTAGRAM)
+    fake.download_error = PermanentError("The media was deleted on Instagram.")
+    with override("lister", "instagram", fake):
+        importer.import_video(db, v.id, {"video_id": v.id})
+    assert not part.exists()
+
+
+def test_new_original_resets_fingerprints_of_an_earlier_one(
+    db, workspace, make_account, make_source, sample_video
+):
+    acc = make_account("instagram")
+    src = make_source(SourceKind.PLATFORM_API, Platform.INSTAGRAM, account=acc)
+    v = _importing_video(db, workspace, src, sha256="a" * 64, phash="0" * 16)
+    with override("lister", "instagram", FakeLister(Platform.INSTAGRAM, sample=sample_video)):
+        importer.import_video(db, v.id, {"video_id": v.id})
+    db.refresh(v)
+    assert v.status == VideoStatus.PROCESSING and v.sha256 is None and v.phash is None

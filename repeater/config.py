@@ -38,10 +38,17 @@ class Settings(BaseSettings):
     meta_app_id: str = ""
     meta_app_secret: str = ""
     meta_graph_version: str = "v26.0"
+    # TikTok audit state of the developer app. Until TikTok has audited it, every post made through
+    # the API is restricted to private viewing (SELF_ONLY, on a private account), so the rule form
+    # offers only that and the adapter refuses any other privacy level. Set true after the audit.
+    tiktok_audited: bool = False
 
     # Notifications
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+    # Alerts go to one operator chat for every workspace. By default they carry only the kind of
+    # event, a count and a dashboard link; true also sends titles, account names and platform errors.
+    telegram_include_details: bool = False
 
     # Unofficial import (yt-dlp). Off unless a source opts in.
     ytdlp_proxy: str = ""
@@ -50,7 +57,9 @@ class Settings(BaseSettings):
     # Worker
     worker_poll_seconds: float = 2.0
     worker_threads: int = 2
-    job_lock_timeout_minutes: int = 30
+    # Lease: a running job renews locked_at every job_lease_refresh_seconds; a job whose lease has
+    # not been renewed for this long (never less than a few renewals) is requeued.
+    job_lock_timeout_minutes: int = 10
     # Touched by the worker loop; the container healthcheck reads its age.
     worker_heartbeat_path: Path = Path("/tmp/repeater-worker.heartbeat")  # noqa: S108
 
@@ -71,6 +80,10 @@ class Settings(BaseSettings):
     # Retention
     original_retention_days: int = 30
     platform_data_retention_days: int = 30  # YouTube API policy: refresh or delete within 30 days
+
+    # backup.sh writes "<epoch> <ISO time>" here after each successful backup (docker-compose.yml mounts
+    # the directory read-only and sets this); `repeater.cli check` and the dashboard warn when it is stale.
+    backup_status_file: Path | None = None
 
     ffmpeg_bin: str = "ffmpeg"
     ffprobe_bin: str = "ffprobe"

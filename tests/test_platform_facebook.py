@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import subprocess
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
@@ -29,7 +29,10 @@ from repeater.platforms.base import (
     RemoteVideo,
     RestartPublish,
     RetryableError,
+    UnknownOutcomeError,
 )
+from repeater.timeutil import utcnow
+from tests import test_platform_meta as meta_tests
 
 GRAPH = "https://graph.facebook.com/v26.0"
 TOKEN = "fb-page-token-SECRET"
@@ -47,6 +50,11 @@ def mock() -> Any:
     with respx.mock(assert_all_called=False) as m:
         yield m
         assert_signed(m)
+
+
+@pytest.fixture
+def engine_post(db, workspace, make_account, sample_video, monkeypatch):
+    return meta_tests.build_engine_post(db, workspace, make_account, sample_video, monkeypatch)
 
 
 @pytest.fixture(autouse=True)
@@ -107,13 +115,13 @@ def assert_signed(mock: Any) -> None:
         assert params["appsecret_proof"] == proof(TOKEN)
 
 
-def ctx() -> AccountContext:
+def ctx(**extra: Any) -> AccountContext:
     return AccountContext(
         account_id=7,
         platform=Platform.FACEBOOK,
         external_id=PAGE_ID,
         tokens=OAuthTokens(access_token=TOKEN),
-        extra={"page_id": PAGE_ID, "fb_user_id": "u1"},
+        extra={"page_id": PAGE_ID, "fb_user_id": "u1", **extra},
     )
 
 
@@ -422,15 +430,81 @@ def test_publish_finish_failure_after_landing(mock, sample_video):
     assert facebook.publisher.publish(ctx(), request(sample_video)).outcome == PublishOutcome.PROCESSING
 
 
-def test_publish_finish_never_confirmed(mock, sample_video):
+def test_publish_finish_never_confirmed_is_an_unknown_outcome(mock, sample_video):
+    """api-meta-1: three lost finish responses must not become a RetryableError, which the engine
+    answers with a brand-new upload (and so a second reel)."""
     reels = mock.post(REELS_URL).mock(
         side_effect=reels_endpoint([httpx.ReadTimeout("x"), httpx.ReadTimeout("x"), httpx.ReadTimeout("x")])
     )
     mock.post(RUPLOAD).respond(json={"success": True})
     mock.get(VIDEO_URL).respond(json=status_body("upload_complete"))
-    with pytest.raises(RetryableError):
+    with pytest.raises(UnknownOutcomeError) as exc:
         facebook.publisher.publish(ctx(), request(sample_video))
+    assert reels.call_count == 1 + facebook.FINISH_ATTEMPTS  # one start, never a second
+    state = exc.value.state
+    assert state["video_id"] == VIDEO_ID and state["page_id"] == PAGE_ID
+    assert state["finish_unconfirmed"] is True
+    assert state["finish_options"] == {"description": "Watch this #magic", "title": "Magic trick"}
+    assert datetime.fromisoformat(state["finish_sent_at"]).tzinfo is not None
+    assert TOKEN not in exc.value.message and TOKEN not in str(state)
+
+
+def test_publish_finish_lost_then_4xx_is_an_unknown_outcome(mock, sample_video):
+    """The first finish landed but its answer was lost; the second is refused ("already finished")
+    while the status still reads not started."""
+    mock.post(REELS_URL).mock(
+        side_effect=reels_endpoint([httpx.ReadTimeout("x"), graph_error(400, 100, None, "Invalid phase")])
+    )
+    mock.post(RUPLOAD).respond(json={"success": True})
+    mock.get(VIDEO_URL).respond(json=status_body("processing"))
+    with pytest.raises(UnknownOutcomeError) as exc:
+        facebook.publisher.publish(ctx(), request(sample_video))
+    assert exc.value.state["video_id"] == VIDEO_ID
+
+
+def test_publish_finish_unknown_even_when_the_status_read_fails_too(mock, sample_video):
+    mock.post(REELS_URL).mock(
+        side_effect=reels_endpoint([httpx.Response(502, text="x")] * facebook.FINISH_ATTEMPTS)
+    )
+    mock.post(RUPLOAD).respond(json={"success": True})
+    mock.get(VIDEO_URL).respond(status_code=500)  # the same incident breaks the status read
+    with pytest.raises(UnknownOutcomeError) as exc:
+        facebook.publisher.publish(ctx(), request(sample_video))
+    assert exc.value.state["video_id"] == VIDEO_ID
+
+
+def test_publish_finish_rate_limit_after_a_lost_attempt_stops_retrying(mock, sample_video):
+    reels = mock.post(REELS_URL).mock(
+        side_effect=reels_endpoint([httpx.ReadTimeout("x"), graph_error(400, 613, None, "rate limit")])
+    )
+    mock.post(RUPLOAD).respond(json={"success": True})
+    mock.get(VIDEO_URL).respond(json=status_body("processing"))
+    with pytest.raises(UnknownOutcomeError):  # not RateLimitedError: the engine would upload again
+        facebook.publisher.publish(ctx(), request(sample_video))
+    assert reels.call_count == 1 + 2
+
+
+def test_publish_finish_rejected_every_time_is_still_retryable(mock, sample_video):
+    """Facebook answered 4xx each time: nothing was finished, so a later fresh upload is safe."""
+    reels = mock.post(REELS_URL).mock(
+        side_effect=reels_endpoint(
+            [graph_error(400, 6000, None, "upload problem")] * facebook.FINISH_ATTEMPTS
+        )
+    )
+    mock.post(RUPLOAD).respond(json={"success": True})
+    mock.get(VIDEO_URL).respond(json=status_body("upload_complete"))
+    with pytest.raises(RetryableError) as exc:
+        facebook.publisher.publish(ctx(), request(sample_video))
+    assert not isinstance(exc.value, UnknownOutcomeError)
     assert reels.call_count == 1 + facebook.FINISH_ATTEMPTS
+
+
+def test_publish_with_saved_video_never_uploads_again(mock, sample_video):
+    saved = {"video_id": VIDEO_ID, "page_id": PAGE_ID, "finish_unconfirmed": True}
+    result = facebook.publisher.publish(ctx(), request(sample_video, state=dict(saved)))
+    assert result.outcome == PublishOutcome.PROCESSING and result.state == saved
+    assert result.platform_post_id == VIDEO_ID
+    assert mock.calls.call_count == 0
 
 
 @pytest.mark.parametrize(
@@ -604,6 +678,140 @@ def test_poll_request_errors(mock, response, cls):
         facebook.publisher.poll(ctx(), {"video_id": VIDEO_ID})
 
 
+SENT_AT = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    now = {"t": SENT_AT}
+    monkeypatch.setattr(facebook, "utcnow", lambda: now["t"])
+    return now
+
+
+def unconfirmed(**overrides: Any) -> dict[str, Any]:
+    state: dict[str, Any] = {
+        "video_id": VIDEO_ID,
+        "page_id": PAGE_ID,
+        "finish_unconfirmed": True,
+        "finish_sent_at": SENT_AT.isoformat(),
+        "finish_options": {"description": "Watch this #magic", "title": "Magic trick"},
+    }
+    state.update(overrides)
+    return state
+
+
+def test_poll_unconfirmed_finish_waits_during_the_grace_period(mock, clock):
+    reels = mock.post(REELS_URL).respond(json={"success": True})
+    mock.get(VIDEO_URL).respond(json=status_body("ready"))
+    clock["t"] = SENT_AT + facebook.FINISH_RESEND_GRACE - timedelta(seconds=1)
+    result = facebook.publisher.poll(ctx(), unconfirmed())
+    assert result.outcome == PublishOutcome.PROCESSING and result.state == unconfirmed()
+    assert reels.call_count == 0
+
+
+def test_poll_unconfirmed_finish_is_confirmed_once_publishing_started(mock, clock):
+    reels = mock.post(REELS_URL).respond(json={"success": True})
+    mock.get(VIDEO_URL).respond(json=status_body("processing", publishing={"status": "in_progress"}))
+    clock["t"] = SENT_AT + timedelta(hours=1)
+    result = facebook.publisher.poll(ctx(), unconfirmed())
+    assert result.outcome == PublishOutcome.PROCESSING
+    assert "finish_unconfirmed" not in result.state and result.state["video_id"] == VIDEO_ID
+    assert reels.call_count == 0
+
+
+def test_poll_unconfirmed_finish_is_resent_for_the_same_video_after_the_grace_period(mock, clock):
+    reels = mock.post(REELS_URL).respond(json={"success": True})
+    mock.get(VIDEO_URL).respond(json=status_body("ready"))
+    clock["t"] = SENT_AT + facebook.FINISH_RESEND_GRACE
+    result = facebook.publisher.poll(ctx(), unconfirmed())
+    assert reels.call_count == 1  # never a "start": no second upload
+    assert form(reels.calls.last.request) == {
+        "upload_phase": "finish",
+        "video_id": VIDEO_ID,
+        "video_state": "PUBLISHED",
+        "description": "Watch this #magic",
+        "title": "Magic trick",
+        "appsecret_proof": proof(TOKEN),
+    }
+    assert result.outcome == PublishOutcome.PROCESSING
+    assert result.state["finish_resends"] == 1
+    assert result.state["finish_sent_at"] == clock["t"].isoformat()
+    assert "finish_unconfirmed" not in result.state  # Facebook accepted the finish this time
+
+
+def test_poll_unconfirmed_finish_resend_failure_keeps_waiting(mock, clock):
+    reels = mock.post(REELS_URL).respond(status_code=502)
+    mock.get(VIDEO_URL).respond(
+        json=status_body("ready", publishing={"status": "not_started", "publish_status": "draft"})
+    )
+    clock["t"] = SENT_AT + timedelta(hours=1)
+    result = facebook.publisher.poll(ctx(), unconfirmed())
+    assert reels.call_count == 1
+    assert result.outcome == PublishOutcome.PROCESSING
+    assert result.state["finish_unconfirmed"] is True and result.state["finish_resends"] == 1
+
+
+def test_poll_unconfirmed_finish_auth_error_is_raised(mock, clock):
+    mock.post(REELS_URL).mock(return_value=graph_error(400, 190, 463))
+    mock.get(VIDEO_URL).respond(json=status_body("ready"))
+    clock["t"] = SENT_AT + timedelta(hours=1)
+    with pytest.raises(AuthError):
+        facebook.publisher.poll(ctx(), unconfirmed())
+
+
+def test_poll_unconfirmed_finish_resends_are_bounded(mock, clock):
+    reels = mock.post(REELS_URL).respond(json={"success": True})
+    mock.get(VIDEO_URL).respond(json=status_body("ready"))
+    clock["t"] = SENT_AT + timedelta(days=1)
+    result = facebook.publisher.poll(ctx(), unconfirmed(finish_resends=facebook.MAX_FINISH_RESENDS))
+    assert result.outcome == PublishOutcome.PROCESSING and reels.call_count == 0
+
+
+def test_poll_unconfirmed_finish_is_not_resent_while_facebook_is_processing(mock, clock):
+    reels = mock.post(REELS_URL).respond(json={"success": True})
+    mock.get(VIDEO_URL).respond(json=status_body("processing"))
+    clock["t"] = SENT_AT + timedelta(hours=1)
+    facebook.publisher.poll(ctx(), unconfirmed())
+    assert reels.call_count == 0
+
+
+def test_poll_unconfirmed_finish_without_a_sent_time_starts_the_clock(mock, clock):
+    reels = mock.post(REELS_URL).respond(json={"success": True})
+    mock.get(VIDEO_URL).respond(json=status_body("ready"))
+    state = unconfirmed()
+    del state["finish_sent_at"]
+    clock["t"] = SENT_AT + timedelta(hours=1)
+    result = facebook.publisher.poll(ctx(), state)
+    assert result.state["finish_sent_at"] == clock["t"].isoformat() and reels.call_count == 0
+
+
+def test_poll_unconfirmed_finish_published_drops_the_finish_bookkeeping(mock, clock):
+    mock.get(VIDEO_URL).mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json=status_body("ready", publishing={"status": "complete", "publish_status": "published"}),
+            ),
+            httpx.Response(200, json={"permalink_url": "/reel/990001/"}),
+        ]
+    )
+    result = facebook.publisher.poll(ctx(), unconfirmed(finish_resends=1))
+    assert result.outcome == PublishOutcome.PUBLISHED
+    assert result.state == {"video_id": VIDEO_ID, "page_id": PAGE_ID}
+
+
+@pytest.mark.parametrize(
+    ("body", "code"),
+    [(status_body("expired"), "video_expired"), (status_body("upload_failed"), "upload_failed")],
+)
+def test_poll_unconfirmed_finish_of_a_dead_upload_restarts(mock, clock, body, code):
+    """Facebook confirms there is nothing to publish: the only case that uploads again."""
+    mock.get(VIDEO_URL).respond(json=body)
+    with pytest.raises(RestartPublish) as exc:
+        facebook.publisher.poll(ctx(), unconfirmed())
+    assert exc.value.code == code
+
+
 def test_publish_then_poll_lifecycle(mock, sample_video):
     mock.post(REELS_URL).mock(side_effect=reels_endpoint())
     mock.post(RUPLOAD).respond(json={"success": True})
@@ -708,6 +916,46 @@ def test_list_recent_errors(mock):
         facebook.lister.list_recent(ctx())
 
 
+def test_list_recent_without_the_manage_task_fails_with_a_clear_message(mock):
+    """api-meta-missed-2: listing /videos needs the MANAGE task (Video API 'Get Videos' guide)."""
+    with pytest.raises(PermanentError) as exc:
+        facebook.lister.list_recent(ctx(can_manage=False))
+    assert exc.value.code == "import_permission"
+    assert "MANAGE" in exc.value.message and "Publishing to this Page is not affected" in exc.value.message
+    assert mock.calls.call_count == 0
+    # Accounts connected before the flag existed (or with the task) still try.
+    mock.get(REELS_URL).respond(json={"data": []})
+    mock.get(VIDEOS_URL).respond(json={"data": []})
+    assert facebook.lister.list_recent(ctx()) == []
+    assert facebook.lister.list_recent(ctx(can_manage=True)) == []
+
+
+@pytest.mark.parametrize(
+    ("reels_response", "videos_response"),
+    [
+        (graph_error(403, 200, None, "(#200) Requires pages_read_engagement permission"), None),
+        (graph_error(400, 10, None, "(#10) Application does not have permission"), None),
+        (httpx.Response(200, json={"data": []}), graph_error(403, 200)),
+    ],
+)
+def test_list_recent_permission_error_is_not_an_auth_error(mock, reels_response, videos_response):
+    """A permission error on the read path must not mark the account needs-reconnect (the importer
+    does that for AuthError), which would stop publishing to a Page that can publish."""
+    mock.get(REELS_URL).mock(return_value=reels_response)
+    mock.get(VIDEOS_URL).mock(return_value=videos_response or httpx.Response(200, json={"data": []}))
+    with pytest.raises(PermanentError) as exc:
+        facebook.lister.list_recent(ctx())
+    assert not isinstance(exc.value, AuthError)
+    assert exc.value.code == "import_permission" and TOKEN not in exc.value.message
+
+
+def test_download_permission_error_is_not_an_auth_error(mock, tmp_path):
+    mock.get(f"{GRAPH}/r1").mock(return_value=graph_error(403, 200))
+    with pytest.raises(PermanentError) as exc:
+        facebook.lister.download(ctx(), RemoteVideo(external_id="r1"), tmp_path / "x.mp4")
+    assert exc.value.code == "import_permission"
+
+
 def test_download_refetches_source(mock, tmp_path):
     node = mock.get(f"{GRAPH}/r1").respond(json={"id": "r1", "source": CDN_URL})
     cdn = mock.get(CDN_URL).respond(content=b"raw-video")
@@ -738,3 +986,109 @@ def test_download_cdn_error(mock, tmp_path):
     with pytest.raises(RetryableError):
         facebook.lister.download(ctx(), RemoteVideo(external_id="r1"), tmp_path / "x.mp4")
     assert not (tmp_path / "x.mp4").exists()
+
+
+# --------------------------------------------------------------------------- engine (end to end)
+
+
+def engine_run(account, finish_script, status_script):
+    """Mock Facebook for the real engine + adapter. Returns (starts, finishes, mock, publisher):
+    the video ids started and finished so far, the respx router and the engine module. Finish
+    answers come from `finish_script` (then success), status answers from status_script["now"]."""
+    from repeater.engine import publisher
+
+    page = account.external_id
+    starts: list[str] = []
+    finishes: list[str] = []
+    videos = iter(["V1", "V2", "V3"])
+    script = list(finish_script)
+
+    def reels(request: httpx.Request) -> httpx.Response:
+        body = form(request)
+        if body["upload_phase"] == "start":
+            starts.append(next(videos))
+            return httpx.Response(200, json={"video_id": starts[-1]})
+        finishes.append(body["video_id"])
+        item = script.pop(0) if script else httpx.Response(200, json={"success": True})
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    def status(request: httpx.Request) -> httpx.Response:
+        if dict(request.url.params).get("fields") == "permalink_url":
+            return httpx.Response(200, json={"permalink_url": "/reel/V1/"})
+        return httpx.Response(200, json=status_script["now"])
+
+    mock = respx.mock(assert_all_called=False)
+    mock.post(f"{GRAPH}/{page}/video_reels").mock(side_effect=reels)
+    mock.post(url__regex=r"https://rupload\.facebook\.com/video-upload/v26\.0/V\d").respond(
+        json={"success": True}
+    )
+    mock.get(url__regex=rf"{GRAPH}/V\d.*").mock(side_effect=status)
+    return starts, finishes, mock, publisher
+
+
+def test_engine_lost_finish_responses_never_upload_a_second_reel(db, engine_post):
+    """api-meta-1 end to end: all finish responses lost -> the post waits (PROCESSING, video_id
+    saved), polls, and ends PUBLISHED with exactly one upload."""
+    from repeater.models import PostStatus
+
+    post, account = engine_post("facebook")
+    status = {"now": status_body("processing")}  # processing; publishing not started yet
+    lost = [httpx.ReadTimeout("response lost")] * facebook.FINISH_ATTEMPTS
+    starts, finishes, mock, publisher = engine_run(account, lost, status)
+    now = utcnow()
+    with mock:
+        publisher.publish_post(db, post.id, now=now)
+        db.refresh(post)
+        assert post.status == PostStatus.PROCESSING
+        assert post.publish_state["video_id"] == "V1" and post.publish_state["finish_unconfirmed"] is True
+
+        publisher.poll_post(db, post.id, now=now + timedelta(minutes=1))
+        db.refresh(post)
+        assert post.status == PostStatus.PROCESSING and starts == ["V1"]
+
+        status["now"] = status_body("ready", publishing={"status": "complete", "publish_status": "published"})
+        publisher.poll_post(db, post.id, now=now + timedelta(minutes=2))
+        db.refresh(post)
+    assert post.status == PostStatus.PUBLISHED and post.platform_post_id == "V1"
+    assert post.permalink == "https://www.facebook.com/reel/V1/"
+    assert starts == ["V1"] and finishes == ["V1"] * facebook.FINISH_ATTEMPTS
+
+
+def test_engine_lost_finish_then_4xx_is_not_needs_attention(db, engine_post):
+    """The variant: attempt 1 landed (response lost), attempt 2 got a 4xx. Not a failure."""
+    from repeater.models import PostStatus
+
+    post, account = engine_post("facebook")
+    status = {"now": status_body("processing")}
+    script = [httpx.ReadTimeout("lost"), graph_error(400, 100, None, "Invalid upload phase")]
+    starts, _finishes, mock, publisher = engine_run(account, script, status)
+    with mock:
+        now = utcnow()
+        publisher.publish_post(db, post.id, now=now)
+        db.refresh(post)
+    assert post.status == PostStatus.PROCESSING
+    assert post.publish_state["video_id"] == "V1" and starts == ["V1"]
+
+
+def test_engine_resends_the_finish_for_the_same_video(db, engine_post, clock):
+    """The finish never landed: after the grace period poll() finishes the SAME video again."""
+    from repeater.models import PostStatus
+
+    post, account = engine_post("facebook")
+    status = {"now": status_body("ready")}  # processed, but never published
+    lost = [httpx.ReadTimeout("x")] * facebook.FINISH_ATTEMPTS
+    starts, finishes, mock, publisher = engine_run(account, lost, status)
+    with mock:
+        now = utcnow()
+        publisher.publish_post(db, post.id, now=now)
+        clock["t"] = SENT_AT + facebook.FINISH_RESEND_GRACE
+        publisher.poll_post(db, post.id, now=now + facebook.FINISH_RESEND_GRACE)
+        db.refresh(post)
+        assert post.status == PostStatus.PROCESSING
+        assert finishes == ["V1"] * (facebook.FINISH_ATTEMPTS + 1) and starts == ["V1"]
+        status["now"] = status_body("ready", publishing={"status": "complete", "publish_status": "published"})
+        publisher.poll_post(db, post.id, now=now + facebook.FINISH_RESEND_GRACE + timedelta(minutes=1))
+        db.refresh(post)
+    assert post.status == PostStatus.PUBLISHED and starts == ["V1"]

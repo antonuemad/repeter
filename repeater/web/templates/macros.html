@@ -23,7 +23,7 @@
 {% macro post_actions(post, actionable, next) %}
 {% if post.status in actionable %}
 <div class="actions">
-  {% if post.status == 'needs_attention' and (post.platform_post_id or post.publish_state) %}
+  {% if may_be_live(post) %}
   {# The upload may already be live: ask on a page that explains it instead of re-uploading blindly. #}
   <a class="button small" href="/schedule/{{ post.id }}/publish-now?next={{ next | urlencode }}">{{ t('schedule.publish_now') }}</a>
   {% else %}

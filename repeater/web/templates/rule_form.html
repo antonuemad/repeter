@@ -92,6 +92,8 @@
         {% endfor %}
       </select>
     </label>
+    {% if tiktok_unaudited %}<p class="muted small">{{ t('rules.tiktok_unaudited_note') }}</p>{% endif %}
+    {% if tiktok_account_public %}<div class="flash flash-warning small" role="alert">{{ t('rules.tiktok_unaudited_public') }}</div>{% endif %}
 
     <fieldset>
       <legend>{{ t('rules.tiktok_interactions') }}</legend>

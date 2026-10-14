@@ -16,7 +16,7 @@
 
 1. **Branding:**
    - App name: `Magic Lap Rotator` (بدون "YouTube" أو "YT" في الاسم)، وبريد الدعم.
-   - Application home page: `https://rotator.magic-lap.com`
+   - Application home page: **صفحة عامة على النطاق الموثّق** تصف التطبيق وتربط بـ `/privacy` و`/terms`، مثل `https://magic-lap.com/rotator` (أنشئها قبل التقديم). **لا تضع `https://rotator.magic-lap.com`**: للزائر بلا حساب يحوّله التطبيق (303) إلى صفحة الدخول، وتحقق العلامة التجارية في Google يشترط صفحة رئيسية "ظاهرة بلا تسجيل دخول، ثابتة، ولا تحوّل إلى عنوان آخر، وتعرض معلومات عن التطبيق" ويرفض الصفحة الواقعة خلف تسجيل الدخول (https://support.google.com/cloud/answer/13807376). نفس القاعدة طبقها تيكتوك ([01-tiktok.md](01-tiktok.md)). في وضع Testing/Internal لا يُطلب هذا؛ يلزم عند الانتقال إلى Production (القسم 4).
    - Privacy policy: `https://rotator.magic-lap.com/privacy`
    - Terms of service: `https://rotator.magic-lap.com/terms`
    - Authorized domains: `magic-lap.com`
@@ -58,5 +58,6 @@
 
 - سياسة الخصوصية يجب أن تذكر استخدام YouTube API Services ورابط سياسة Google وطريقة الإلغاء عبر https://myaccount.google.com/permissions (صفحة `/privacy` في Repeater تغطي ذلك).
 - "فصل الحساب" في اللوحة يلغي التوكن عند Google.
+- سياسة مطوري YouTube API تشترط أن تُحدَّث البيانات المخزّنة من YouTube (عنوان القناة، الصورة، معرفات الفيديوهات والروابط) أو تُحذف خلال 30 يومًا. Repeater يجدد بيانات قنوات يوتيوب المفعّلة كل 25 يومًا على الأكثر؛ النص الملزم لما يُحفظ ومدة حفظه هو صفحة `/privacy` في اللوحة.
 
 المراجع: https://developers.google.com/youtube/v3/docs/videos/insert ، https://developers.google.com/identity/protocols/oauth2 ، https://support.google.com/cloud/answer/15549945 ، https://developers.google.com/workspace/drive/api/guides/api-specific-auth ، https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification

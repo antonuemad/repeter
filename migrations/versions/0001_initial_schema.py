@@ -52,6 +52,8 @@ def upgrade() -> None:
     sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.Column('locale', sa.String(length=8), nullable=False),
     sa.Column('last_login_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('terms_accepted_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('terms_version', sa.String(length=32), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.PrimaryKeyConstraint('id'),

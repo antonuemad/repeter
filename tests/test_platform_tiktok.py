@@ -27,6 +27,7 @@ from repeater.platforms.base import (
     RemoteVideo,
     RestartPublish,
     RetryableError,
+    UnknownOutcomeError,
 )
 from repeater.timeutil import utcnow
 
@@ -35,6 +36,7 @@ GIB = 1024 * MIB
 ACCESS = "act.SECRET-access-token"
 REFRESH = "rft.SECRET-refresh-token"
 UPLOAD_URL = "https://open-upload.tiktokapis.com/video/?upload_id=67890&upload_token=SECRET-upload"
+PUBLIC_URL = "https://rotator.test/m/1/2/sig.mp4"
 
 
 # --------------------------------------------------------------------------- fixtures & helpers
@@ -51,6 +53,14 @@ def _no_sleep(monkeypatch):
     sleeps: list[float] = []
     monkeypatch.setattr(tt, "_sleep", sleeps.append)
     return sleeps
+
+
+@pytest.fixture(autouse=True)
+def _fresh_pull_cache():
+    """url_ownership_unverified is remembered per process: start every test without it."""
+    tt._pull_cache.unverified_until = 0.0
+    yield
+    tt._pull_cache.unverified_until = 0.0
 
 
 def ctx(
@@ -123,11 +133,20 @@ def direct_settings(**over) -> dict:
     return s
 
 
-def make_request(path: Path, settings: dict, *, caption: str = "Hello #magic", duration: float = 4.0):
+def make_request(
+    path: Path,
+    settings: dict,
+    *,
+    caption: str = "Hello #magic",
+    duration: float = 4.0,
+    public_url: str = "",
+    state: dict | None = None,
+):
+    """A request without a public_url, i.e. the FILE_UPLOAD path; pass PUBLIC_URL to let TikTok pull."""
     return PublishRequest(
         post_id=99,
         video_path=path,
-        public_url="https://rotator.test/m/1/2/sig.mp4",
+        public_url=public_url,
         size_bytes=path.stat().st_size if path.exists() else 1000,
         duration_s=duration,
         width=1080,
@@ -135,6 +154,7 @@ def make_request(path: Path, settings: dict, *, caption: str = "Hello #magic", d
         title="Hello",
         caption=caption,
         settings=settings,
+        state=state or {},
     )
 
 
@@ -768,7 +788,16 @@ def test_direct_publish_single_chunk(router, sample_video):
     assert put.content == sample_video.read_bytes()
 
     assert result.outcome == PublishOutcome.PROCESSING
-    assert result.state == {"publish_id": "v_pub_file~v2-1.1", "mode": "direct", "username": "magiclap"}
+    assert result.state == {
+        "publish_id": "v_pub_file~v2-1.1",
+        "mode": "direct",
+        "username": "magiclap",
+        "source": "FILE_UPLOAD",
+        "init_at": result.state["init_at"],
+        "privacy_level": "PUBLIC_TO_EVERYONE",
+        "video_size": size,
+    }
+    assert abs(datetime.fromisoformat(result.state["init_at"]) - utcnow()) < timedelta(seconds=30)
     assert result.poll_after_seconds == 30
     assert routes["creator"].call_count == 1
 
@@ -872,7 +901,14 @@ def test_inbox_publish_sends_source_info_only(router, sample_video):
     put = routes["upload"].calls.last.request
     assert put.headers["content-range"] == f"bytes 0-{size - 1}/{size}"
     assert put.headers["content-type"] == "video/mp4"
-    assert result.state == {"publish_id": "v_inbox_file~v2-1.2", "mode": "inbox", "username": "ml_user"}
+    assert result.state == {
+        "publish_id": "v_inbox_file~v2-1.2",
+        "mode": "inbox",
+        "username": "ml_user",
+        "source": "FILE_UPLOAD",
+        "init_at": result.state["init_at"],
+        "video_size": size,
+    }
 
 
 INIT_ERRORS = [
@@ -975,10 +1011,12 @@ def test_chunk_5xx_is_retried_then_succeeds(router, sample_video, _no_sleep):
     assert a.headers["content-range"] == b.headers["content-range"]
 
 
-def test_chunk_persistent_failure_is_retryable(router, sample_video):
+def test_chunk_persistent_failure_before_the_last_chunk_is_retryable(router, tmp_path):
+    video = write_file(tmp_path, 12 * MIB)
     routes = mock_publish_flow(router, upload_statuses=(500, 500, 500))
-    with pytest.raises(RetryableError):
-        tt.publisher.publish(ctx(), make_request(sample_video, direct_settings()))
+    with pytest.raises(RetryableError) as ei:
+        tt.TikTokPublisher(chunk_bytes=5 * MIB).publish(ctx(), make_request(video, direct_settings()))
+    assert not isinstance(ei.value, UnknownOutcomeError)  # the last byte never left: nothing can be live
     assert routes["upload"].call_count == tt.CHUNK_ATTEMPTS
 
 
@@ -1108,7 +1146,7 @@ def test_poll_processing(router, status):
         ("spam_risk", PermanentError),
         ("spam_risk_user_banned_from_posting", PermanentError),
         ("auth_removed", AuthError),
-        ("spam_risk_too_many_posts", RateLimitedError),
+        ("spam_risk_too_many_posts", RestartPublish),
         ("brand_new_reason", PermanentError),
         ("", PermanentError),
     ],
@@ -1140,6 +1178,428 @@ def test_poll_without_publish_id(router):
     with pytest.raises(PermanentError):
         tt.publisher.poll(ctx(), {"mode": "direct"})
     assert not router.calls
+
+
+# --------------------------------------------------------------------------- PULL_FROM_URL (api-tiktok-youtube-3)
+
+
+def pull_flow(router, *, creator: dict | None = None):
+    return {
+        "creator": router.post(tt.CREATOR_INFO_URL).mock(return_value=ok(creator or creator_payload())),
+        "init": router.post(tt.DIRECT_INIT_URL).mock(return_value=ok({"publish_id": "v_pub_url~v2-1.9"})),
+        "inbox": router.post(tt.INBOX_INIT_URL).mock(return_value=ok({"publish_id": "v_inbox_url~v2-1.8"})),
+        "upload": router.put(url__startswith="https://open-upload.tiktokapis.com/video/").mock(
+            return_value=httpx.Response(201)
+        ),
+    }
+
+
+def test_direct_publish_lets_tiktok_pull_the_signed_url(router, sample_video):
+    routes = pull_flow(router)
+    req = make_request(sample_video, direct_settings(), public_url=PUBLIC_URL)
+
+    result = tt.publisher.publish(ctx(), req)
+
+    init = body(routes["init"].calls.last.request)
+    assert init["source_info"] == {"source": "PULL_FROM_URL", "video_url": PUBLIC_URL}
+    assert init["post_info"]["privacy_level"] == "PUBLIC_TO_EVERYONE"
+    assert not routes["upload"].called  # no byte of the file is sent by Repeater
+    assert result.outcome == PublishOutcome.PROCESSING and result.poll_after_seconds == 30
+    assert result.state["publish_id"] == "v_pub_url~v2-1.9" and result.state["source"] == "PULL_FROM_URL"
+    assert "video_size" not in result.state
+
+
+def test_inbox_publish_pulls_from_the_signed_url_too(router, sample_video):
+    routes = pull_flow(router)
+    result = tt.publisher.publish(
+        ctx(username="ml_user"), make_request(sample_video, {"mode": "inbox"}, public_url=PUBLIC_URL)
+    )
+    assert body(routes["inbox"].calls.last.request) == {
+        "source_info": {"source": "PULL_FROM_URL", "video_url": PUBLIC_URL}
+    }
+    assert not routes["upload"].called and not routes["creator"].called
+    assert result.state["mode"] == "inbox" and result.state["source"] == "PULL_FROM_URL"
+
+
+@pytest.mark.parametrize("url", ["", "http://localhost:8000/m/1/2/sig.mp4"])
+def test_urls_tiktok_cannot_pull_use_file_upload(router, sample_video, url):
+    routes = mock_publish_flow(router)
+    tt.publisher.publish(ctx(), make_request(sample_video, direct_settings(), public_url=url))
+    assert body(routes["init"].calls.last.request)["source_info"]["source"] == "FILE_UPLOAD"
+    assert routes["upload"].called
+
+
+def unverified_then_file_flow(router):
+    routes = mock_publish_flow(router)
+    routes["init"].mock(
+        side_effect=[
+            api_error("url_ownership_unverified", 403),
+            ok({"publish_id": "v_pub_file~v2-1.1", "upload_url": UPLOAD_URL}),
+            ok({"publish_id": "v_pub_file~v2-1.5", "upload_url": UPLOAD_URL}),
+            ok({"publish_id": "v_pub_url~v2-1.7"}),
+        ]
+    )
+    routes["upload"].mock(return_value=httpx.Response(201))
+    return routes
+
+
+def test_unverified_url_prefix_falls_back_to_file_upload_and_is_remembered(router, sample_video, monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(tt, "_monotonic", lambda: clock[0])
+    routes = unverified_then_file_flow(router)
+    req = make_request(sample_video, direct_settings(), public_url=PUBLIC_URL)
+
+    first = tt.publisher.publish(ctx(), req)
+
+    sources = [body(c.request)["source_info"]["source"] for c in routes["init"].calls]
+    assert sources == ["PULL_FROM_URL", "FILE_UPLOAD"]
+    assert routes["upload"].call_count == 1 and routes["creator"].call_count == 1
+    assert first.state["publish_id"] == "v_pub_file~v2-1.1" and first.state["source"] == "FILE_UPLOAD"
+
+    clock[0] += 60  # later posts of this process go straight to FILE_UPLOAD
+    tt.publisher.publish(ctx(), req)
+    sources = [body(c.request)["source_info"]["source"] for c in routes["init"].calls]
+    assert sources == ["PULL_FROM_URL", "FILE_UPLOAD", "FILE_UPLOAD"]
+
+    clock[0] += tt.PULL_UNVERIFIED_RETRY_SECONDS  # verifying the prefix needs no restart
+    again = tt.publisher.publish(ctx(), req)
+    assert body(routes["init"].calls.last.request)["source_info"]["source"] == "PULL_FROM_URL"
+    assert again.state["source"] == "PULL_FROM_URL"
+
+
+def test_other_init_refusals_do_not_trigger_the_file_fallback(router, sample_video):
+    routes = pull_flow(router)
+    routes["init"].mock(return_value=api_error("spam_risk_too_many_posts", 403))
+    with pytest.raises(RateLimitedError):
+        tt.publisher.publish(ctx(), make_request(sample_video, direct_settings(), public_url=PUBLIC_URL))
+    assert routes["init"].call_count == 1 and not routes["upload"].called
+    assert tt._pull_cache.unverified_until == 0.0
+
+
+def test_lost_answer_to_a_pull_init_may_be_live_and_is_not_retried(router, sample_video):
+    routes = pull_flow(router)
+    routes["init"].mock(side_effect=httpx.ReadTimeout("slow"))
+    with pytest.raises(UnknownOutcomeError) as ei:
+        tt.publisher.publish(ctx(), make_request(sample_video, direct_settings(), public_url=PUBLIC_URL))
+    assert ei.value.state == {}  # nothing to poll with: the engine reports "may be live"
+    assert "ReadTimeout" not in ei.value.message or PUBLIC_URL not in ei.value.message
+    assert PUBLIC_URL not in ei.value.message and ACCESS not in ei.value.message
+
+
+def test_pull_init_that_provably_never_arrived_is_a_plain_retry(router, sample_video):
+    routes = pull_flow(router)
+    routes["init"].mock(side_effect=httpx.ConnectError("refused"))
+    with pytest.raises(RetryableError) as ei:
+        tt.publisher.publish(ctx(), make_request(sample_video, direct_settings(), public_url=PUBLIC_URL))
+    assert not isinstance(ei.value, UnknownOutcomeError)
+
+
+def test_pull_init_answered_without_a_publish_id_may_be_live(router, sample_video):
+    routes = pull_flow(router)
+    routes["init"].mock(return_value=ok({}))
+    with pytest.raises(UnknownOutcomeError):
+        tt.publisher.publish(ctx(), make_request(sample_video, direct_settings(), public_url=PUBLIC_URL))
+
+
+# --------------------------------------------------------------------------- unknown final chunk (api-tiktok-youtube-2)
+
+LOST_FINAL = [
+    pytest.param([httpx.ReadTimeout("lost"), httpx.Response(404)], id="reply-lost-then-404"),
+    pytest.param([httpx.ReadTimeout("lost"), httpx.Response(403)], id="reply-lost-then-403"),
+    pytest.param([httpx.ReadTimeout("lost"), httpx.Response(416)], id="reply-lost-then-416-without-range"),
+    pytest.param([httpx.ReadTimeout("lost"), httpx.Response(400)], id="reply-lost-then-400"),
+    pytest.param([httpx.ReadTimeout("lost")] * 3, id="reply-lost-three-times"),
+    pytest.param([httpx.Response(503)] * 3, id="server-error-three-times"),
+    pytest.param([httpx.ReadError("reset"), httpx.Response(429)], id="reply-lost-then-throttled"),
+]
+
+
+@pytest.mark.parametrize("answers", LOST_FINAL)
+def test_unclear_final_chunk_is_an_unknown_outcome_never_a_second_post(router, sample_video, answers):
+    routes = mock_publish_flow(router)
+    routes["upload"].mock(side_effect=answers)
+
+    with pytest.raises(UnknownOutcomeError) as ei:
+        tt.publisher.publish(ctx(), make_request(sample_video, direct_settings()))
+
+    err = ei.value
+    size = sample_video.stat().st_size
+    assert err.state == {
+        "publish_id": "v_pub_file~v2-1.1",
+        "mode": "direct",
+        "username": "magiclap",
+        "source": "FILE_UPLOAD",
+        "init_at": err.state["init_at"],
+        "privacy_level": "PUBLIC_TO_EVERYONE",
+        "video_size": size,
+    }
+    assert routes["init"].call_count == 1
+    assert "SECRET-upload" not in err.message and "SECRET-upload" not in str(err)
+
+    # The engine saves the state and polls: TikTok says what happened, no second init.
+    router.post(tt.STATUS_URL).mock(
+        return_value=status_response(status="PUBLISH_COMPLETE", publicaly_available_post_id=[55])
+    )
+    result = tt.publisher.poll(ctx(), err.state)
+    assert result.outcome == PublishOutcome.PUBLISHED and result.platform_post_id == "55"
+    assert routes["init"].call_count == 1
+
+
+@pytest.mark.parametrize("failure", [httpx.ConnectError("refused"), httpx.WriteError("reset")])
+def test_final_chunk_that_never_left_is_a_plain_retry(router, sample_video, failure):
+    routes = mock_publish_flow(router)
+    routes["upload"].mock(side_effect=[failure] * 3)
+    with pytest.raises(RetryableError) as ei:
+        tt.publisher.publish(ctx(), make_request(sample_video, direct_settings()))
+    assert not isinstance(ei.value, UnknownOutcomeError)
+
+
+def test_unclear_last_chunk_of_a_multi_chunk_upload_is_an_unknown_outcome(router, tmp_path):
+    video = write_file(tmp_path, 11 * MIB)
+    routes = mock_publish_flow(router)
+    routes["upload"].mock(side_effect=[httpx.Response(206)] + [httpx.ReadTimeout("lost")] * 3)
+    with pytest.raises(UnknownOutcomeError) as ei:
+        tt.TikTokPublisher(chunk_bytes=5 * MIB).publish(ctx(), make_request(video, direct_settings()))
+    assert ei.value.state["video_size"] == 11 * MIB and routes["init"].call_count == 1
+
+
+def test_publish_with_an_earlier_publish_id_asks_tiktok_instead_of_posting_again(router, sample_video):
+    routes = mock_publish_flow(router)
+    status = router.post(tt.STATUS_URL).mock(return_value=status_response(status="PROCESSING_UPLOAD"))
+    state = {**STATE, "source": "FILE_UPLOAD", "video_size": 100, "init_at": utcnow().isoformat()}
+
+    result = tt.publisher.publish(ctx(), make_request(sample_video, direct_settings(), state=state))
+
+    assert result.outcome == PublishOutcome.PROCESSING and result.state == state
+    assert body(status.calls.last.request) == {"publish_id": STATE["publish_id"]}
+    assert not routes["init"].called and not routes["upload"].called
+
+
+def test_publish_starts_over_only_when_tiktok_dropped_the_earlier_upload(router, sample_video):
+    routes = mock_publish_flow(router)
+    router.post(tt.STATUS_URL).mock(
+        return_value=status_response(status="FAILED", fail_reason="video_pull_failed")
+    )
+    result = tt.publisher.publish(
+        ctx(), make_request(sample_video, direct_settings(), state={**STATE, "source": "PULL_FROM_URL"})
+    )
+    assert routes["init"].call_count == 1 and result.state["publish_id"] == "v_pub_file~v2-1.1"
+
+
+def test_publish_does_not_start_over_after_a_final_failure_of_the_earlier_upload(router, sample_video):
+    routes = mock_publish_flow(router)
+    router.post(tt.STATUS_URL).mock(return_value=status_response(status="FAILED", fail_reason="spam_risk"))
+    with pytest.raises(PermanentError):
+        tt.publisher.publish(ctx(), make_request(sample_video, direct_settings(), state=dict(STATE)))
+    assert not routes["init"].called
+
+
+def upload_state(age: timedelta, **over) -> dict:
+    return {
+        **STATE,
+        "source": "FILE_UPLOAD",
+        "video_size": 1000,
+        "init_at": (utcnow() - age).isoformat(),
+        **over,
+    }
+
+
+def test_poll_restarts_an_upload_that_never_received_all_bytes_after_the_url_lifetime(router):
+    router.post(tt.STATUS_URL).mock(
+        return_value=status_response(status="PROCESSING_UPLOAD", uploaded_bytes=0)
+    )
+    with pytest.raises(RestartPublish) as ei:
+        tt.publisher.poll(ctx(), upload_state(timedelta(minutes=61)))
+    assert ei.value.code == "upload_incomplete" and ei.value.retry_after == tt.FAILED_RETRY_AFTER
+    assert "SECRET" not in ei.value.message
+
+
+def test_poll_keeps_waiting_while_the_upload_url_is_still_valid_or_all_bytes_arrived(router):
+    route = router.post(tt.STATUS_URL).mock(
+        return_value=status_response(status="PROCESSING_UPLOAD", uploaded_bytes=0)
+    )
+    assert tt.publisher.poll(ctx(), upload_state(timedelta(minutes=59))).outcome == PublishOutcome.PROCESSING
+    route.mock(return_value=status_response(status="PROCESSING_UPLOAD", uploaded_bytes=1000))
+    assert tt.publisher.poll(ctx(), upload_state(timedelta(hours=3))).outcome == PublishOutcome.PROCESSING
+    route.mock(return_value=status_response(status="PROCESSING_UPLOAD"))
+    state = upload_state(timedelta(hours=3))
+    del state["init_at"]  # an old state without init_at is never restarted on a guess
+    assert tt.publisher.poll(ctx(), state).outcome == PublishOutcome.PROCESSING
+    route.mock(return_value=status_response(status="PROCESSING_DOWNLOAD"))
+    pulled = upload_state(timedelta(hours=3), source="PULL_FROM_URL")
+    assert (
+        tt.publisher.poll(ctx(), pulled).outcome == PublishOutcome.PROCESSING
+    )  # TikTok times pulls out itself
+
+
+# --------------------------------------------------------------------------- daily cap at status time (api-tiktok-youtube-4)
+
+
+def test_failed_with_the_daily_cap_restarts_the_post_after_the_cap_window(router):
+    router.post(tt.STATUS_URL).mock(
+        return_value=status_response(status="FAILED", fail_reason="spam_risk_too_many_posts")
+    )
+    with pytest.raises(RestartPublish) as ei:
+        tt.publisher.poll(ctx(), STATE)
+    err = ei.value
+    assert not isinstance(err, RateLimitedError)  # FAILED is final: "poll again" would hide a lost post
+    assert err.code == "spam_risk_too_many_posts" and err.retry_after == tt.DAILY_CAP_RETRY_AFTER
+    assert "daily posting limit" in err.message
+
+
+# --------------------------------------------------------------------------- post id after moderation (api-tiktok-youtube-missed-3)
+
+MODERATION_T0 = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
+PUBLIC_STATE = {
+    **STATE,
+    "source": "PULL_FROM_URL",
+    "init_at": MODERATION_T0.isoformat(),
+    "privacy_level": "PUBLIC_TO_EVERYONE",
+}
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    now = [MODERATION_T0]
+    monkeypatch.setattr(tt, "utcnow", lambda: now[0])
+
+    def at(minutes: float) -> None:
+        now[0] = MODERATION_T0 + timedelta(minutes=minutes)
+
+    return at
+
+
+def test_public_post_waits_for_moderation_then_reports_the_post_id_and_link(router, clock):
+    route = router.post(tt.STATUS_URL).mock(
+        return_value=status_response(status="PUBLISH_COMPLETE", publicaly_available_post_id=[])
+    )
+    clock(3)
+    waiting = tt.publisher.poll(ctx(), PUBLIC_STATE)
+    assert waiting.outcome == PublishOutcome.PROCESSING
+    assert waiting.platform_post_id is None and waiting.permalink is None
+    assert waiting.poll_after_seconds == tt.POST_ID_POLL_SECONDS
+    assert waiting.state == {
+        **PUBLIC_STATE,
+        "complete_seen_at": (MODERATION_T0 + timedelta(minutes=3)).isoformat(),
+    }
+    assert "moderation" in waiting.message
+
+    clock(8)  # moderation finished
+    route.mock(
+        return_value=status_response(
+            status="PUBLISH_COMPLETE", publicaly_available_post_id=[7312345678901234567]
+        )
+    )
+    done = tt.publisher.poll(ctx(), waiting.state)
+    assert done.outcome == PublishOutcome.PUBLISHED
+    assert done.platform_post_id == "7312345678901234567"
+    assert done.permalink == "https://www.tiktok.com/@magiclap/video/7312345678901234567"
+
+
+def test_the_wait_for_the_post_id_is_bounded_and_ends_published(router, clock):
+    router.post(tt.STATUS_URL).mock(
+        return_value=status_response(status="PUBLISH_COMPLETE", publicaly_available_post_id=[])
+    )
+    clock(3)
+    state = tt.publisher.poll(ctx(), PUBLIC_STATE).state
+    clock(3 + 29)
+    assert tt.publisher.poll(ctx(), state).outcome == PublishOutcome.PROCESSING
+    clock(3 + 31)
+    final = tt.publisher.poll(ctx(), state)
+    assert final.outcome == PublishOutcome.PUBLISHED  # live, just without an id
+    assert final.platform_post_id is None and "moderation" in final.message
+
+
+def test_the_post_id_wait_never_outlasts_the_engines_two_hour_limit(router, clock):
+    router.post(tt.STATUS_URL).mock(
+        return_value=status_response(status="PUBLISH_COMPLETE", publicaly_available_post_id=[])
+    )
+    clock(95)  # TikTok took 95 minutes to finish the upload and publish
+    state = tt.publisher.poll(ctx(), PUBLIC_STATE).state
+    clock(99)
+    assert tt.publisher.poll(ctx(), state).outcome == PublishOutcome.PROCESSING
+    clock(101)  # 100 minutes after init: stop, well before the 2 h limit
+    assert tt.publisher.poll(ctx(), state).outcome == PublishOutcome.PUBLISHED
+
+
+def test_post_id_in_the_completing_poll_is_reported_at_once(router, clock):
+    router.post(tt.STATUS_URL).mock(
+        return_value=status_response(status="PUBLISH_COMPLETE", publicaly_available_post_id=[321])
+    )
+    clock(2)
+    result = tt.publisher.poll(ctx(), PUBLIC_STATE)
+    assert result.outcome == PublishOutcome.PUBLISHED and result.platform_post_id == "321"
+
+
+@pytest.mark.parametrize("privacy", ["SELF_ONLY", "FOLLOWER_OF_CREATOR", "MUTUAL_FOLLOW_FRIENDS", None])
+def test_posts_that_cannot_get_an_id_are_published_without_waiting(router, clock, privacy):
+    router.post(tt.STATUS_URL).mock(
+        return_value=status_response(status="PUBLISH_COMPLETE", publicaly_available_post_id=[])
+    )
+    clock(2)
+    result = tt.publisher.poll(ctx(), {**PUBLIC_STATE, "privacy_level": privacy})
+    assert result.outcome == PublishOutcome.PUBLISHED and result.platform_post_id is None
+
+
+def test_waiting_for_the_post_id_never_posts_again(router, clock, sample_video):
+    routes = mock_publish_flow(router)
+    router.post(tt.STATUS_URL).mock(
+        return_value=status_response(status="PUBLISH_COMPLETE", publicaly_available_post_id=[])
+    )
+    clock(3)
+    waiting = tt.publisher.publish(ctx(), make_request(sample_video, direct_settings(), state=PUBLIC_STATE))
+    assert waiting.outcome == PublishOutcome.PROCESSING and waiting.state["complete_seen_at"]
+    assert not routes["init"].called and not routes["upload"].called
+
+
+# --------------------------------------------------------------------------- unaudited apps (api-tiktok-youtube-7)
+
+
+def test_unaudited_guidance_requires_a_private_account_and_only_me():
+    text = tt._CODE_EXPLANATIONS["unaudited_client_can_only_post_to_private_accounts"]
+    assert "private" in text and "SELF_ONLY" in text and "both" in text
+    assert " or " not in text  # it used to offer one of the two conditions as enough
+
+
+def test_unaudited_init_refusal_names_both_conditions(router, sample_video):
+    routes = mock_publish_flow(router)
+    routes["init"].mock(return_value=api_error("unaudited_client_can_only_post_to_private_accounts", 403))
+    with pytest.raises(PermanentError) as ei:
+        tt.publisher.publish(ctx(), make_request(sample_video, direct_settings(privacy_level="SELF_ONLY")))
+    assert "private" in ei.value.message and "SELF_ONLY" in ei.value.message
+
+
+def test_unaudited_app_accepts_only_the_only_me_privacy_level(sample_video, monkeypatch):
+    monkeypatch.setattr(tt, "_client_audited", lambda: False)
+    problems = tt.publisher.validate(ctx(), make_request(sample_video, direct_settings()))
+    assert len(problems) == 1 and "SELF_ONLY" in problems[0] and "private" in problems[0]
+    assert (
+        tt.publisher.validate(ctx(), make_request(sample_video, direct_settings(privacy_level="SELF_ONLY")))
+        == []
+    )
+    assert tt.publisher.validate(ctx(), make_request(sample_video, {"mode": "inbox"})) == []
+    monkeypatch.setattr(tt, "_client_audited", lambda: True)
+    assert tt.publisher.validate(ctx(), make_request(sample_video, direct_settings())) == []
+
+
+def test_audit_state_follows_the_setting_and_defaults_to_unaudited(monkeypatch):
+    from repeater.config import Settings, get_settings
+
+    assert Settings.model_fields["tiktok_audited"].default is False
+    monkeypatch.setattr(get_settings(), "tiktok_audited", False)
+    assert tt._client_audited() is False
+    monkeypatch.setattr(get_settings(), "tiktok_audited", True)
+    assert tt._client_audited() is True
+
+
+def test_pull_publish_logs_no_signed_url(router, sample_video, caplog):
+    import logging
+
+    caplog.set_level(logging.DEBUG, logger="repeater.platforms.tiktok")
+    pull_flow(router)
+    tt.publisher.publish(ctx(), make_request(sample_video, direct_settings(), public_url=PUBLIC_URL))
+    lines = [r.getMessage() for r in caplog.records if r.name == "repeater.platforms.tiktok"]
+    assert lines and all("sig.mp4" not in line and ACCESS not in line for line in lines)
 
 
 # --------------------------------------------------------------------------- listing

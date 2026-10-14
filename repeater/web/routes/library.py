@@ -315,7 +315,7 @@ def _may_exist_on_platform(post: ScheduledPost | None) -> str | None:
         return None
     if post.status == PostStatus.PUBLISHED:
         return "published"
-    if post.status == PostStatus.NEEDS_ATTENTION and (post.platform_post_id or post.publish_state):
+    if actions.may_be_live(post):
         return "uncertain"
     return None
 

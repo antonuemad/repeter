@@ -2,6 +2,12 @@
 
 Source config: {"folder_id": "<id or full folder URL>"}. The account is a ConnectedAccount with
 platform gdrive whose Google token carries a scope that can read file content.
+
+What counts as new is decided by the importer from file ids alone: Drive's createdTime is when a
+file was created, not when it was put in the folder, so a video moved into the folder is older
+than the source. The listing therefore returns the whole folder (up to FULL_LISTING_LIMIT files),
+and shortcuts to videos (the only way to show someone else's video in your own folder) are
+listed too.
 """
 
 from __future__ import annotations
@@ -29,10 +35,18 @@ from repeater.timeutil import ensure_aware
 
 API_BASE = "https://www.googleapis.com/drive/v3"
 FOLDER_MIME = "application/vnd.google-apps.folder"
-LIST_FIELDS = "nextPageToken,files(id,name,mimeType,createdTime,size,description,webViewLink)"
+SHORTCUT_MIME = "application/vnd.google-apps.shortcut"
+LIST_FIELDS = (
+    "nextPageToken,files(id,name,mimeType,createdTime,size,description,webViewLink,"
+    "shortcutDetails(targetId,targetMimeType,targetResourceKey))"
+)
 FOLDER_FIELDS = "id,name,mimeType,trashed"
-PAGE_SIZE_MAX = 100
-MAX_PAGES = 10
+SHORTCUT_FIELDS = "id,mimeType,shortcutDetails(targetId,targetMimeType,targetResourceKey)"
+PAGE_SIZE_MAX = 1000  # files.list coerces larger values to 1000
+MAX_PAGES = 6
+# The importer asks for this many files so the listing covers the whole folder.
+FULL_LISTING_LIMIT = PAGE_SIZE_MAX * MAX_PAGES
+RESOURCE_KEYS_HEADER = "X-Goog-Drive-Resource-Keys"
 API_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 MAX_DOWNLOAD_BYTES = 4 * 1024**3
 
@@ -79,24 +93,34 @@ class DriveLister:
         limit: int = 50,
         config: dict | None = None,
     ) -> list[RemoteVideo]:
-        """Newest-first video files directly inside the configured folder."""
+        """Newest-created-first video files (and shortcuts to videos) directly inside the configured
+        folder. `since` is accepted for the MediaLister protocol but not used: createdTime says when
+        a file was created, not when it entered the folder, so nothing may be cut off by it."""
+        del since
         if limit <= 0:
             return []
         folder_id = parse_folder_id((config or {}).get("folder_id"))
-        since = ensure_aware(since)
         headers = _auth(account)
         with http.client(timeout=API_TIMEOUT) as c:
-            files = _list_folder(c, headers, folder_id, limit, since)
+            files = _list_folder(c, headers, folder_id, limit)
             if not files:
                 _check_folder(c, headers, folder_id)
         return [rv for rv in (_remote_video(f) for f in files) if rv is not None][:limit]
 
     def download(self, account: AccountContext, remote: RemoteVideo, dest: Path) -> Path:
-        url = remote.download_url or file_download_url(remote.external_id)
+        headers = _auth(account)
+        url = remote.download_url
+        if not url:
+            target_id, resource_key = self._resolve_download_target(account, remote)
+            url = file_download_url(target_id)
+            if resource_key:
+                headers[RESOURCE_KEYS_HEADER] = f"{target_id}/{resource_key}"
+        elif remote.extra.get("resource_key") and remote.extra.get("download_id"):
+            headers[RESOURCE_KEYS_HEADER] = f"{remote.extra['download_id']}/{remote.extra['resource_key']}"
         if not url.startswith(f"{API_BASE}/files/"):
             raise PermanentError("Refusing to download a Google Drive file from an unexpected address.")
         try:
-            return http.stream_download(url, dest, headers=_auth(account), max_bytes=MAX_DOWNLOAD_BYTES)
+            return http.stream_download(url, dest, headers=headers, max_bytes=MAX_DOWNLOAD_BYTES)
         except AuthError as exc:
             raise AuthError(
                 f"Google Drive refused the download. {RECONNECT_HINT}", status=exc.status
@@ -104,16 +128,38 @@ class DriveLister:
         except PermanentError as exc:
             raise _download_error(exc) from None
 
+    def _resolve_download_target(
+        self, account: AccountContext, remote: RemoteVideo
+    ) -> tuple[str, str | None]:
+        """(file id to download, resource key) for a listing entry whose download link was not
+        kept (a retried import): a shortcut points at its target, any other file is itself."""
+        file_id = str(remote.external_id)
+        with http.client(timeout=API_TIMEOUT) as c:
+            meta = _get_json(
+                c,
+                f"{API_BASE}/files/{quote(file_id, safe='')}",
+                {"fields": SHORTCUT_FIELDS, "supportsAllDrives": "true"},
+                _auth(account),
+                "file lookup",
+            )
+        details = meta.get("shortcutDetails")
+        if meta.get("mimeType") == SHORTCUT_MIME and isinstance(details, dict) and details.get("targetId"):
+            return str(details["targetId"]), details.get("targetResourceKey") or None
+        return file_id, None
+
 
 def _auth(account: AccountContext) -> dict[str, str]:
     return {"Authorization": f"Bearer {account.tokens.access_token}"}
 
 
 def _list_folder(
-    c: httpx.Client, headers: dict[str, str], folder_id: str, limit: int, since: datetime | None
+    c: httpx.Client, headers: dict[str, str], folder_id: str, limit: int
 ) -> list[dict[str, Any]]:
     params: dict[str, Any] = {
-        "q": f"'{folder_id}' in parents and trashed = false and mimeType contains 'video/'",
+        "q": (
+            f"'{folder_id}' in parents and trashed = false and "
+            f"(mimeType contains 'video/' or mimeType = '{SHORTCUT_MIME}')"
+        ),
         "orderBy": "createdTime desc",
         "fields": LIST_FIELDS,
         "pageSize": min(limit, PAGE_SIZE_MAX),
@@ -124,9 +170,6 @@ def _list_folder(
     for _ in range(MAX_PAGES):
         data = _get_json(c, f"{API_BASE}/files", params, headers, "folder listing")
         for item in data.get("files") or []:
-            created = _parse_time(item.get("createdTime"))
-            if since and created and created < since:
-                return out  # ordered newest first: everything after this is older
             out.append(item)
             if len(out) >= limit:
                 return out
@@ -220,15 +263,37 @@ def _download_error(exc: PermanentError) -> PlatformError:
     return exc
 
 
-def _remote_video(item: dict[str, Any]) -> RemoteVideo | None:
-    file_id = item.get("id")
-    if not file_id or not str(item.get("mimeType") or "").startswith("video/"):
+def _video_target(item: dict[str, Any]) -> tuple[str, str, str | None] | None:
+    """(file id to download, its mime type, resource key) for a video file or a shortcut to one."""
+    file_id, mime = item.get("id"), str(item.get("mimeType") or "")
+    if not file_id:
         return None
+    if mime.startswith("video/"):
+        return str(file_id), mime, None
+    details = item.get("shortcutDetails")
+    if mime == SHORTCUT_MIME and isinstance(details, dict):
+        target_id, target_mime = details.get("targetId"), str(details.get("targetMimeType") or "")
+        if target_id and target_mime.startswith("video/"):
+            return str(target_id), target_mime, details.get("targetResourceKey") or None
+    return None
+
+
+def _remote_video(item: dict[str, Any]) -> RemoteVideo | None:
+    target = _video_target(item)
+    if target is None:
+        return None
+    file_id = item["id"]
+    download_id, mime_type, resource_key = target
     name = str(item.get("name") or "")
     stem = Path(name).stem if name else ""
     description = str(item.get("description") or "").strip()
     ext = Path(name).suffix.lower().lstrip(".")
-    extra: dict[str, Any] = {"name": name, "mime_type": item.get("mimeType")}
+    extra: dict[str, Any] = {"name": name, "mime_type": mime_type}
+    if download_id != str(file_id):
+        extra["download_id"] = download_id  # a shortcut: the bytes live in its target
+    if resource_key:
+        extra["resource_key"] = resource_key
+        extra["download_id"] = download_id
     if ext in _VIDEO_EXTENSIONS:
         extra["ext"] = ext
     size = item.get("size")
@@ -240,7 +305,7 @@ def _remote_video(item: dict[str, Any]) -> RemoteVideo | None:
         title=stem,
         caption=description or stem,
         permalink=item.get("webViewLink") or None,
-        download_url=file_download_url(str(file_id)),
+        download_url=file_download_url(download_id),
         extra=extra,
     )
 

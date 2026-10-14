@@ -167,6 +167,79 @@ def test_tiktok_disconnect_revokes_when_the_other_connection_is_gone(web_owner, 
     assert db.get(ConnectedAccount, unrelated.id).status == AccountStatus.ACTIVE
 
 
+# --------------------------------------------------------------------------- Google grant sharing
+
+
+def _google_pair(make_account, *, yt_sub, drive_sub, drive_workspace_id=None):
+    """A YouTube channel and a Drive login with DIFFERENT refresh tokens (every connect issues a
+    new one) and the given Google identities."""
+    youtube = make_account(
+        "youtube",
+        refresh_token="rt-youtube",
+        extra={"channel_id": "UC1", **({"google_sub": yt_sub} if yt_sub else {})},
+    )
+    drive = make_account(
+        "gdrive",
+        refresh_token="rt-drive",
+        workspace_id=drive_workspace_id,
+        extra={"email": "a@b.c", **({"google_sub": drive_sub} if drive_sub else {})},
+    )
+    return youtube, drive
+
+
+def test_disconnecting_drive_keeps_the_youtube_grant_of_the_same_google_user(web_owner, db, make_account):
+    """Google revokes every scope the user gave the project when any one token is revoked."""
+    youtube, drive = _google_pair(make_account, yt_sub="g-1", drive_sub="g-1")
+    fake = FakeRevoke("google")
+    with override("oauth", "google", fake):
+        resp = post(web_owner, f"/accounts/{drive.id}/disconnect", page="/accounts")
+    assert resp.status_code == 303
+    assert fake.revoked == []  # Google was not asked to revoke
+    db.expire_all()
+    assert db.get(ConnectedAccount, drive.id).token_enc is None
+    assert db.get(ConnectedAccount, youtube.id).status == AccountStatus.ACTIVE
+    assert db.get(ConnectedAccount, youtube.id).token_enc is not None
+
+
+def test_google_grant_is_revoked_when_the_other_account_is_another_google_user(web_owner, db, make_account):
+    _, drive = _google_pair(make_account, yt_sub="g-1", drive_sub="g-2")
+    fake = FakeRevoke("google")
+    with override("oauth", "google", fake):
+        post(web_owner, f"/accounts/{drive.id}/disconnect", page="/accounts")
+    assert fake.revoked == [drive.external_id]
+
+
+def test_google_grant_is_shared_across_workspaces(web_owner, db, make_account):
+    other = Workspace(name="Other workspace")
+    db.add(other)
+    db.commit()
+    _, drive = _google_pair(make_account, yt_sub="g-1", drive_sub="g-1")
+    foreign_channel = make_account("youtube", workspace_id=other.id, extra={"google_sub": "g-1"})
+    fake = FakeRevoke("google")
+    with override("oauth", "google", fake):
+        post(web_owner, f"/accounts/{drive.id}/disconnect", page="/accounts")
+    assert fake.revoked == []
+    db.expire_all()
+    assert db.get(ConnectedAccount, foreign_channel.id).status == AccountStatus.ACTIVE
+
+
+def test_legacy_google_accounts_without_an_identity_are_never_revoked_while_another_one_is_active(
+    web_owner, db, make_account
+):
+    youtube, drive = _google_pair(make_account, yt_sub=None, drive_sub=None)
+    fake = FakeRevoke("google")
+    with override("oauth", "google", fake):
+        post(web_owner, f"/accounts/{drive.id}/disconnect", page="/accounts")
+    assert fake.revoked == []
+    db.expire_all()
+    assert db.get(ConnectedAccount, drive.id).token_enc is None
+    assert db.get(ConnectedAccount, youtube.id).status == AccountStatus.ACTIVE
+    # The last Google connection does revoke (nothing else depends on the grant any more).
+    with override("oauth", "google", fake):
+        post(web_owner, f"/accounts/{youtube.id}/disconnect", page="/accounts")
+    assert fake.revoked == [youtube.external_id]
+
+
 def test_disconnect_page_states_the_retention(web_owner, make_account):
     account = make_account("tiktok")
     set_lang(web_owner, "en")

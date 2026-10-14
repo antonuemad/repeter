@@ -13,11 +13,18 @@
 #   --update-env    only merge platform credentials into deploy/.env (needs --stdin-env).
 #   --create-admin  only create/update the dashboard admin (the stack must be running).
 # Options:
-#   --stdin-env     read KEY=VALUE lines from stdin: ADMIN_EMAIL, ADMIN_PASSWORD, REPEATER_DOMAIN
-#                   and the platform credentials in UPDATABLE_KEYS. Empty values are ignored.
+#   --stdin-env     read KEY=VALUE lines from stdin: ADMIN_EMAIL, ADMIN_PASSWORD, REPEATER_DOMAIN,
+#                   REPEATER_PROXY and the platform credentials in UPDATABLE_KEYS. Empty values are ignored.
+#   --redetect-proxy  decide the reverse proxy mode again on a host that already has deploy/.env
+#                   (for example after moving to a new server with the old .env). Without it, a
+#                   .env that does not fit this host stops the script before anything is started.
+# Environment:
+#   REPEATER_PROXY  auto (default) | caddy | external. Repeater's own Caddy is only started when
+#                   ports 80/443 are free AND the host runs nothing else, or when you say caddy.
 #
-# Never stops or reconfigures other services on the host: when ports 80/443 are taken, it
-# prints the snippet to add to the existing reverse proxy instead.
+# Never stops or reconfigures other services on the host: when ports 80/443 are taken (running or
+# not: stopped containers and enabled services count), it prints the snippet to add to the
+# existing reverse proxy instead.
 set -Eeuo pipefail
 
 ROOT_DIR="${REPEATER_ROOT:-/srv/repeater}"
@@ -45,7 +52,9 @@ declare -A UPDATES=()
 ADMIN_EMAIL="${ADMIN_EMAIL:-}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
 REPEATER_DOMAIN="${REPEATER_DOMAIN:-}"
+REPEATER_PROXY="${REPEATER_PROXY:-}"
 ENV_CREATED=0
+REDETECT_PROXY=0
 
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mWARNING:\033[0m %s\n' "$*" >&2; }
@@ -109,7 +118,7 @@ is_updatable_key() {
     return 1
 }
 
-# Read KEY=VALUE lines from stdin into ADMIN_*, REPEATER_DOMAIN and UPDATES.
+# Read KEY=VALUE lines from stdin into ADMIN_*, REPEATER_DOMAIN, REPEATER_PROXY and UPDATES.
 read_stdin_env() {
     local line key value
     while IFS= read -r line || [[ -n "$line" ]]; do
@@ -124,6 +133,7 @@ read_stdin_env() {
             ADMIN_EMAIL) ADMIN_EMAIL="$value" ;;
             ADMIN_PASSWORD) ADMIN_PASSWORD="$value" ;;
             REPEATER_DOMAIN) REPEATER_DOMAIN="$value" ;;
+            REPEATER_PROXY) REPEATER_PROXY="$value" ;;
             *)
                 is_updatable_key "$key" || die "$key cannot be set through stdin (allowed: ${UPDATABLE_KEYS[*]})"
                 UPDATES["$key"]="$value"
@@ -222,6 +232,8 @@ install_docker() {
 prepare_dirs() {
     install -d -m 0755 "$ROOT_DIR" "$TARGET_APP_DIR"
     install -d -m 0700 "$BACKUP_DIR"
+    # backup.sh writes its last-success marker here; the web container mounts it read-only.
+    install -d -m 0755 "$BACKUP_DIR/status"
     local media
     media="$(env_get REPEATER_MEDIA_DIR "$ENV_FILE")"
     media="${media:-$MEDIA_DIR_DEFAULT}"
@@ -305,54 +317,108 @@ port_80_443_processes() {
         grep -oE '"[^"]+",pid=' | cut -d'"' -f2 | sort -u || true
 }
 
-# Containers publishing 80/443 as "name|image|compose project".
-port_80_443_containers() {
+# Every container, running or not, as "name|image|project|state|network mode|published host ports".
+# `docker ps` shows no ports for a stopped or restarting container, `docker inspect` still has the
+# bindings it will claim again when it starts.
+docker_containers() {
     command -v docker >/dev/null || return 0
-    docker ps --format '{{.Names}}|{{.Image}}|{{.Label "com.docker.compose.project"}}|{{.Ports}}' 2>/dev/null |
-        awk -F'|' '$4 ~ /:(80|443)->/ {print $1 "|" $2 "|" $3}' || true
+    local ids
+    ids="$(docker ps -aq 2>/dev/null || true)"
+    [[ -n "$ids" ]] || return 0
+    # shellcheck disable=SC2086 # one argument per container id
+    docker inspect --format '{{.Name}}|{{.Config.Image}}|{{index .Config.Labels "com.docker.compose.project"}}|{{.State.Status}}|{{.HostConfig.NetworkMode}}|{{range $p, $b := .HostConfig.PortBindings}}{{range $b}}{{.HostPort}} {{end}}{{end}}' $ids 2>/dev/null |
+        sed 's|^/||' || true
+}
+
+# Containers that publish host port 80/443 (or run a proxy image on the host network) as
+# "name|image|project|state"; running ones first.
+port_80_443_containers() {
+    docker_containers | awk -F'|' '
+        {
+            ports = " " $6 " "
+            proxyish = tolower($1 " " $2) ~ /traefik|coolify-proxy|nginx|caddy|haproxy|openresty|envoy/
+            if (ports ~ / (80|443) / || ($5 == "host" && proxyish)) {
+                line = $1 "|" $2 "|" $3 "|" $4
+                if ($4 == "running") print line; else stopped = stopped line "\n"
+            }
+        }
+        END { printf "%s", stopped }'
+}
+
+# Containers of other projects (a shared VPS), as a short description; empty when there are none.
+other_containers_summary() {
+    local count
+    count="$(docker_containers | awk -F'|' -v own="${COMPOSE_PROJECT_NAME:-repeater}" 'NF && $3 != own { n++ } END { print n + 0 }')"
+    ((count == 0)) || printf '%s other Docker containers' "$count"
+}
+
+# Web servers installed as host services that are enabled (they bind 80/443 at boot) or running, even
+# when nothing is listening at this moment (stopped for maintenance, crashed on a bad config).
+host_web_services() {
+    command -v systemctl >/dev/null || return 0
+    local unit
+    for unit in nginx apache2 httpd caddy traefik lsws openresty haproxy; do
+        if [[ "$(systemctl is-enabled "$unit" 2>/dev/null || true)" == enabled* ||
+            "$(systemctl is-active "$unit" 2>/dev/null || true)" == active ]]; then
+            echo "$unit"
+        fi
+    done
 }
 
 # Prints "<kind> <description>": none, repeater-caddy, docker-traefik, docker-npm, docker-caddy,
 # docker-nginx, docker-other, host-nginx, host-caddy, host-traefik, host-apache, host-other.
+# Stopped or restarting containers and enabled-but-not-running services count: the decision to
+# start Repeater's own Caddy on 80/443 must not depend on whether the other proxy is up right now.
 detect_proxy() {
-    local containers processes name image project
+    local containers processes name image project state
     containers="$(port_80_443_containers)"
     processes="$(port_80_443_processes)"
     if [[ -n "$containers" ]]; then
-        IFS='|' read -r name image project <<<"$(head -1 <<<"$containers")"
-        local id="${name} ${image}"
+        IFS='|' read -r name image project state <<<"$(head -1 <<<"$containers")"
+        local id="${name} ${image}" note=""
         id="${id,,}"
-        if [[ "$project" == repeater ]]; then
+        [[ "$state" == running ]] || note=", $state"
+        if [[ "$project" == "${COMPOSE_PROJECT_NAME:-repeater}" ]]; then
             echo "repeater-caddy container $name"
         elif [[ "$id" == *traefik* || "$id" == *coolify-proxy* ]]; then
-            echo "docker-traefik container $name ($image)"
+            echo "docker-traefik container $name ($image$note)"
         elif [[ "$id" == *nginx-proxy-manager* ]]; then
-            echo "docker-npm container $name ($image)"
+            echo "docker-npm container $name ($image$note)"
         elif [[ "$id" == *caddy* ]]; then
-            echo "docker-caddy container $name ($image)"
+            echo "docker-caddy container $name ($image$note)"
         elif [[ "$id" == *nginx* || "$id" == *openresty* ]]; then
-            echo "docker-nginx container $name ($image)"
+            echo "docker-nginx container $name ($image$note)"
         else
-            echo "docker-other container $name ($image)"
+            echo "docker-other container $name ($image$note)"
         fi
         return 0
     fi
-    local procs
+    local procs services
     procs="$({ grep -v '^docker-proxy$' <<<"$processes" || true; } | tr '\n' ' ' | sed 's/ *$//')"
-    if [[ -z "$processes" ]]; then
-        echo "none ports 80/443 are free"
-    elif [[ -z "$procs" ]]; then
+    services="$(host_web_services | tr '\n' ' ' | sed 's/ *$//')"
+    if [[ -n "$processes" && -z "$procs" ]]; then
         echo "docker-other a container (docker-proxy)"
-    elif [[ " $procs " == *" nginx "* ]]; then
-        echo "host-nginx host process nginx"
-    elif [[ " $procs " == *" caddy "* ]]; then
-        echo "host-caddy host process caddy"
-    elif [[ " $procs " == *" traefik "* ]]; then
-        echo "host-traefik host process traefik"
-    elif [[ " $procs " == *" apache2 "* || " $procs " == *" httpd "* ]]; then
-        echo "host-apache host process $procs"
+        return 0
+    fi
+    # Listening processes first (they are what holds the ports); otherwise the enabled services.
+    local names="${procs:-$services}" origin="host process"
+    [[ -n "$procs" ]] || origin="host service (not listening now)"
+    if [[ -z "$names" ]]; then
+        if [[ -d "${REPEATER_COOLIFY_DIR:-/data/coolify}" ]]; then
+            echo "docker-traefik Coolify installation (${REPEATER_COOLIFY_DIR:-/data/coolify}), proxy container not running"
+        else
+            echo "none ports 80/443 are free"
+        fi
+    elif [[ " $names " == *" nginx "* ]]; then
+        echo "host-nginx $origin nginx"
+    elif [[ " $names " == *" caddy "* ]]; then
+        echo "host-caddy $origin caddy"
+    elif [[ " $names " == *" traefik "* ]]; then
+        echo "host-traefik $origin traefik"
+    elif [[ " $names " == *" apache2 "* || " $names " == *" httpd "* ]]; then
+        echo "host-apache $origin $names"
     else
-        echo "host-other host process $procs"
+        echo "host-other $origin $names"
     fi
 }
 
@@ -362,7 +428,18 @@ docker_bridge_ip() {
     printf '%s' "${ip:-172.17.0.1}"
 }
 
+host_has_address() {
+    [[ "$1" == 127.0.0.1 ]] && return 0
+    ip -4 -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | grep -qxF "$1"
+}
+
 port_in_use() { [[ -n "$(ss -H -ltn "( sport = :$1 )" 2>/dev/null)" ]]; }
+
+# True when this project's own web container is up (so a busy web port is expected).
+repeater_web_running() {
+    [[ -f "$ENV_FILE" ]] && command -v docker >/dev/null &&
+        [[ -n "$(compose ps --status running -q web 2>/dev/null || true)" ]]
+}
 
 first_free_port() {
     local port
@@ -375,52 +452,113 @@ first_free_port() {
     return 1
 }
 
-# Decide (first run) or report (later runs) how HTTPS reaches the web container.
+# Writes COMPOSE_PROFILES / REPEATER_WEB_BIND / REPEATER_WEB_PORT for the detected proxy. Used on the
+# first run and with --redetect-proxy; later runs only validate (see check_proxy_settings).
+decide_proxy() {
+    local kind="$1" desc="$2" wanted="${REPEATER_PROXY:-auto}" port other
+    case "$wanted" in
+        auto | caddy | external) ;;
+        *) die "REPEATER_PROXY must be auto, caddy or external (got '$wanted')" ;;
+    esac
+    port="$(env_get REPEATER_WEB_PORT "$ENV_FILE")"
+    port="${port:-8090}"
+    if port_in_use "$port" && ! repeater_web_running; then
+        local taken="$port"
+        port="$(first_free_port 8091 8199)" || die "no free port in 8091-8199 for the web container"
+        env_set "$ENV_FILE" REPEATER_WEB_PORT "$port"
+        log "port $taken is taken by another service; the web container uses $port"
+    fi
+    case "$wanted:$kind" in
+        caddy:none | caddy:repeater-caddy) use_caddy "REPEATER_PROXY=caddy" ;;
+        caddy:*) die "REPEATER_PROXY=caddy, but ports 80/443 belong to $desc. Repeater's Caddy would fail to start and, once the other proxy restarts, take 80/443 from it. Use REPEATER_PROXY=external and the snippet this script prints." ;;
+        external:docker-*) use_external_docker "$desc" ;;
+        external:*) use_external "$desc" "REPEATER_PROXY=external" ;;
+        auto:none | auto:repeater-caddy)
+            other="$(other_containers_summary)"
+            if [[ "$kind" == none && -n "$other" ]]; then
+                # A shared host: ports that look free now may belong to a proxy that is down, a
+                # container that is being replaced, or a service started later. Never grab them
+                # without being asked.
+                use_external "this host runs other services ($other); ports 80/443 look free but Repeater did not take them" \
+                    "set REPEATER_PROXY=caddy to let Repeater serve HTTPS itself"
+            else
+                use_caddy "ports 80/443 are free"
+            fi
+            ;;
+        auto:docker-*) use_external_docker "$desc" ;;
+        auto:*) use_external "$desc" "Repeater will not touch it" ;;
+    esac
+}
+
+use_caddy() {
+    env_set "$ENV_FILE" COMPOSE_PROFILES caddy
+    env_set "$ENV_FILE" REPEATER_WEB_BIND 127.0.0.1
+    log "$1: Repeater runs its own Caddy with automatic HTTPS"
+}
+
+use_external_docker() {
+    env_set "$ENV_FILE" COMPOSE_PROFILES ""
+    env_set "$ENV_FILE" REPEATER_WEB_BIND "$(docker_bridge_ip)"
+    log "ports 80/443 belong to $1: the web container listens on the docker0 address for it"
+}
+
+use_external() {
+    env_set "$ENV_FILE" COMPOSE_PROFILES ""
+    env_set "$ENV_FILE" REPEATER_WEB_BIND 127.0.0.1
+    log "ports 80/443: $1 ($2)"
+}
+
+# On a configured host (a deploy/.env that exists already, e.g. copied from the old server when
+# moving) nothing may be taken for granted: stop before deploy.sh when `compose up` would fail or
+# take ports from another proxy, and say how to fix it.
+check_proxy_settings() {
+    local kind="$1" desc="$2" profiles="$3" bind port problems=()
+    if [[ ",$profiles," == *",caddy,"* && "$kind" != none && "$kind" != repeater-caddy ]]; then
+        problems+=("COMPOSE_PROFILES=caddy, but ports 80/443 belong to $desc (Caddy would fail to bind, or take the ports from it later)")
+    fi
+    bind="$(env_get REPEATER_WEB_BIND "$ENV_FILE")"
+    bind="${bind:-127.0.0.1}"
+    if [[ "$bind" == 0.0.0.0 ]]; then
+        problems+=("REPEATER_WEB_BIND=0.0.0.0 would publish the dashboard on every interface (Docker bypasses ufw)")
+    elif ! host_has_address "$bind"; then
+        problems+=("REPEATER_WEB_BIND=$bind is not an address of this host (docker0 is $(docker_bridge_ip) here)")
+    fi
+    port="$(env_get REPEATER_WEB_PORT "$ENV_FILE")"
+    port="${port:-8090}"
+    if port_in_use "$port" && ! repeater_web_running; then
+        problems+=("REPEATER_WEB_PORT=$port is used by another service")
+    fi
+    ((${#problems[@]} > 0)) || return 0
+    local problem
+    for problem in "${problems[@]}"; do warn "$problem"; done
+    if [[ "$kind" != none && "$kind" != repeater-caddy ]]; then
+        PROXY_KIND="$kind"
+        PROXY_DESC="$desc"
+        print_proxy_snippet
+    fi
+    die "deploy/.env does not fit this host (see above). Fix the values, or run: sudo bash $SCRIPT_DIR/bootstrap.sh --redetect-proxy"
+}
+
+# Decide (first run, or --redetect-proxy) or verify (later runs) how HTTPS reaches the web container.
 configure_proxy() {
     local detected kind desc profiles
     detected="$(detect_proxy)"
     kind="${detected%% *}"
     desc="${detected#* }"
-    profiles="$(env_get COMPOSE_PROFILES "$ENV_FILE")"
-    if ((ENV_CREATED)); then
-        local port
-        port="$(env_get REPEATER_WEB_PORT "$ENV_FILE")"
-        if port_in_use "${port:-8090}"; then
-            port="$(first_free_port 8091 8199)" || die "no free port in 8091-8199 for the web container"
-            env_set "$ENV_FILE" REPEATER_WEB_PORT "$port"
-            log "port 8090 is taken; the web container uses 127.0.0.1:$port"
-        fi
-        case "$kind" in
-            none | repeater-caddy)
-                env_set "$ENV_FILE" COMPOSE_PROFILES caddy
-                profiles=caddy
-                log "ports 80/443 are free: Repeater runs its own Caddy with automatic HTTPS"
-                ;;
-            docker-*)
-                env_set "$ENV_FILE" COMPOSE_PROFILES ""
-                env_set "$ENV_FILE" REPEATER_WEB_BIND "$(docker_bridge_ip)"
-                profiles=""
-                log "ports 80/443 belong to $desc: the web container listens on the docker0 address for it"
-                ;;
-            *)
-                env_set "$ENV_FILE" COMPOSE_PROFILES ""
-                profiles=""
-                log "ports 80/443 belong to $desc: Repeater will not touch it"
-                ;;
-        esac
+    if ((ENV_CREATED || REDETECT_PROXY)); then
+        decide_proxy "$kind" "$desc"
+    else
+        check_proxy_settings "$kind" "$desc" "$(env_get COMPOSE_PROFILES "$ENV_FILE")"
     fi
+    profiles="$(env_get COMPOSE_PROFILES "$ENV_FILE")"
     PROXY_KIND="$kind"
     PROXY_DESC="$desc"
     if [[ ",$profiles," == *",caddy,"* ]]; then
         PROXY_MODE=caddy
-        if [[ "$kind" != none && "$kind" != repeater-caddy ]]; then
-            warn "COMPOSE_PROFILES=caddy but ports 80/443 are used by $desc; Caddy will fail to start. Set COMPOSE_PROFILES= in deploy/.env and use the snippet below instead."
-            print_proxy_snippet
-        fi
     else
         PROXY_MODE=external
         if [[ "$kind" == none ]]; then
-            warn "ports 80/443 are free but COMPOSE_PROFILES does not include caddy: set COMPOSE_PROFILES=caddy in deploy/.env to let Repeater serve HTTPS itself"
+            warn "ports 80/443 are free but COMPOSE_PROFILES does not include caddy: set REPEATER_PROXY=caddy and run bootstrap.sh --redetect-proxy to let Repeater serve HTTPS itself"
         fi
     fi
 }
@@ -432,12 +570,21 @@ print_proxy_snippet() {
     port="$(env_get REPEATER_WEB_PORT "$ENV_FILE")"
     port="${port:-8090}"
     local upstream="http://$host:$port"
+    echo
+    echo "------------------------------------------------------------------------------------------"
+    if [[ "$PROXY_KIND" == none ]]; then
+        echo "Repeater's own Caddy is not enabled and no proxy owns ports 80/443 right now: $PROXY_DESC."
+        echo "Put a reverse proxy in front of Repeater, or set REPEATER_PROXY=caddy and run bootstrap.sh --redetect-proxy."
+        echo "Forward $DOMAIN to $upstream."
+    else
+        echo "Ports 80/443 are served by: $PROXY_DESC"
+        echo "Add $DOMAIN to that proxy, forwarding to $upstream (nothing was changed on it)."
+    fi
     cat <<EOF
-
-------------------------------------------------------------------------------------------
-Ports 80/443 are served by: $PROXY_DESC
-Add $DOMAIN to that proxy, forwarding to $upstream (nothing was changed on it).
-Requirements: request bodies up to 600 MB, 1 hour timeouts, X-Forwarded-Proto/For passed.
+Requirements: request bodies up to 600 MB, 1 hour timeouts, X-Forwarded-Proto passed, and
+X-Forwarded-For SET to the client address (not appended to what the client sent): Repeater uses it
+for the login throttle and the media access log. It trusts the header only from loopback and
+Docker's private networks (REPEATER_FORWARDED_ALLOW_IPS in deploy/.env).
 EOF
     case "$PROXY_KIND" in
         host-nginx | docker-nginx | docker-npm)
@@ -455,7 +602,7 @@ server {
         proxy_pass $upstream;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-For \$remote_addr;
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_connect_timeout 10s;
         proxy_send_timeout 3600s;
@@ -549,10 +696,12 @@ install_backup_cron() {
     local content
     content="$(
         cat <<EOF
-# Repeater: daily database backup at 03:17 (server time). Logs: journalctl -t repeater-backup
+# Repeater: daily database backup at 03:17 (server time), and a check at 09:07 that raises a
+# Telegram alert when there has been no successful backup for 36 hours. Logs: journalctl -t repeater-backup
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 17 3 * * * root REPEATER_BACKUP_DIR=$BACKUP_DIR bash $TARGET_APP_DIR/deploy/backup.sh 2>&1 | logger -t repeater-backup
+7 9 * * * root REPEATER_BACKUP_DIR=$BACKUP_DIR bash $TARGET_APP_DIR/deploy/backup.sh status --alert 2>&1 | logger -t repeater-backup
 EOF
     )"
     if [[ ! -f "$CRON_FILE" || "$(cat "$CRON_FILE")" != "$content" ]]; then
@@ -588,7 +737,9 @@ Repeater is running. Remaining steps (details in docs/ar/00-deploy.md):
      Privacy policy:       $base/privacy
      Terms of service:     $base/terms
 3. Keep a copy of $ENV_FILE in a password manager (it holds the token encryption key).
-4. Backups: daily at 03:17 into $BACKUP_DIR; set RCLONE_REMOTE in deploy/.env for an off-site copy.
+4. Backups: daily at 03:17 into $BACKUP_DIR (a failure, or 36 hours without a success, is sent to
+   Telegram when REPEATER_TELEGRAM_BOT_TOKEN/CHAT_ID are set); set RCLONE_REMOTE in deploy/.env for
+   an off-site copy. Restore: backup.sh restore FILE --yes (pauses every workspace, web only).
 EOF
     if [[ "$PROXY_MODE" == external ]]; then
         echo "5. Reverse proxy: add $DOMAIN to the existing proxy (snippet above)."
@@ -608,6 +759,7 @@ main() {
             --update-env) mode=update-env ;;
             --create-admin) mode=create-admin ;;
             --stdin-env) stdin_env=1 ;;
+            --redetect-proxy) REDETECT_PROXY=1 ;;
             -h | --help)
                 usage
                 return 0

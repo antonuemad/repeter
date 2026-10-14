@@ -48,6 +48,9 @@ class KeyRing:
             if ":" not in part:
                 raise CryptoError("token key must be 'kid:base64key'")
             kid, b64 = part.split(":", 1)
+            if kid in keys:
+                # A repeated kid would silently keep the last key as the only one for that id.
+                raise CryptoError(f"token key id {kid!r} appears more than once")
             raw = _b64d(b64)
             if len(raw) != 32:
                 raise CryptoError(f"token key {kid!r} must decode to 32 bytes")
@@ -134,7 +137,9 @@ def signed_media_url(video_id: int, ttl_seconds: int | None = None) -> str:
 def verify_media_signature(video_id: int, expires: int, sig: str, now: float | None = None) -> str:
     """Return 'ok', 'expired' or 'invalid'."""
     expected = media_signature(video_id, expires)
-    if not hmac.compare_digest(expected, sig):
+    # Compare bytes: compare_digest raises TypeError for a str that is not ASCII, and the
+    # signature comes straight from a URL.
+    if not hmac.compare_digest(expected.encode("ascii"), str(sig).encode("utf-8", "replace")):
         return "invalid"
     if expires < int(now if now is not None else time.time()):
         return "expired"

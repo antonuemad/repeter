@@ -46,7 +46,7 @@ from repeater.config import get_settings
 from repeater.engine.publisher import mark_may_be_live
 from repeater.jobs import kinds
 from repeater.jobs.registry import handler
-from repeater.media import storage
+from repeater.media import retention
 from repeater.models import (
     AccountStatus,
     ActivityLevel,
@@ -56,8 +56,6 @@ from repeater.models import (
     Platform,
     PostStatus,
     ScheduledPost,
-    Video,
-    VideoStatus,
 )
 from repeater.timeutil import utcnow
 
@@ -73,10 +71,6 @@ LOST_JOB_GRACE = timedelta(minutes=10)
 # A disconnected account is deleted this long after the disconnect. The commitments are "within 7
 # days" (YouTube Developer Policies, the privacy policy); the margin covers a stopped worker.
 DISCONNECTED_RETENTION = timedelta(days=5)
-# Originals of videos that failed to import or encode are kept this long (for retries/diagnosis).
-FAILED_ORIGINAL_RETENTION = timedelta(days=7)
-# Partial downloads, encodes and uploads older than this were abandoned.
-PARTIAL_FILE_MAX_AGE = timedelta(days=1)
 # Posts in these statuses may be on the platform without being published; when their API data
 # is expired a marker remains so the planner still knows (no API data in it).
 _NOT_CONFIRMED = (PostStatus.NEEDS_ATTENTION, PostStatus.CANCELED)
@@ -159,51 +153,17 @@ def _delete_old_activity(session: Session, now: datetime) -> int:
 
 
 def _purge_originals(session: Session, days: int, now: datetime) -> int:
-    from repeater.media import retention
-
-    try:
-        return retention.purge_expired_originals(session, older_than_days=days, now=now)
-    except NotImplementedError:
-        return 0
+    return retention.purge_expired_originals(session, older_than_days=days, now=now)
 
 
 def _purge_failed_originals(session: Session, now: datetime) -> int:
-    """Delete the original file of videos that failed to import or encode after 7 days."""
-    videos = session.execute(
-        select(Video).where(
-            Video.status == VideoStatus.FAILED,
-            Video.original_path.isnot(None),
-            Video.updated_at < now - FAILED_ORIGINAL_RETENTION,
-        )
-    ).scalars()
-    removed = 0
-    for video in videos:
-        try:
-            path = storage.abs_path(video.original_path)
-            if path is not None and path.is_file():
-                path.unlink()
-                removed += 1
-        except (OSError, ValueError) as exc:
-            log.warning("could not delete the original of failed video %s (%s)", video.id, type(exc).__name__)
-            continue
-        video.original_path = None
-    return removed
+    """Delete the original file of videos that failed to import or encode after 7 days (C5(e))."""
+    return retention.purge_failed_originals(session, now=now)
 
 
 def _purge_partial_files(now: datetime) -> int:
     """Delete abandoned *.part files (killed encodes, downloads and dashboard uploads)."""
-    root = storage.media_root()
-    cutoff = now.timestamp() - PARTIAL_FILE_MAX_AGE.total_seconds()
-    removed = 0
-    for pattern in ("uploads/*.part", "ws*/v*/*.part"):
-        for path in root.glob(pattern):
-            try:
-                if path.is_file() and path.stat().st_mtime < cutoff:
-                    path.unlink()
-                    removed += 1
-            except OSError as exc:
-                log.warning("could not delete a partial file (%s)", type(exc).__name__)
-    return removed
+    return retention.sweep_partial_files(now=now)
 
 
 def _flag_stuck_uploads(session: Session, now: datetime, flagged: list[tuple[int, int]] | None = None) -> int:

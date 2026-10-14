@@ -122,6 +122,50 @@ def test_tiktok_form_follows_content_sharing_guidelines(web_owner, tiktok_accoun
     assert "300 s" in html
 
 
+@pytest.fixture
+def unaudited(monkeypatch):
+    from repeater.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "tiktok_audited", False)
+
+
+def test_unaudited_app_offers_only_only_me_and_warns_about_a_public_account(
+    web_owner, tiktok_account, creator, unaudited
+):
+    set_lang(web_owner, "en")
+    html = web_owner.get(f"/rules/{tiktok_account.id}").text
+    select_html = re.search(r'<select name="privacy_level".*?</select>', html, re.S).group(0)
+    assert re.findall(r'<option value="([^"]*)"', select_html) == ["", "SELF_ONLY"]
+    assert "has not audited this app yet" in html
+    assert "This TikTok account is public" in html  # creator_info offers PUBLIC_TO_EVERYONE
+    # A private account is not offered PUBLIC_TO_EVERYONE: no warning about it.
+    creator.info = _info(privacy_level_options=["FOLLOWER_OF_CREATOR", "SELF_ONLY"])
+    html = web_owner.get(f"/rules/{tiktok_account.id}").text
+    assert "has not audited this app yet" in html and "This TikTok account is public" not in html
+
+
+def test_unaudited_app_refuses_any_other_privacy_level(web_owner, tiktok_account, creator, db, unaudited):
+    set_lang(web_owner, "en")
+    form = _base_form(enabled="1", music_consent="1", privacy_level="PUBLIC_TO_EVERYONE")
+    resp = _save(web_owner, tiktok_account, form)
+    assert resp.status_code == 400 and "only “Only me” can be used" in resp.text
+    assert _rule(db, tiktok_account).enabled is False
+    ok = _save(web_owner, tiktok_account, {**form, "privacy_level": "SELF_ONLY"})
+    assert ok.status_code == 303
+    assert _rule(db, tiktok_account).settings["privacy_level"] == "SELF_ONLY"
+
+
+def test_audited_app_offers_every_creator_option(web_owner, tiktok_account, creator):
+    html = web_owner.get(f"/rules/{tiktok_account.id}").text
+    select_html = re.search(r'<select name="privacy_level".*?</select>', html, re.S).group(0)
+    assert re.findall(r'<option value="([^"]*)"', select_html)[1:] == [
+        "PUBLIC_TO_EVERYONE",
+        "MUTUAL_FOLLOW_FRIENDS",
+        "SELF_ONLY",
+    ]
+    assert "has not audited this app yet" not in html
+
+
 def test_tiktok_form_in_arabic_keeps_english_declaration(web_owner, tiktok_account, creator):
     html = web_owner.get(f"/rules/{tiktok_account.id}").text
     assert "By posting, you agree to TikTok's" in html

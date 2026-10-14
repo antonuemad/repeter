@@ -132,23 +132,26 @@ def test_login_page_names_the_terms_and_privacy_policy(web_client):
     assert 'href="/terms"' in main and 'href="/privacy"' in main and "توافق على" in main
 
 
-def test_consent_uses_user_columns_when_the_model_has_them(db, workspace, admin_user, monkeypatch):
-    """With `terms_accepted_at` and `terms_version` on the User model (core change request) they
-    are the record; the activity entry stays as an audit trail."""
-    monkeypatch.setattr(User, "terms_accepted_at", None, raising=False)
-    monkeypatch.setattr(User, "terms_version", None, raising=False)
+def test_consent_is_stored_on_the_user_with_version_and_time(db, workspace, admin_user):
+    """User.terms_accepted_at and terms_version are the record; the activity entry is an audit
+    trail that the 90-day log purge may remove without asking anyone to accept again."""
     session: dict = {}
+    assert admin_user.terms_accepted_at is None and admin_user.terms_version is None
     assert consent.has_consented(session, db, admin_user) is False
     consent.record_consent(session, db, admin_user)
-    db.flush()
+    db.commit()
+    db.refresh(admin_user)
     assert admin_user.terms_version == consent.LEGAL_VERSION and admin_user.terms_accepted_at is not None
+    assert consent.has_consented({}, db, admin_user) is True
+    db.execute(ActivityLog.__table__.delete())  # the audit trail is gone: still accepted
+    db.commit()
     assert consent.has_consented({}, db, admin_user) is True
     admin_user.terms_version = "1999-01-01"
     assert consent.has_consented({}, db, admin_user) is False
 
 
 def test_session_cache_is_bound_to_user_and_version(db, workspace, admin_user):
-    other = SimpleNamespace(id=admin_user.id + 1, email="x@y.z")
+    other = SimpleNamespace(id=admin_user.id + 1, email="x@y.z", terms_accepted_at=None, terms_version=None)
     session = {consent.SESSION_KEY: f"{admin_user.id}:{consent.LEGAL_VERSION}"}
     assert consent.has_consented(session, db, admin_user) is True
     assert consent.has_consented(session, db, other) is False  # type: ignore[arg-type]
@@ -270,6 +273,9 @@ def test_privacy_policy_english_matches_the_retention_rules(web_app):
     assert "Videos imported from that account stay in your library until you delete them" in html
     assert "refreshed or removed within 30 days" in html
     assert "completed within 24 hours" in html
+    # Backups keep deleted data for a bounded time (backup.sh: 14 days local, 30 off-site and for
+    # the safety dumps).
+    assert "Backups:</strong>" in html and "until they expire (within 30 days at the latest)" in html
     assert "Original files</strong> are deleted after 30 days" in html
     assert "failed to process are deleted after 7 days" in html
     # Deletion requests (ux-compliance-missed-4): 7 days, and a Delete button exists.
@@ -298,6 +304,8 @@ def test_privacy_policy_arabic_matches_the_retention_rules(web_app):
         "حتى تحذفها أو تطلب منا حذف بياناتك",
         "خلال 30 يومًا",
         "تكتمل خلال 24 ساعة",
+        "النسخ الاحتياطية:",
+        "خلال 30 يومًا على الأكثر",
         "بعد 7 أيام",
         "ننفّذ طلبات الحذف خلال 7 أيام",
         "مستخدم تيك توك نفسه ما زال مربوطًا في مساحة عمل أخرى",

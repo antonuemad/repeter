@@ -14,6 +14,7 @@ x-app: &app
   build:
     context: ..
     dockerfile: Dockerfile
+    target: app
     args:
       YTDLP_REFRESH: ${YTDLP_REFRESH:-0}
     secrets:
@@ -28,10 +29,23 @@ x-app: &app
     # Inside containers these are fixed; POSTGRES_PASSWORD must stay URL-safe (bootstrap uses hex).
     REPEATER_DATABASE_URL: postgresql+psycopg://repeater:${POSTGRES_PASSWORD:-}@db:5432/repeater
     REPEATER_MEDIA_ROOT: /srv/repeater/media
+    # uvicorn (web) trusts X-Forwarded-For/Proto only from these peers: loopback (a proxy on the
+    # host reaches the published port from 127.0.0.1) and Docker's private ranges (Caddy on the
+    # compose network, a proxy container, or the bridge gateway that NATs host connections). Never
+    # "*": that makes uvicorn take the leftmost X-Forwarded-For entry, which a client controls
+    # whenever the proxy appends to the header instead of overwriting it.
+    FORWARDED_ALLOW_IPS: "${REPEATER_FORWARDED_ALLOW_IPS:-127.0.0.1,::1,172.16.0.0/12,192.168.0.0/16}"
+    # backup.sh's last-success marker (read-only mount below): `repeater.cli check` reports a
+    # backup that is older than 36 hours.
+    REPEATER_BACKUP_STATUS_FILE: /srv/repeater/backup-status/last_success
   volumes:
     - type: bind
       source: ${REPEATER_MEDIA_DIR:-/srv/repeater/media}
       target: /srv/repeater/media
+    - type: bind
+      source: ${REPEATER_BACKUP_DIR:-/srv/repeater/backups}/status
+      target: /srv/repeater/backup-status
+      read_only: true
   networks:
     - backend
   restart: unless-stopped
@@ -122,12 +136,17 @@ services:
       retries: 3
       start_period: 60s
       start_interval: 5s
-    # Running jobs (an ffmpeg encode, an upload) finish before the worker exits.
-    stop_grace_period: 3m
+    # Running jobs (an ffmpeg encode, an upload) finish before the worker exits: the worker waits
+    # REPEATER_WORKER_SHUTDOWN_GRACE_S (default 600) for them and docker waits 60 s longer. The
+    # scripts (deploy.sh, backup.sh) export WORKER_STOP_GRACE_S = that value + 60; compose cannot add.
+    stop_grace_period: "${WORKER_STOP_GRACE_S:-660}s"
     deploy:
       resources:
         limits:
-          cpus: "${REPEATER_WORKER_CPUS:-1.0}"
+          # Sized for libx264 -preset medium and the 1800 s encode cap: a worst-case (very busy)
+          # 1080x1920 clip encodes at about 5x its duration on one CPU, 2.5x on two. Two encodes can
+          # run at once, so 2 CPUs keep clips up to ~5 minutes inside the cap; 1.0 halves that.
+          cpus: "${REPEATER_WORKER_CPUS:-2.0}"
           memory: ${REPEATER_WORKER_MEMORY:-3G}
 
   caddy:

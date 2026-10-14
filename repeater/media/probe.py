@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 from dataclasses import dataclass
 from fractions import Fraction
@@ -34,10 +35,35 @@ class MediaToolError(RuntimeError):
     """ffmpeg/ffprobe is missing, timed out or failed for reasons unrelated to the input."""
 
 
+# Colour metadata names (ffprobe / libavutil spelling) that are passed on to ffmpeg filters. Values
+# read from an untrusted file are only ever used when they are in these sets.
+KNOWN_TRANSFERS = frozenset(
+    {
+        "bt709",
+        "smpte170m",
+        "smpte240m",
+        "bt470m",
+        "bt470bg",
+        "linear",
+        "iec61966-2-1",
+        "bt2020-10",
+        "bt2020-12",
+        "smpte2084",
+        "arib-std-b67",
+    }
+)
+KNOWN_PRIMARIES = frozenset(
+    {"bt709", "bt470m", "bt470bg", "smpte170m", "smpte240m", "bt2020", "smpte431", "smpte432"}
+)
+KNOWN_MATRICES = frozenset({"bt709", "fcc", "bt470bg", "smpte170m", "smpte240m", "bt2020nc", "bt2020c"})
+PQ = "smpte2084"
+HLG = "arib-std-b67"
+
+
 @dataclass(frozen=True)
 class ProbeResult:
     duration_s: float
-    width: int  # display width, i.e. after applying `rotation`
+    width: int  # display width: coded width times the pixel aspect ratio, then `rotation` applied
     height: int  # display height
     fps: float
     video_codec: str
@@ -46,6 +72,13 @@ class ProbeResult:
     size_bytes: int
     rotation: int = 0  # clockwise degrees applied at display time: 0, 90, 180 or 270
     format_name: str = ""
+    pix_fmt: str = ""
+    bit_depth: int = 8
+    color_space: str = ""  # matrix, e.g. bt709 / bt2020nc ("" when untagged or unknown)
+    color_transfer: str = ""  # e.g. bt709 / smpte2084 (PQ) / arib-std-b67 (HLG)
+    color_primaries: str = ""
+    color_range: str = ""  # tv | pc | ""
+    peak_nits: float | None = None  # HDR10 MaxCLL or mastering peak, when the stream carries it
 
     @property
     def is_vertical(self) -> bool:
@@ -54,6 +87,22 @@ class ProbeResult:
     @property
     def is_landscape(self) -> bool:
         return self.width > self.height
+
+    @property
+    def is_hdr(self) -> bool:
+        """PQ (HDR10, Dolby Vision 8.1) or HLG (iPhone / Android HDR video)."""
+        return self.color_transfer in (PQ, HLG)
+
+    @property
+    def is_wide_gamut_sdr(self) -> bool:
+        """BT.2020 / DCI-P3 tagged material that is not HDR (needs a gamut conversion only)."""
+        if self.is_hdr:
+            return False
+        return (
+            self.color_primaries in ("bt2020", "smpte431", "smpte432")
+            or self.color_space in ("bt2020nc", "bt2020c")
+            or self.color_transfer in ("bt2020-10", "bt2020-12")
+        )
 
 
 def probe(path: Path | str) -> ProbeResult:
@@ -114,6 +163,8 @@ def parse_probe_json(data: dict[str, Any], *, size_fallback: int = 0) -> ProbeRe
     if coded_w <= 0 or coded_h <= 0:
         raise ValueError("not a video: the video track has no picture size")
     rotation = _rotation(video)
+    # Anamorphic material (camcorders, HDV): the picture is shown `sar` times wider than coded.
+    coded_w = max(1, round(coded_w * _sample_aspect_ratio(video)))
     width, height = (coded_h, coded_w) if rotation in (90, 270) else (coded_w, coded_h)
     return ProbeResult(
         duration_s=duration,
@@ -126,6 +177,13 @@ def parse_probe_json(data: dict[str, Any], *, size_fallback: int = 0) -> ProbeRe
         size_bytes=_int(fmt.get("size")) or size_fallback,
         rotation=rotation,
         format_name=format_name,
+        pix_fmt=str(video.get("pix_fmt") or ""),
+        bit_depth=_bit_depth(video),
+        color_space=_known(video.get("color_space"), KNOWN_MATRICES),
+        color_transfer=_known(video.get("color_transfer"), KNOWN_TRANSFERS),
+        color_primaries=_known(video.get("color_primaries"), KNOWN_PRIMARIES),
+        color_range=_known(video.get("color_range"), frozenset({"tv", "pc"})),
+        peak_nits=_peak_nits(video),
     )
 
 
@@ -137,6 +195,50 @@ def _video_stream(streams: list[dict[str, Any]]) -> dict[str, Any] | None:
             continue  # cover art, not the picture track
         return s
     return None
+
+
+def _known(value: Any, allowed: frozenset[str]) -> str:
+    text = str(value or "").strip().lower()
+    return text if text in allowed else ""
+
+
+def _sample_aspect_ratio(stream: dict[str, Any]) -> float:
+    """Pixel aspect ratio, 1.0 when absent, unknown ("0:1") or implausible."""
+    raw = str(stream.get("sample_aspect_ratio") or "")
+    num, _, den = raw.partition(":")
+    try:
+        value = int(num) / int(den)
+    except (ValueError, ZeroDivisionError):
+        return 1.0
+    return value if 0.25 <= value <= 4.0 else 1.0
+
+
+def _bit_depth(stream: dict[str, Any]) -> int:
+    depth = _int(stream.get("bits_per_raw_sample"))
+    if depth <= 0:
+        m = re.search(r"p(\d{2})(?:le|be)?$", str(stream.get("pix_fmt") or ""))
+        depth = int(m.group(1)) if m else 8
+    return depth
+
+
+def _peak_nits(stream: dict[str, Any]) -> float | None:
+    """HDR10 peak luminance: MaxCLL if present, else the mastering display's maximum."""
+    max_cll = mastering = None
+    for side in stream.get("side_data_list") or []:
+        if not isinstance(side, dict):
+            continue
+        kind = str(side.get("side_data_type") or "").lower()
+        if "content light level" in kind:
+            max_cll = _positive_float(side.get("max_content"))
+        elif "mastering display" in kind:
+            mastering = _fraction_value(side.get("max_luminance"))
+    return max_cll or mastering
+
+
+def _fraction_value(value: Any) -> float | None:
+    if isinstance(value, str) and "/" in value:
+        return _positive_float(_fraction(value))
+    return _positive_float(value)
 
 
 def _rotation(stream: dict[str, Any]) -> int:

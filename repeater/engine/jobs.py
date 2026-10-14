@@ -130,14 +130,12 @@ def refresh_tokens(session: Session) -> dict[str, int]:
 def refresh_youtube_channels(session: Session, now: datetime | None = None) -> dict[str, int]:
     """Re-read the channel title, avatar and ids of active YouTube accounts whose data is older
     than REFRESH_YOUTUBE_EVERY (youtube.refresh_account_info, i.e. channels.list(mine)), so the
-    stored API data never ages past the 30 days the YouTube Developer Policies allow. Without that
-    function (or when it keeps failing) maintenance scrubs the data at 30 days instead."""
+    stored API data never ages past the 30 days the YouTube Developer Policies allow. When it keeps
+    failing, maintenance scrubs the data at 30 days instead."""
     from repeater.platforms import youtube as youtube_mod
 
     counts = {"refreshed": 0, "failed": 0}
-    refresher = getattr(youtube_mod, "refresh_account_info", None)
-    if refresher is None:
-        return counts
+    refresher = youtube_mod.refresh_account_info
     now = ensure_aware(now) or utcnow()
     candidates = session.execute(
         select(ConnectedAccount.id, ConnectedAccount.extra, ConnectedAccount.created_at).where(

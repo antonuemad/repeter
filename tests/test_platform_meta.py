@@ -197,6 +197,56 @@ def ctx(tokens: OAuthTokens | None = None, platform: Platform = Platform.FACEBOO
     )
 
 
+def build_engine_post(db, workspace, make_account, sample_video, monkeypatch):
+    """Factory for engine-level tests: make("facebook") -> (post, account). A real READY video with
+    an encoded file, an enabled rule, one post due now, notifications swallowed. The Facebook and
+    Instagram test modules wrap it in an `engine_post` fixture to run the real publish_post /
+    poll_post against the real adapters with respx-mocked HTTP."""
+    import shutil
+
+    from repeater.engine import publisher, rules
+    from repeater.media import storage
+    from repeater.models import ScheduledPost, Video, VideoStatus
+
+    monkeypatch.setattr(publisher.notify_mod, "notify", lambda text, **kw: True)
+
+    def _make(platform: str):
+        account = make_account(platform, display_name=f"Magic Lab {platform}")
+        rule = rules.ensure_rule(db, account)
+        rule.enabled = True
+        video = Video(
+            workspace_id=workspace.id,
+            status=VideoStatus.READY,
+            title="Coin trick",
+            caption="Watch this coin vanish",
+            duration_s=4.0,
+            width=1080,
+            height=1920,
+            fps=30.0,
+        )
+        db.add(video)
+        db.flush()
+        folder = storage.ensure_video_dir(workspace.id, video.id)
+        shutil.copy(sample_video, folder / storage.ENCODED_NAME)
+        video.encoded_path = storage.rel_path(folder / storage.ENCODED_NAME)
+        video.encoded_size_bytes = (folder / storage.ENCODED_NAME).stat().st_size
+        post = ScheduledPost(
+            workspace_id=workspace.id,
+            video_id=video.id,
+            connected_account_id=account.id,
+            platform=Platform(platform),
+            cycle=0,
+            idempotency_key=f"{video.id}:{account.id}:0",
+            scheduled_at=utcnow(),
+            created_by="scheduler",
+        )
+        db.add(post)
+        db.commit()
+        return post, account
+
+    return _make
+
+
 # --------------------------------------------------------------------------- contract & authorize URL
 
 
@@ -225,9 +275,18 @@ def test_authorize_url(purpose):
         "pages_manage_posts",
         "instagram_basic",
         "instagram_content_publish",
+        "ads_read",
         "business_management",
     ]
     assert APP_SECRET not in url
+
+
+def test_scopes_cover_business_portfolio_publishing():
+    """api-meta-2: a user whose Page role comes from a business portfolio needs ads_read or
+    ads_management on every Instagram publishing endpoint; the smaller one is requested."""
+    assert "ads_read" in meta.SCOPES and "ads_management" not in meta.SCOPES
+    assert set(meta.PLATFORM_PERMISSIONS[Platform.INSTAGRAM]) <= set(meta.SCOPES)
+    assert set(meta.PLATFORM_PERMISSIONS[Platform.FACEBOOK]) <= set(meta.SCOPES)
 
 
 def test_authorize_url_rejects_unknown_purpose():
@@ -268,7 +327,7 @@ def test_exchange_code_pages_ig_and_pagination(mock):
     fb, ig = accounts
     assert fb.display_name == "Magic Lap Page"
     assert fb.avatar_url == "https://scontent.test/111.jpg"
-    assert fb.extra == {"page_id": "111", "fb_user_id": "fbuser1"}
+    assert fb.extra == {"page_id": "111", "fb_user_id": "fbuser1", "can_manage": True}
     assert fb.tokens.access_token == PAGE_A_TOKEN and fb.tokens.expires_at is None
     assert fb.tokens.refresh_token is None
     assert "pages_manage_posts" in fb.tokens.scopes and "business_management" not in fb.tokens.scopes
@@ -423,6 +482,78 @@ def test_exchange_code_missing_user_id(mock):
         meta.oauth.exchange_code(code=CODE, redirect_uri=REDIRECT, code_verifier=None, purpose="meta")
 
 
+def permissions(**status: str) -> list[dict[str, str]]:
+    """Granted permissions of mock_login's default login with `name=status` overrides."""
+    names = {p: "granted" for p in (*GRANTED, "instagram_content_publish")}
+    names.update(status)
+    return [{"permission": name, "status": value} for name, value in names.items()]
+
+
+def test_exchange_code_declined_instagram_publish_is_not_connected(mock, caplog):
+    """api-meta-3: an account that can never publish must not be added to the rotation."""
+    mock_login(mock, permissions=permissions(instagram_content_publish="declined"))
+    with caplog.at_level("WARNING", logger=meta.log.name):
+        accounts = meta.oauth.exchange_code(
+            code=CODE, redirect_uri=REDIRECT, code_verifier=None, purpose="meta"
+        )
+    assert [(a.platform, a.external_id) for a in accounts] == [(Platform.FACEBOOK, "111")]
+    assert "instagram_content_publish" in caplog.text and PAGE_A_TOKEN not in caplog.text
+
+
+def test_exchange_code_declined_instagram_publish_names_the_permission(mock):
+    mock_login(mock, permissions=permissions(instagram_content_publish="declined"))
+    with pytest.raises(PermanentError) as exc:
+        meta.oauth.exchange_code(code=CODE, redirect_uri=REDIRECT, code_verifier=None, purpose="instagram")
+    assert exc.value.code == "permissions_declined"
+    assert "instagram_content_publish" in exc.value.message and "Instagram" in exc.value.message
+    assert_no_secrets(exc.value)
+
+
+def test_exchange_code_declined_pages_manage_posts_is_not_connected(mock):
+    mock_login(mock, permissions=permissions(pages_manage_posts="declined"))
+    with pytest.raises(PermanentError) as exc:
+        meta.oauth.exchange_code(code=CODE, redirect_uri=REDIRECT, code_verifier=None, purpose="facebook")
+    assert exc.value.code == "permissions_declined" and "pages_manage_posts" in exc.value.message
+    # The Instagram account of the same login does not need pages_manage_posts.
+    mock_login(mock, permissions=permissions(pages_manage_posts="declined"))
+    accounts = meta.oauth.exchange_code(code=CODE, redirect_uri=REDIRECT, code_verifier=None, purpose="meta")
+    assert [a.platform for a in accounts] == [Platform.INSTAGRAM]
+
+
+def test_exchange_code_everything_declined_lists_both_platforms(mock):
+    mock_login(
+        mock,
+        permissions=permissions(pages_manage_posts="declined", instagram_content_publish="declined"),
+    )
+    with pytest.raises(PermanentError) as exc:
+        meta.oauth.exchange_code(code=CODE, redirect_uri=REDIRECT, code_verifier=None, purpose="meta")
+    assert exc.value.code == "permissions_declined"
+    assert "pages_manage_posts" in exc.value.message and "instagram_content_publish" in exc.value.message
+
+
+def test_exchange_code_ads_read_is_not_required(mock, caplog):
+    """ads_read only matters for Page roles granted through a business portfolio, which cannot be
+    told at connect time: connecting without it works, and publishing explains the failure."""
+    mock_login(mock, permissions=permissions(ads_read="declined"))
+    with caplog.at_level("INFO", logger=meta.log.name):
+        accounts = meta.oauth.exchange_code(
+            code=CODE, redirect_uri=REDIRECT, code_verifier=None, purpose="meta"
+        )
+    assert {a.platform for a in accounts} == {Platform.FACEBOOK, Platform.INSTAGRAM}
+    assert "ads_read" in caplog.text
+
+
+def test_exchange_code_records_whether_the_user_can_manage_the_page(mock):
+    def accounts(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"data": [page("555", "Contributor Page", PAGE_C_TOKEN, ["CREATE_CONTENT"])]}
+        )
+
+    mock_login(mock, accounts=accounts)
+    (fb,) = meta.oauth.exchange_code(code=CODE, redirect_uri=REDIRECT, code_verifier=None, purpose="facebook")
+    assert fb.extra["can_manage"] is False and fb.extra["page_id"] == "555"
+
+
 # --------------------------------------------------------------------------- refresh & revoke
 
 
@@ -555,10 +686,10 @@ def err(code: int, subcode: int | None = None, **extra: Any) -> dict[str, Any]:
         (400, err(102), AuthError, "102"),
         (400, err(100, 460), AuthError, "460"),
         (400, err(100, 492), AuthError, "492"),
-        (403, err(10), AuthError, "10"),
-        (403, err(200), AuthError, "200"),
-        (403, err(299), AuthError, "299"),
-        (400, err(100, 1363042), AuthError, "1363042"),
+        (403, err(10), meta.PermissionDeniedError, "10"),
+        (403, err(200), meta.PermissionDeniedError, "200"),
+        (403, err(299), meta.PermissionDeniedError, "299"),
+        (400, err(100, 1363042), meta.PermissionDeniedError, "1363042"),
         (400, err(4), RateLimitedError, "4"),
         (400, err(17), RateLimitedError, "17"),
         (400, err(32), RateLimitedError, "32"),
@@ -578,6 +709,12 @@ def err(code: int, subcode: int | None = None, **extra: Any) -> dict[str, Any]:
         (400, err(9004, 2207052), RetryableError, "2207052"),
         (400, err(9007, 2207027), RetryableError, "2207027"),
         (400, err(100, 6000), RetryableError, "6000"),
+        (400, err(6000), RetryableError, "6000"),
+        (400, err(6000, 1363019), RetryableError, "1363019"),
+        (400, err(6000, 1363999), RetryableError, "1363999"),
+        (400, err(6000, 1363024), PermanentError, "1363024"),
+        (400, err(6000, 1363128), PermanentError, "1363128"),
+        (500, err(6000), RetryableError, "6000"),
         (400, err(100, 1363030), RetryableError, "1363030"),
         (500, err(12345), RetryableError, "12345"),
         (400, err(352, 2207026), PermanentError, "2207026"),
@@ -634,6 +771,36 @@ def test_auth_subcode_text_only_for_auth_errors():
 def test_known_explanation_replaces_meta_text():
     exc = classify(400, err(352, 2207026, message="raw"))
     assert "does not support this video format" in exc.message
+
+
+def test_permission_errors_are_auth_errors_with_their_own_class():
+    exc = classify(403, err(200))
+    assert isinstance(exc, AuthError) and type(exc) is meta.PermissionDeniedError
+    assert type(classify(400, err(190))) is AuthError  # a bad token is not a missing permission
+
+
+PERMISSION_FRAGMENT = "permission is missing or was removed"
+
+
+@pytest.mark.parametrize("permission", ["ads_management", "ads_read"])
+def test_ads_permission_failure_names_ads_read(permission):
+    """api-meta-2: the documented 403/200 error for a business-portfolio Page role."""
+    exc = classify(403, err(200, message=f"(#200) Requires {permission} permission to manage the object"))
+    assert type(exc) is meta.PermissionDeniedError
+    assert "ads_read" in exc.message and "Business portfolio" in exc.message
+    assert "Reconnect" in exc.message
+    assert PERMISSION_FRAGMENT not in exc.message
+
+
+def test_other_permission_failures_keep_the_generic_text():
+    exc = classify(403, err(10, message="(#10) Application does not have permission for this action"))
+    assert PERMISSION_FRAGMENT in exc.message and "ads_read" not in exc.message
+
+
+def test_code_6000_without_subcode_is_retryable_with_backoff():
+    exc = classify(400, err(6000, message="There was a problem uploading your video file."))
+    assert type(exc) is RetryableError and exc.retry_after == meta.TRANSIENT_RETRY
+    assert "6000" in exc.message and "try again" in exc.message
 
 
 @pytest.mark.parametrize(

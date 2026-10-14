@@ -29,7 +29,9 @@ from repeater.platforms.base import (
     PublishRequest,
     RateLimitedError,
     RemoteVideo,
+    RestartPublish,
     RetryableError,
+    UnknownOutcomeError,
 )
 from repeater.timeutil import utcnow
 
@@ -59,6 +61,9 @@ def ctx(extra: dict | None = None) -> AccountContext:
 
 
 def make_req(path: Path, **kw: Any) -> PublishRequest:
+    """A valid request. YouTube has no default audience answer, so the rule settings always carry
+    an explicit self_declared_made_for_kids unless a test overrides it."""
+    kw["settings"] = {"self_declared_made_for_kids": False, **kw.get("settings", {})}
     defaults: dict[str, Any] = {
         "post_id": 11,
         "video_path": path,
@@ -69,7 +74,6 @@ def make_req(path: Path, **kw: Any) -> PublishRequest:
         "height": 1920,
         "title": "My Short",
         "caption": "Line one\nLine two #magic",
-        "settings": {},
     }
     defaults.update(kw)
     return PublishRequest(**defaults)
@@ -197,10 +201,12 @@ def test_title_strips_angle_brackets_and_newlines():
     assert youtube.build_title("  Hello <b>world</b>\n again ", "") == "Hello bworld/b again"
 
 
-def test_title_falls_back_to_first_caption_line_then_short():
+def test_title_falls_back_to_first_caption_line_and_never_to_a_constant():
     assert youtube.build_title("", "\n  \n<>\nFirst real line\nsecond") == "First real line"
-    assert youtube.build_title(None, "<<>>") == "Short"
-    assert youtube.build_title("   ", None) == "Short"
+    # No title and no caption text: no invented default (Developer Policies III.C.3).
+    assert youtube.build_title(None, "<<>>") == ""
+    assert youtube.build_title("   ", None) == ""
+    assert not hasattr(youtube, "FALLBACK_TITLE")
 
 
 def test_title_truncates_arabic_at_word_boundary():
@@ -528,17 +534,18 @@ def test_publish_completes_when_status_query_shows_finished_upload(
     assert result.platform_post_id == "vid123"
 
 
-def test_publish_gives_up_after_repeated_5xx(
+def test_publish_gives_up_after_repeated_5xx_before_the_last_chunk(
     mock: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
 ):
-    path = binary_file(tmp_path, 4000)
-    server = FakeUploadServer(4000, script={i: 503 for i in range(1, 20)})
+    monkeypatch.setattr(youtube, "CHUNK_SIZE", KIB256)
+    path = binary_file(tmp_path, 3 * KIB256)
+    server = FakeUploadServer(3 * KIB256, script={i: 503 for i in range(1, 20)})
     upload_routes(mock, server)
 
-    with pytest.raises(RetryableError) as ei:
+    with pytest.raises(RetryableError) as ei:  # the last byte was never sent: nothing can exist
         youtube.publisher.publish(ctx(), make_req(path))
 
-    assert not isinstance(ei.value, RateLimitedError)
+    assert not isinstance(ei.value, RateLimitedError | UnknownOutcomeError)
     assert len(sleeps) == youtube.MAX_UPLOAD_RETRIES
     assert len(server.calls) == youtube.MAX_UPLOAD_RETRIES + 1
     assert sleeps == sorted(sleeps)  # exponential backoff
@@ -546,10 +553,11 @@ def test_publish_gives_up_after_repeated_5xx(
 
 
 def test_publish_long_retry_after_is_returned_instead_of_sleeping(
-    mock: Any, tmp_path: Path, sleeps: list[float]
+    mock: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
 ):
-    path = binary_file(tmp_path, 4000)
-    upload_routes(mock, FakeUploadServer(4000))
+    monkeypatch.setattr(youtube, "CHUNK_SIZE", KIB256)
+    path = binary_file(tmp_path, 3 * KIB256)
+    upload_routes(mock, FakeUploadServer(3 * KIB256))
     put = mock.route(method="PUT", host="www.googleapis.com", path="/upload/youtube/v3/videos")
     put.mock(return_value=gerr(503, "backendError", headers={"Retry-After": "600"}))
 
@@ -649,12 +657,13 @@ def test_publish_missing_or_empty_file_is_permanent(mock: Any, tmp_path: Path, s
     assert not start_route.called
 
 
-def test_publish_without_video_id_in_response_is_permanent(mock: Any, tmp_path: Path, sleeps: list[float]):
+def test_publish_without_video_id_in_response_may_be_live(mock: Any, tmp_path: Path, sleeps: list[float]):
     path = binary_file(tmp_path, 100)
     upload_routes(mock, FakeUploadServer(100, video={"status": {"uploadStatus": "uploaded"}}))
-    with pytest.raises(PermanentError) as ei:
+    with pytest.raises(UnknownOutcomeError) as ei:
         youtube.publisher.publish(ctx(), make_req(path))
-    assert ei.value.code == "no_video_id"
+    # No state: the engine ends in needs-attention ("may be live") instead of retrying.
+    assert ei.value.code == "no_video_id" and ei.value.state == {}
 
 
 def test_publish_reports_immediate_rejection(mock: Any, tmp_path: Path, sleeps: list[float]):
@@ -664,6 +673,378 @@ def test_publish_reports_immediate_rejection(mock: Any, tmp_path: Path, sleeps: 
     with pytest.raises(PermanentError) as ei:
         youtube.publisher.publish(ctx(), make_req(path))
     assert ei.value.code == "duplicate" and "duplicate" in ei.value.message
+
+
+# --------------------------------------------------------------------------- unknown outcome and resume
+
+
+def lost_final_response_server(size: int) -> FakeUploadServer:
+    """The only chunk is stored, its 201 is lost, and every status query fails: YouTube has
+    created the video but the adapter cannot find out within one publish() call."""
+    script: dict[int, Any] = {
+        1: "network_after",
+        **{i: "network" for i in range(2, 2 + youtube.MAX_UPLOAD_RETRIES)},
+    }
+    return FakeUploadServer(size, script=script)
+
+
+def test_lost_final_response_is_an_unknown_outcome_carrying_the_session(
+    mock: Any, tmp_path: Path, sleeps: list[float]
+):
+    path = binary_file(tmp_path, 4000)
+    server = lost_final_response_server(4000)
+    start_route, _ = upload_routes(mock, server)
+
+    with pytest.raises(UnknownOutcomeError) as ei:
+        youtube.publisher.publish(ctx(), make_req(path, settings={"privacy_status": "unlisted"}))
+
+    err = ei.value
+    assert err.state == {"session_uri": SESSION_URI, "total": 4000, "requested_privacy": "unlisted"}
+    assert [c[0] for c in server.calls] == ["chunk"] + ["probe"] * youtube.MAX_UPLOAD_RETRIES
+    assert start_route.call_count == 1
+    assert_no_secrets(err)  # the session URI is state, never message text
+
+
+def test_poll_resolves_the_session_to_the_created_video_without_a_second_upload(
+    mock: Any, tmp_path: Path, sleeps: list[float]
+):
+    path = binary_file(tmp_path, 4000)
+    server = lost_final_response_server(4000)
+    start_route, _ = upload_routes(mock, server)
+    with pytest.raises(UnknownOutcomeError) as ei:
+        youtube.publisher.publish(ctx(), make_req(path))
+
+    result = youtube.publisher.poll(ctx(), ei.value.state)  # the network is back: 201 replays the video
+
+    assert result.outcome == PublishOutcome.PROCESSING and result.platform_post_id == "vid123"
+    assert result.state == {"video_id": "vid123", "requested_privacy": "public"}
+    assert start_route.call_count == 1  # one videos.insert call in total
+    assert server.calls[-1] == ("probe", "bytes */4000", 0)
+    # and the next poll is the ordinary videos.list status check
+    item = {"id": "vid123", "status": {"uploadStatus": "processed", "privacyStatus": "public"}}
+    done, _ = poll_with(mock, {"items": [item]}, result.state)
+    assert done.outcome == PublishOutcome.PUBLISHED
+
+
+def test_unreadable_2xx_body_after_the_final_chunk_is_an_unknown_outcome(
+    mock: Any, tmp_path: Path, sleeps: list[float]
+):
+    path = binary_file(tmp_path, 3000)
+    start_route, _ = upload_routes(mock, FakeUploadServer(3000))
+    mock.route(method="PUT", host="www.googleapis.com", path="/upload/youtube/v3/videos").mock(
+        return_value=httpx.Response(201, text="<html>proxy page</html>")
+    )
+
+    with pytest.raises(UnknownOutcomeError) as ei:
+        youtube.publisher.publish(ctx(), make_req(path))
+
+    assert ei.value.state["session_uri"] == SESSION_URI and ei.value.state["total"] == 3000
+    assert start_route.call_count == 1
+
+
+def test_lost_reply_then_rate_limited_probe_is_still_unknown(mock: Any, tmp_path: Path, sleeps: list[float]):
+    path = binary_file(tmp_path, 3000)
+    script: dict[int, Any] = {1: "network_after", **{i: 429 for i in range(2, 20)}}
+    upload_routes(mock, FakeUploadServer(3000, script=script))
+    with pytest.raises(UnknownOutcomeError) as ei:
+        youtube.publisher.publish(ctx(), make_req(path))
+    assert ei.value.state["session_uri"] == SESSION_URI
+
+
+def test_lost_reply_then_rejected_token_on_a_probe_is_still_unknown(
+    mock: Any, tmp_path: Path, sleeps: list[float]
+):
+    path = binary_file(tmp_path, 3000)
+    script: dict[int, Any] = {1: "network_after", 2: 401}
+    server = FakeUploadServer(3000, script=script)
+    upload_routes(mock, server)
+    with pytest.raises(UnknownOutcomeError) as ei:
+        youtube.publisher.publish(ctx(), make_req(path))
+    assert ei.value.state["session_uri"] == SESSION_URI
+
+
+def test_clear_error_answer_to_the_final_chunk_stays_a_plain_error(
+    mock: Any, tmp_path: Path, sleeps: list[float]
+):
+    path = binary_file(tmp_path, 3000)
+    upload_routes(mock, FakeUploadServer(3000))
+    mock.route(method="PUT", host="www.googleapis.com", path="/upload/youtube/v3/videos").mock(
+        return_value=gerr(429, "rateLimitExceeded")
+    )
+    with pytest.raises(RateLimitedError):
+        youtube.publisher.publish(ctx(), make_req(path))
+
+
+def test_failure_before_the_final_chunk_is_retryable_and_uses_a_new_session_next_time(
+    mock: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+):
+    monkeypatch.setattr(youtube, "CHUNK_SIZE", KIB256)
+    path = binary_file(tmp_path, 3 * KIB256)
+    script: dict[int, Any] = {i: "network" for i in range(2, 20)}
+    upload_routes(mock, FakeUploadServer(3 * KIB256, script=script))
+    with pytest.raises(RetryableError) as ei:
+        youtube.publisher.publish(ctx(), make_req(path))
+    assert not isinstance(ei.value, UnknownOutcomeError)
+
+
+def poll_session(mock: Any, response: httpx.Response | Exception, state: dict | None = None):
+    route = mock.route(method="PUT", host="www.googleapis.com", path="/upload/youtube/v3/videos")
+    route.mock(side_effect=response) if isinstance(response, Exception) else route.mock(return_value=response)
+    session_state = state or {"session_uri": SESSION_URI, "total": 4000, "requested_privacy": "public"}
+    try:
+        return youtube.publisher.poll(ctx(), session_state), route
+    finally:
+        assert route.calls.last.request.headers["content-range"] == "bytes */4000"
+        assert route.calls.last.request.headers["authorization"] == f"Bearer {ACCESS}"
+
+
+def test_poll_session_404_proves_nothing_was_created(mock: Any):
+    with pytest.raises(RestartPublish) as ei:
+        poll_session(mock, httpx.Response(404))
+    assert ei.value.code == "session_expired"
+    assert "SESSION1" not in ei.value.message
+
+
+def test_poll_session_partial_308_proves_nothing_was_created(mock: Any):
+    with pytest.raises(RestartPublish) as ei:
+        poll_session(mock, httpx.Response(308, headers={"Range": "bytes=0-1999"}))
+    assert ei.value.code == "upload_incomplete"
+    with pytest.raises(RestartPublish):
+        poll_session(mock, httpx.Response(308))  # no Range header: nothing received
+
+
+def test_poll_session_308_with_every_byte_keeps_waiting(mock: Any):
+    state = {"session_uri": SESSION_URI, "total": 4000, "requested_privacy": "public"}
+    result, _ = poll_session(mock, httpx.Response(308, headers={"Range": "bytes=0-3999"}), state)
+    assert result.outcome == PublishOutcome.PROCESSING and result.state == state
+
+
+def test_poll_session_transient_failures_poll_again(mock: Any):
+    with pytest.raises(RetryableError) as ei:
+        poll_session(mock, httpx.ConnectError("down"))
+    assert not isinstance(ei.value, RestartPublish) and "SESSION1" not in ei.value.message
+    with pytest.raises(RetryableError) as ei:
+        poll_session(mock, gerr(503, "backendError", headers={"Retry-After": "90"}))
+    assert not isinstance(ei.value, RestartPublish) and ei.value.retry_after == 90
+    with pytest.raises(RetryableError):
+        poll_session(mock, httpx.Response(200, text="not json"))
+
+
+def test_poll_session_replays_the_original_error_of_a_finished_upload(mock: Any):
+    with pytest.raises(PermanentError) as ei:
+        poll_session(mock, gerr(400, "invalidTitle"))
+    assert ei.value.code == "invalidTitle"
+    with pytest.raises(RateLimitedError):
+        poll_session(mock, gerr(403, "quotaExceeded"))
+    with pytest.raises(PermanentError) as ei:
+        poll_session(mock, httpx.Response(201, json={"status": {}}))
+    assert ei.value.code == "no_video_id"
+
+
+def test_poll_session_state_without_a_usable_uri_is_permanent():
+    with pytest.raises(PermanentError):
+        youtube.publisher.poll(ctx(), {"session_uri": "http://insecure/x", "total": 10})
+    with pytest.raises(PermanentError):
+        youtube.publisher.poll(ctx(), {"session_uri": SESSION_URI})
+
+
+def test_publish_resumes_a_session_from_state_instead_of_starting_a_new_upload(
+    mock: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+):
+    monkeypatch.setattr(youtube, "CHUNK_SIZE", KIB256)
+    size = 3 * KIB256
+    path = binary_file(tmp_path, size)
+    server = FakeUploadServer(size)
+    server.received += path.read_bytes()[: 2 * KIB256]  # an earlier attempt delivered two chunks
+    start_route, _ = upload_routes(mock, server)
+    state = {"session_uri": SESSION_URI, "total": size, "requested_privacy": "public"}
+
+    result = youtube.publisher.publish(ctx(), make_req(path, state=state))
+
+    assert start_route.call_count == 0
+    assert [c[0] for c in server.calls] == ["probe", "chunk"]
+    assert server.calls[1][1] == f"bytes {2 * KIB256}-{size - 1}/{size}"
+    assert result.platform_post_id == "vid123"
+    assert bytes(server.received) == path.read_bytes()
+
+
+def test_publish_resume_of_a_finished_session_returns_the_video_without_sending_bytes(
+    mock: Any, tmp_path: Path, sleeps: list[float]
+):
+    path = binary_file(tmp_path, 4000)
+    server = FakeUploadServer(4000)
+    server.received += path.read_bytes()
+    start_route, _ = upload_routes(mock, server)
+    state = {"session_uri": SESSION_URI, "total": 4000, "requested_privacy": "public"}
+
+    result = youtube.publisher.publish(ctx(), make_req(path, state=state))
+
+    assert result.platform_post_id == "vid123" and start_route.call_count == 0
+    assert [c[0] for c in server.calls] == ["probe"]
+
+
+def test_publish_resume_of_an_expired_session_starts_one_new_session(
+    mock: Any, tmp_path: Path, sleeps: list[float]
+):
+    path = binary_file(tmp_path, 3000)
+    server = FakeUploadServer(3000, script={1: 404})
+    start_route, _ = upload_routes(mock, server)
+    state = {"session_uri": SESSION_URI, "total": 3000}
+
+    result = youtube.publisher.publish(ctx(), make_req(path, state=state))
+
+    assert start_route.call_count == 1 and result.platform_post_id == "vid123"
+    assert [c[0] for c in server.calls] == ["probe", "chunk"]
+
+
+def test_publish_resume_failure_keeps_the_outcome_unknown(mock: Any, tmp_path: Path, sleeps: list[float]):
+    path = binary_file(tmp_path, 3000)
+    server = FakeUploadServer(3000, script={i: "network" for i in range(1, 20)})
+    start_route, _ = upload_routes(mock, server)
+    state = {"session_uri": SESSION_URI, "total": 3000, "requested_privacy": "public"}
+
+    with pytest.raises(UnknownOutcomeError) as ei:
+        youtube.publisher.publish(ctx(), make_req(path, state=state))
+
+    assert ei.value.state == state and start_route.call_count == 0
+
+
+def test_publish_ignores_a_session_of_a_different_file(mock: Any, tmp_path: Path, sleeps: list[float]):
+    path = binary_file(tmp_path, 3000)
+    server = FakeUploadServer(3000)
+    start_route, _ = upload_routes(mock, server)
+    youtube.publisher.publish(ctx(), make_req(path, state={"session_uri": SESSION_URI, "total": 999}))
+    assert start_route.call_count == 1 and [c[0] for c in server.calls] == ["chunk"]
+
+
+def test_publish_with_a_video_in_state_only_checks_its_status(mock: Any, tmp_path: Path):
+    path = binary_file(tmp_path, 3000)
+    start_route, put = upload_routes(mock, FakeUploadServer(3000))
+    item = {"id": "vid123", "status": {"uploadStatus": "processed", "privacyStatus": "public"}}
+    mock.get(f"{API}/videos").mock(return_value=httpx.Response(200, json={"items": [item]}))
+
+    result = youtube.publisher.publish(
+        ctx(), make_req(path, state={"video_id": "vid123", "requested_privacy": "public"})
+    )
+
+    assert result.outcome == PublishOutcome.PUBLISHED and result.platform_post_id == "vid123"
+    assert not start_route.called and not put.called
+
+
+# --------------------------------------------------------------------------- titles are never invented
+
+
+def test_validate_requires_a_title_instead_of_inventing_one(sample_video: Path):
+    problems = youtube.publisher.validate(ctx(), make_req(sample_video, title="", caption=""))
+    assert problems == [youtube.TITLE_REQUIRED_MESSAGE]
+    assert "title" in problems[0].lower()
+    assert youtube.publisher.validate(ctx(), make_req(sample_video, title="", caption="Real line")) == []
+
+
+def test_publish_without_any_title_never_sends_a_default(mock: Any, tmp_path: Path):
+    path = binary_file(tmp_path, 100)
+    start_route, put = upload_routes(mock, FakeUploadServer(100))
+    with pytest.raises(PermanentError) as ei:
+        youtube.publisher.publish(ctx(), make_req(path, title="", caption="<>"))
+    assert ei.value.code == "invalid_settings" and "title" in ei.value.message.lower()
+    assert not start_route.called and not put.called
+
+
+# --------------------------------------------------------------------------- quota reset and refresh
+
+
+def test_quota_exhaustion_waits_until_the_next_pacific_midnight_plus_margin(
+    mock: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(youtube, "utcnow", lambda: datetime(2026, 10, 14, 22, 30, tzinfo=UTC))  # 15:30 PDT
+    path = binary_file(tmp_path, 100)
+    upload_routes(mock, FakeUploadServer(100), start=lambda r: gerr(403, "quotaExceeded"))
+
+    with pytest.raises(RateLimitedError) as ei:
+        youtube.publisher.publish(ctx(), make_req(path))
+
+    # midnight PDT = 07:00 UTC the next day: 8.5 h away, plus the 5 minute safety margin
+    assert ei.value.retry_after == pytest.approx(8.5 * 3600 + 300)
+    assert ei.value.code == "quotaExceeded"
+
+
+def test_quota_exhaustion_on_a_status_check_carries_the_same_wait(mock: Any, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(youtube, "utcnow", lambda: datetime(2026, 10, 14, 23, 55, tzinfo=UTC))  # 16:55 PDT
+    with pytest.raises(RateLimitedError) as ei:
+        poll_with(mock, gerr(403, "quotaExceeded"))
+    assert ei.value.retry_after == pytest.approx(7 * 3600 + 5 * 60 + 300)
+
+
+def channel_item(channel_id: str, title: str, **extra: Any) -> dict:
+    return {
+        "id": channel_id,
+        "snippet": {
+            "title": title,
+            "customUrl": extra.get("custom_url"),
+            "thumbnails": {"default": {"url": f"https://yt3.example/{channel_id}-d.jpg"}}
+            | ({"medium": {"url": f"https://yt3.example/{channel_id}-m.jpg"}} if extra.get("medium") else {}),
+        },
+        "contentDetails": {"relatedPlaylists": {"uploads": "UU" + channel_id[2:]}},
+    }
+
+
+def test_refresh_account_info_reads_the_connected_channel_with_mine(mock: Any):
+    route = mock.get(f"{API}/channels").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    channel_item("UCother", "Other channel"),
+                    channel_item("UCchan", "Magic Lap Renamed", custom_url="@magiclap", medium=True),
+                ]
+            },
+        )
+    )
+
+    info = youtube.refresh_account_info(ctx())
+
+    assert info == {
+        "display_name": "Magic Lap Renamed",
+        "avatar_url": "https://yt3.example/UCchan-m.jpg",
+        "extra": {"channel_id": "UCchan", "uploads_playlist_id": "UUchan", "custom_url": "@magiclap"},
+    }
+    params = route.calls.last.request.url.params
+    assert params["mine"] == "true" and "snippet" in params["part"] and "contentDetails" in params["part"]
+    assert route.calls.last.request.headers["authorization"] == f"Bearer {ACCESS}"
+
+
+def test_refresh_account_info_falls_back_to_the_external_id(mock: Any):
+    mock.get(f"{API}/channels").mock(
+        return_value=httpx.Response(200, json={"items": [channel_item("UCchan", "Only channel")]})
+    )
+    info = youtube.refresh_account_info(ctx(extra={}))
+    assert info["display_name"] == "Only channel" and info["avatar_url"] == "https://yt3.example/UCchan-d.jpg"
+
+
+def test_refresh_account_info_reports_a_channel_that_is_gone(mock: Any):
+    mock.get(f"{API}/channels").mock(
+        return_value=httpx.Response(200, json={"items": [channel_item("UCother", "Someone else")]})
+    )
+    with pytest.raises(PermanentError) as ei:
+        youtube.refresh_account_info(ctx())
+    assert ei.value.code == "channelNotFound"
+    mock.get(f"{API}/channels").mock(return_value=httpx.Response(200, json={"items": []}))
+    with pytest.raises(PermanentError):
+        youtube.refresh_account_info(ctx())
+
+
+def test_refresh_account_info_maps_api_errors(mock: Any):
+    route = mock.get(f"{API}/channels")
+    route.mock(return_value=gerr(401, "authError"))
+    with pytest.raises(AuthError):
+        youtube.refresh_account_info(ctx())
+    route.mock(return_value=gerr(403, "quotaExceeded"))
+    with pytest.raises(RateLimitedError):
+        youtube.refresh_account_info(ctx())
+    route.mock(side_effect=httpx.ConnectTimeout("slow"))
+    with pytest.raises(RetryableError) as ei:
+        youtube.refresh_account_info(ctx())
+    assert_no_secrets(ei.value)
 
 
 # --------------------------------------------------------------------------- error mapping

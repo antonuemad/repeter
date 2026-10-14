@@ -21,6 +21,7 @@ dependencies = [
   "yt-dlp[default]>=2026.8.19",
   "pillow>=10.4",
   "imagehash>=4.3",
+  "numpy>=1.26",
   "tzdata>=2024.1",
 ]
 

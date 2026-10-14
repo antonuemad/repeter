@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
+import re
 import secrets
 import sys
+from collections import Counter
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import and_, select, update
+
+KID_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 
 
 def _alembic_cfg():
@@ -28,11 +33,168 @@ def cmd_migrate(_: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_gen_secrets(_: argparse.Namespace) -> int:
-    from repeater.crypto import generate_key_spec
+def _ring_kids(spec: str) -> list[str]:
+    """Key ids in a REPEATER_TOKEN_ENCRYPTION_KEYS value, in order (duplicates kept)."""
+    return [part.split(":", 1)[0].strip() for part in spec.split(",") if part.strip()]
 
-    print(f"REPEATER_SECRET_KEY={secrets.token_urlsafe(48)}")
-    print(f"REPEATER_TOKEN_ENCRYPTION_KEYS={generate_key_spec('k1')}")
+
+def _duplicate_kids(spec: str) -> list[str]:
+    counts = Counter(_ring_kids(spec))
+    return sorted(kid for kid, n in counts.items() if n > 1)
+
+
+def _next_kid(kids: list[str]) -> str:
+    """k<N+1> after the highest k<N> in use (k1 for an empty ring)."""
+    numbers = [int(m.group(1)) for kid in kids if (m := re.fullmatch(r"k(\d+)", kid))]
+    return f"k{max(numbers, default=0) + 1}"
+
+
+def cmd_gen_secrets(args: argparse.Namespace) -> int:
+    """Without a configured key ring: a new secret key and a first token key (k1). With one (run
+    inside the web container, or with the old value exported): a new token key under the next free
+    kid, printed as the complete new ring, new key first and the current keys after it."""
+    from repeater.config import get_settings
+    from repeater.crypto import CryptoError, KeyRing, generate_key_spec
+
+    current = get_settings().token_encryption_keys.strip()
+    if current:
+        if _duplicate_kids(current):
+            print(
+                f"the configured REPEATER_TOKEN_ENCRYPTION_KEYS repeats key id(s) {_duplicate_kids(current)}; "
+                "give every key its own id first",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            KeyRing.parse(current)
+        except (CryptoError, ValueError) as exc:  # a malformed key is a binascii.Error
+            print(f"the configured REPEATER_TOKEN_ENCRYPTION_KEYS is invalid: {exc}", file=sys.stderr)
+            return 2
+    kids = _ring_kids(current)
+    kid = args.kid or _next_kid(kids)
+    if not KID_RE.fullmatch(kid):
+        print("the key id may only contain letters, digits, '_' and '-' (at most 32)", file=sys.stderr)
+        return 2
+    if kid in kids:
+        print(f"the key id {kid!r} is already in the ring; pick another with --kid", file=sys.stderr)
+        return 2
+    entry = generate_key_spec(kid)
+    if args.with_secret_key or not current:
+        print(f"REPEATER_SECRET_KEY={secrets.token_urlsafe(48)}")
+    if current:
+        print(f"REPEATER_TOKEN_ENCRYPTION_KEYS={entry},{current}")
+        print(
+            "# Rotation: this line holds your CURRENT keys too (treat it as a secret). Put it in deploy/.env,\n"
+            "# deploy, run `python -m repeater.cli rotate-keys`, and remove the old key only after it\n"
+            "# reports that no value uses it any more.",
+            file=sys.stderr,
+        )
+    else:
+        print(f"REPEATER_TOKEN_ENCRYPTION_KEYS={entry}")
+    return 0
+
+
+def _encrypted_columns() -> list[tuple]:
+    """Every column named *_enc in the models: (table, column, primary key columns)."""
+    import repeater.models  # noqa: F401 - registers the tables
+    from repeater.db import Base
+
+    found = []
+    for table in Base.metadata.sorted_tables:
+        pk = list(table.primary_key.columns)
+        found.extend((table, column, pk) for column in table.columns if column.name.endswith("_enc") and pk)
+    return found
+
+
+def _envelope_kid(value: str) -> str:
+    try:
+        kid = json.loads(value).get("k")
+    except Exception:  # noqa: BLE001 - anything unreadable is reported as "?"
+        return "?"
+    return kid if isinstance(kid, str) else "?"
+
+
+def cmd_rotate_keys(args: argparse.Namespace) -> int:
+    """Re-wrap every stored token envelope with the active key, so old keys can be retired."""
+    from repeater.config import get_settings
+    from repeater.crypto import CryptoError, KeyRing, decrypt_bytes, encrypt_bytes, needs_rewrap
+    from repeater.db import get_sessionmaker
+
+    spec = get_settings().token_encryption_keys
+    if _duplicate_kids(spec):
+        print(
+            f"REPEATER_TOKEN_ENCRYPTION_KEYS repeats key id(s) {_duplicate_kids(spec)}. "
+            "Give every key its own id first.",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        ring = KeyRing.parse(spec)
+    except (CryptoError, ValueError) as exc:  # a malformed key is a binascii.Error
+        print(f"REPEATER_TOKEN_ENCRYPTION_KEYS is invalid: {exc}", file=sys.stderr)
+        return 2
+    sessions = get_sessionmaker()
+    before: Counter[str] = Counter()
+    after: Counter[str] = Counter()
+    problems: list[str] = []
+    rewrapped = 0
+    for table, column, pk in _encrypted_columns():
+        label = f"{table.name}.{column.name}"
+        with sessions() as session:
+            ids = session.execute(select(*pk).where(column.is_not(None)).order_by(*pk)).all()
+        for row_id in ids:
+            where = and_(*(c == v for c, v in zip(pk, row_id, strict=True)))
+            # One short transaction per row, locked, so a concurrent token refresh by the worker is
+            # never overwritten with a stale value.
+            with sessions() as session, session.begin():
+                value = session.execute(select(column).where(where).with_for_update()).scalar_one_or_none()
+                if not value:
+                    continue
+                kid = _envelope_kid(value)
+                before[kid] += 1
+                if not needs_rewrap(value):
+                    after[kid] += 1
+                    continue
+                if args.dry_run:
+                    after[kid] += 1
+                    rewrapped += 1
+                    continue
+                try:
+                    plain = decrypt_bytes(value)
+                except CryptoError:
+                    after[kid] += 1
+                    problems.append(f"{label} id={'/'.join(str(v) for v in row_id)}: sealed with key {kid!r}")
+                    continue
+                session.execute(update(table).where(where).values({column.name: encrypt_bytes(plain)}))
+                after[ring.active_kid] += 1
+                rewrapped += 1
+
+    def fmt(counter: Counter[str]) -> str:
+        return ", ".join(f"{k}={n}" for k, n in sorted(counter.items())) or "none"
+
+    print(f"active key: {ring.active_kid}; keys in the ring: {', '.join(ring.keys)}")
+    print(f"values by sealing key before: {fmt(before)}")
+    print(f"{'would re-wrap' if args.dry_run else 're-wrapped'}: {rewrapped}")
+    if not args.dry_run:
+        print(f"values by sealing key now: {fmt(after)}")
+    if problems:
+        print(f"{len(problems)} value(s) could not be read and were left as they are:", file=sys.stderr)
+        for line in problems:
+            print(f"  {line}", file=sys.stderr)
+        print(
+            "Keep (or add back) the key with that id in REPEATER_TOKEN_ENCRYPTION_KEYS and run this again, "
+            "or reconnect those accounts in the dashboard.",
+            file=sys.stderr,
+        )
+        return 1
+    if not args.dry_run:
+        unused = [kid for kid in ring.keys if kid != ring.active_kid and after[kid] == 0]
+        if unused:
+            print(
+                f"No stored value uses key(s) {', '.join(unused)} any more. Remove them from "
+                "REPEATER_TOKEN_ENCRYPTION_KEYS once no backup you may still restore needs them "
+                "(dumps keep tokens sealed with the key that was active when they were taken)."
+            )
     return 0
 
 
@@ -69,6 +231,7 @@ def cmd_create_admin(args: argparse.Namespace) -> int:
 
 
 def cmd_check(_: argparse.Namespace) -> int:
+    from repeater import backups
     from repeater.config import get_settings
     from repeater.crypto import KeyRing
 
@@ -76,8 +239,10 @@ def cmd_check(_: argparse.Namespace) -> int:
     ok = True
     print(f"env={s.env} base_url={s.base_url} media_root={s.media_root}")
     try:
-        KeyRing.parse(s.token_encryption_keys)
-        print("token encryption keys: ok")
+        if _duplicate_kids(s.token_encryption_keys):
+            raise ValueError(f"key id(s) {_duplicate_kids(s.token_encryption_keys)} appear more than once")
+        ring = KeyRing.parse(s.token_encryption_keys)
+        print(f"token encryption keys: ok (active {ring.active_kid}, {len(ring.keys)} key(s))")
     except Exception as exc:  # noqa: BLE001
         ok = False
         print(f"token encryption keys: INVALID ({exc})")
@@ -90,16 +255,28 @@ def cmd_check(_: argparse.Namespace) -> int:
             f" (redirect URI: {s.oauth_redirect_uri(p)})"
         )
     print(f"telegram: {'configured' if s.telegram_bot_token and s.telegram_chat_id else 'not configured'}")
-    return 0 if ok else 1
+    backup_ok, backup_line = backups.status(s.backup_status_file)
+    if backup_line:
+        print(f"backups: {backup_line}")
+    return 0 if ok and backup_ok else 1
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="repeater")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("migrate", help="apply database migrations").set_defaults(fn=cmd_migrate)
-    sub.add_parser("gen-secrets", help="print new secret key and token encryption key").set_defaults(
-        fn=cmd_gen_secrets
+    gs = sub.add_parser(
+        "gen-secrets",
+        help="print a new secret key and token key, or (with a key ring configured) a rotated ring",
     )
+    gs.add_argument("--kid", help="key id for the new token key (default: the next free k<N>)")
+    gs.add_argument(
+        "--with-secret-key", action="store_true", help="also print a new REPEATER_SECRET_KEY when rotating"
+    )
+    gs.set_defaults(fn=cmd_gen_secrets)
+    rk = sub.add_parser("rotate-keys", help="re-wrap every stored token with the active encryption key")
+    rk.add_argument("--dry-run", action="store_true", help="only report what would be re-wrapped")
+    rk.set_defaults(fn=cmd_rotate_keys)
     sub.add_parser("check", help="validate configuration").set_defaults(fn=cmd_check)
     ca = sub.add_parser("create-admin", help="create/update the admin user and workspace")
     ca.add_argument("--email", required=True)

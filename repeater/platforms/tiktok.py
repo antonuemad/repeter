@@ -632,9 +632,9 @@ def _rule_settings(raw: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _client_audited() -> bool:
-    """Whether TikTok has audited this app (setting REPEATER_TIKTOK_AUDITED). An unaudited app can
-    only post 'Only me' (SELF_ONLY) to private accounts. True while the setting does not exist."""
-    return bool(getattr(get_settings(), "tiktok_audited", True))
+    """Whether TikTok has audited this app (setting REPEATER_TIKTOK_AUDITED, default false). An
+    unaudited app can only post 'Only me' (SELF_ONLY) to private accounts."""
+    return bool(get_settings().tiktok_audited)
 
 
 def _direct_settings_problems(settings: dict[str, Any]) -> list[str]:

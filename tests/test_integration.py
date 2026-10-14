@@ -126,7 +126,9 @@ def processing_post(db, workspace, make_account, sample_video):
 
     def _make(platform: str = "instagram", *, attempts: int = 0) -> ScheduledPost:
         account = make_account(platform, expires_in=None, extra={"ig_user_id": "1", "page_id": "2"})
-        rules.ensure_rule(db, account)
+        # New rules start disabled; an Instagram post is only polled (which publishes the
+        # container) while publishing is switched on for the account.
+        rules.ensure_rule(db, account).enabled = True
         video = Video(
             workspace_id=workspace.id,
             status=VideoStatus.READY,
@@ -277,9 +279,13 @@ class FakeGoogle:
 
 
 def test_disconnect_keeps_a_google_grant_other_channels_still_use(web_owner, db, make_account):
-    first = make_account("youtube", external_id="UC-1", refresh_token="shared-grant")
-    second = make_account("youtube", external_id="UC-2", refresh_token="shared-grant")
-    other = make_account("youtube", external_id="UC-3", refresh_token="own-grant")
+    """Two channels of one Google login (same google_sub, different refresh tokens: every connect
+    issues a new one) share a grant; a channel of another login has its own."""
+    first = make_account("youtube", external_id="UC-1", refresh_token="grant-a", extra={"google_sub": "g-1"})
+    second = make_account("youtube", external_id="UC-2", refresh_token="grant-b", extra={"google_sub": "g-1"})
+    other = make_account(
+        "youtube", external_id="UC-3", refresh_token="own-grant", extra={"google_sub": "g-2"}
+    )
     fake = FakeGoogle()
     with override("oauth", "google", fake):
         for account in (first, second, other):

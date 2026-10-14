@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import html
 import logging
-import os
 import re
 
 import httpx
@@ -40,9 +39,13 @@ _CATEGORIES: dict[str, tuple[str, str, str]] = {
     ),
     "account_reconnect": ("{n} account must be reconnected", "{n} accounts must be reconnected", "/accounts"),
     "source_failing": ("{n} source is failing", "{n} sources are failing", "/sources"),
+    "disk_low": (
+        "The server's disk is nearly full, so imports are waiting",
+        "The server's disk is nearly full, so imports are waiting",
+        "/library",
+    ),
     "alert": ("Something needs your attention", "Something needs your attention", "/"),
 }
-_TRUTHY = {"1", "true", "yes", "on"}
 _BOT_TOKEN_RE = re.compile(r"/bot[^/\s]+/")
 
 
@@ -62,11 +65,8 @@ logging.getLogger("httpx").addFilter(_RedactBotToken())
 
 def details_enabled() -> bool:
     """True when the operator opted in to alerts that quote titles, captions and account names
-    (settings.telegram_include_details, or REPEATER_TELEGRAM_INCLUDE_DETAILS in the environment)."""
-    flag = getattr(get_settings(), "telegram_include_details", None)
-    if flag is None:
-        flag = os.environ.get("REPEATER_TELEGRAM_INCLUDE_DETAILS", "")
-    return flag is True or str(flag).strip().lower() in _TRUTHY
+    (settings.telegram_include_details, env REPEATER_TELEGRAM_INCLUDE_DETAILS)."""
+    return bool(get_settings().telegram_include_details)
 
 
 def notify(
@@ -81,7 +81,7 @@ def notify(
 
     `text` is the full human message; it is only sent when details_enabled(). Otherwise a minimal
     message is sent, built from `category` (one of post_needs_attention, uploads_interrupted,
-    account_reconnect, source_failing; anything else is a generic alert) and `count`."""
+    account_reconnect, source_failing, disk_low; anything else is a generic alert) and `count`."""
     try:
         settings = get_settings()
         token, chat_id = settings.telegram_bot_token, settings.telegram_chat_id

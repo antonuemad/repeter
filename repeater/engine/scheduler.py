@@ -417,8 +417,7 @@ def _plan_account(ctx: _Context, rule: RotationRule, account: ConnectedAccount) 
     platform = Platform(account.platform)
     problems = rules.rule_problems(rule)
     if problems:
-        known = getattr(rules, "PROBLEM_MESSAGES", {})
-        needed = " and ".join(known.get(code, code) for code in problems)
+        needed = " and ".join(rules.PROBLEM_MESSAGES.get(code, code) for code in problems)
         _warn_once(
             ctx,
             f"rule_not_ready:{rule.id}:{int(_ts(rule.updated_at))}",

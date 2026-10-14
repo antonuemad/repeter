@@ -13,6 +13,7 @@ from fastapi import Request
 from fastapi.templating import Jinja2Templates
 from starlette.responses import HTMLResponse
 
+from repeater.engine.actions import may_be_live
 from repeater.engine.captions import platform_name
 from repeater.timeutil import ensure_aware, tz
 from repeater.web import csrf, i18n
@@ -68,7 +69,11 @@ def _build_env() -> jinja2.Environment:
         lstrip_blocks=True,
     )
     env.globals.update(
-        fmt_dt=fmt_dt, fmt_bytes=fmt_bytes, fmt_duration=fmt_duration, platform_name=platform_name
+        fmt_dt=fmt_dt,
+        fmt_bytes=fmt_bytes,
+        fmt_duration=fmt_duration,
+        platform_name=platform_name,
+        may_be_live=may_be_live,
     )
     return env
 

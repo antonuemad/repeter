@@ -838,3 +838,20 @@ def test_a_video_being_processed_or_published_cannot_be_deleted(
     assert db.get(Video, video.id) is not None
     set_lang(web_owner, "en")
     assert "is being prepared or published right now" in web_owner.get(f"/library/{video.id}").text
+
+
+def test_overview_warns_the_owner_when_the_backup_is_stale(web_owner, web_editor, monkeypatch, tmp_path):
+    import time
+
+    from repeater.config import get_settings
+
+    marker = tmp_path / "last_success"
+    monkeypatch.setattr(get_settings(), "backup_status_file", marker)
+    set_lang(web_owner, "en")
+    set_lang(web_editor, "en")
+    assert "database backup" not in web_owner.get("/").text  # no record yet: a new server
+    marker.write_text(f"{int(time.time() - 3 * 3600)} 2026-10-14T03:17:00Z\n")
+    assert "database backup" not in web_owner.get("/").text
+    marker.write_text(f"{int(time.time() - 50 * 3600)} 2026-10-12T03:17:00Z\n")
+    assert "last successful database backup was 50 hours ago" in web_owner.get("/").text
+    assert "database backup" not in web_editor.get("/").text  # editors cannot act on it

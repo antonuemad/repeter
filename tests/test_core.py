@@ -54,6 +54,17 @@ def test_key_rotation(monkeypatch):
     assert not crypto.needs_rewrap(crypto.encrypt_json({"a": 1}))
 
 
+def test_keyring_refuses_a_repeated_kid():
+    with pytest.raises(crypto.CryptoError, match="more than once"):
+        crypto.KeyRing.parse(f"{crypto.generate_key_spec('k1')},{crypto.generate_key_spec('k1')}")
+
+
+def test_media_signature_check_never_raises_for_odd_input():
+    exp = 2_000_000_000
+    for sig in ("", "é" * 43, "\ud800abc", "a" * 5000, "../etc", "ab cd"):
+        assert crypto.verify_media_signature(1, exp, sig, now=1_000_000) == "invalid"
+
+
 def test_signed_media_url():
     path = crypto.signed_media_path(42, ttl_seconds=60, now=1_000_000)
     _, m, vid, exp, sig = path.split("/")
@@ -282,6 +293,12 @@ def test_lease_timeout_is_never_shorter_than_a_few_renewals(monkeypatch):
     assert queue.lease_timeout_minutes() == 6.0
     monkeypatch.setattr(settings, "job_lock_timeout_minutes", 30)
     assert queue.lease_timeout_minutes() == 30.0
+
+
+def test_lease_timeout_default_is_ten_minutes():
+    from repeater.config import Settings
+
+    assert Settings.model_fields["job_lock_timeout_minutes"].default == 10
 
 
 def test_release_owned_returns_this_workers_jobs_without_consuming_attempts(db):

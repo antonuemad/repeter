@@ -80,19 +80,11 @@ def set_lang(client: TestClient, lang: str) -> None:
 @pytest.fixture
 def web_plan_calls(monkeypatch) -> Recorder:
     """Records every call of engine.actions.invalidate_plan (contract C2) made by the dashboard and
-    calls through to the real function. Until the engine module provides it, a stand-in that only
-    enqueues plan_workspace is installed so the dashboard keeps working."""
+    calls through to the real function."""
     from repeater.engine import actions
-    from repeater.jobs import kinds
 
-    real = getattr(actions, "invalidate_plan", None)
-
-    def fallback(session, workspace_id, *, account_id=None, actor="system"):
-        kinds.enqueue_plan_workspace(session, workspace_id)
-        return 0
-
-    recorder = Recorder(result=real or fallback)
-    monkeypatch.setattr(actions, "invalidate_plan", recorder, raising=False)
+    recorder = Recorder(result=actions.invalidate_plan)
+    monkeypatch.setattr(actions, "invalidate_plan", recorder)
     return recorder
 
 

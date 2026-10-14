@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import shutil
@@ -10,12 +11,14 @@ import subprocess
 from datetime import timedelta
 from pathlib import Path
 
+import numpy as np
 import pytest
 from PIL import Image
 
 from repeater.config import get_settings
-from repeater.media import encode, fingerprint, retention, storage
+from repeater.media import encode, filters, fingerprint, retention, storage
 from repeater.media.encode import (
+    DiskFullError,
     EncodeError,
     EncodeTimeout,
     build_encode_command,
@@ -59,6 +62,51 @@ def top_level_atoms(path: Path) -> list[str]:
             else:
                 fh.seek(size - 8, 1)
     return atoms
+
+
+_CONTAINER_BOXES = {b"moov", b"trak", b"mdia", b"minf", b"stbl", b"edts", b"udta", b"dinf"}
+
+
+def mp4_boxes(path: Path) -> list[str]:
+    """Slash-joined paths of every box inside moov (e.g. "moov/trak/edts/elst")."""
+    data = path.read_bytes()
+    found: list[str] = []
+
+    def walk(start: int, end: int, trail: str) -> None:
+        pos = start
+        while pos + 8 <= end:
+            size, kind = struct.unpack(">I4s", data[pos : pos + 8])
+            header = 8
+            if size == 1:
+                size, header = struct.unpack(">Q", data[pos + 8 : pos + 16])[0], 16
+            elif size == 0:
+                size = end - pos
+            name = f"{trail}/{kind.decode('latin-1')}" if trail else kind.decode("latin-1")
+            found.append(name)
+            if kind in _CONTAINER_BOXES:
+                walk(pos + header, pos + size, name)
+            pos += size
+
+    walk(0, len(data), "")
+    return found
+
+
+def decode_rgb(
+    path: Path, vf: str = "null", at_s: float = 0.5, size: tuple[int, int] = (1080, 1920)
+) -> np.ndarray:
+    """One frame as an RGB array, read the way an SDR BT.709 player reads it."""
+    w, h = size
+    raw = subprocess.run(
+        ["ffmpeg", "-v", "error", "-ss", str(at_s), "-i", str(path), "-frames:v", "1",
+         "-vf", f"{vf},scale={w}:{h}:in_color_matrix=bt709:out_color_matrix=bt709,format=rgb24",
+         "-f", "rawvideo", "-"],
+        check=True, capture_output=True,
+    ).stdout  # fmt: skip
+    return np.frombuffer(raw, np.uint8).reshape(h, w, 3).astype(float)
+
+
+def mean_luma(rgb: np.ndarray) -> float:
+    return float((0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]).mean())
 
 
 def make_clip(
@@ -227,31 +275,69 @@ def test_probe_missing_file_and_missing_binary(tmp_path, sample_video, monkeypat
 # --------------------------------------------------------------------------- encode
 
 
-def test_build_encode_command_matches_plan_profile(tmp_path):
+def test_build_encode_command_matches_plan_profile(tmp_path, monkeypatch):
+    monkeypatch.setattr(get_settings(), "encode_preset", "veryfast")
     src, out = tmp_path / "in.mov", tmp_path / "out.part"
     cmd = build_encode_command(src, out, has_audio=True, ffmpeg_bin="ffmpeg")
     joined = " ".join(cmd)
     assert (
-        "-vf scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,"
+        "-vf scale=w=trunc(min(iw*sar\\,4096)/2)*2:h=ih,setsar=1,"
+        "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1,"
         "fps=30,format=yuv420p" in joined
     )
     assert (
-        "-c:v libx264 -profile:v high -level 4.0 -preset slow -crf 20 -maxrate 12M -bufsize 24M "
-        "-g 60 -keyint_min 60 -sc_threshold 0 -bf 2" in joined
+        "-c:v libx264 -profile:v high -level 4.0 -preset veryfast -crf 20 -maxrate 12000k -bufsize 24000k "
+        "-g 60 -keyint_min 60 -sc_threshold 0 -bf 0" in joined
     )
-    assert "-c:a aac -b:a 192k -ar 48000 -ac 2" in joined
+    assert "-color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range tv" in joined
+    assert "-c:a aac -b:a 128k -ar 48000 -ac 2" in joined
+    assert "-use_editlist 0 -avoid_negative_ts make_zero -map_metadata -1" in joined
     assert "-movflags +faststart -f mp4" in joined and cmd[-1] == str(out)
     assert "-protocol_whitelist file -i " + str(src) in joined
     assert "-map 0:V:0 -map 0:a:0" in joined and "anullsrc" not in joined
+    assert "zscale" not in joined  # SDR input: no colour conversion
 
     silent = " ".join(build_encode_command(src, out, has_audio=False, ffmpeg_bin="ffmpeg"))
     assert "-f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000" in silent
     assert "-map 0:V:0 -map 1:a:0 -shortest" in silent
 
 
+def test_encode_preset_comes_from_settings(monkeypatch, caplog):
+    monkeypatch.setattr(get_settings(), "encode_preset", "ultrafast")
+    assert encode.encode_preset() == "ultrafast"
+    assert "-preset ultrafast" in " ".join(build_encode_command(Path("a"), Path("b"), has_audio=True))
+    monkeypatch.setattr(get_settings(), "encode_preset", "bogus; rm -rf")
+    assert encode.encode_preset() == "medium" and "not an x264 preset" in caplog.text
+
+
+def test_encode_timeout_follows_settings(monkeypatch):
+    s = get_settings()
+    monkeypatch.setattr(s, "encode_timeout_base_s", 300)
+    monkeypatch.setattr(s, "encode_timeout_per_media_s", 20.0)
+    monkeypatch.setattr(s, "encode_timeout_max_s", 1800)
+    assert encode.encode_timeout(10) == 500
+    assert encode.encode_timeout(60) == 1500
+    assert encode.encode_timeout(900) == 1800  # capped
+    assert encode.encode_timeout(600) > encode.encode_timeout(60) > encode.encode_timeout(3)
+    monkeypatch.setattr(s, "encode_timeout_max_s", 400)
+    assert encode.encode_timeout(60) == 400
+
+
+def test_encode_for_platforms_passes_a_duration_based_timeout(sample_video, tmp_path, monkeypatch):
+    seen: list[float] = []
+    monkeypatch.setattr(encode, "_run_ffmpeg", lambda cmd, *, timeout_s, **kw: seen.append(timeout_s))
+    with pytest.raises(EncodeError, match="no output"):
+        encode_for_platforms(sample_video, tmp_path / "o.mp4")
+    assert seen == [encode.encode_timeout(probe(sample_video).duration_s)]
+    seen.clear()
+    with pytest.raises(EncodeError):
+        encode_for_platforms(sample_video, tmp_path / "o.mp4", timeout_s=7)
+    assert seen == [7.0]  # an explicit timeout still wins
+
+
 def test_encode_vertical_with_real_profile(encoded_sample, sample_video):
     info = probe(encoded_sample)
-    assert (info.width, info.height, info.fps) == (1080, 1920, 30)
+    assert (info.width, info.height) == (1080, 1920) and abs(info.fps - 30) < 0.5
     assert info.video_codec == "h264" and info.audio_codec == "aac"
     assert abs(info.duration_s - probe(sample_video).duration_s) < 0.2
     v, a = (
@@ -264,9 +350,282 @@ def test_encode_vertical_with_real_profile(encoded_sample, sample_video):
     assert not list(encoded_sample.parent.glob(".*.part"))
 
 
+def test_encode_output_has_no_edit_lists_and_128k_audio(encoded_sample, sample_video):
+    """Instagram's Reel spec: no edit lists, moov first, AAC 128 kb/s (import-media-9)."""
+    boxes = mp4_boxes(encoded_sample)
+    assert "moov/trak/mdia" in boxes and not any("edts" in b or "elst" in b for b in boxes), boxes
+    streams = {s["codec_type"]: s for s in ffprobe_streams(encoded_sample)}
+    assert 110_000 <= int(streams["audio"]["bit_rate"]) <= 140_000
+    assert streams["video"]["start_time"] == "0.000000" and streams["audio"]["start_time"] == "0.000000"
+    assert (streams["video"]["color_space"], streams["video"]["color_transfer"]) == ("bt709", "bt709")
+    assert (streams["video"]["color_primaries"], streams["video"]["color_range"]) == ("bt709", "tv")
+    # The source's own metadata (device, location, creation time) is not carried over.
+    tags = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format_tags", "-of", "json", str(encoded_sample)],
+        check=True,
+        capture_output=True,
+    ).stdout
+    assert set(json.loads(tags).get("format", {}).get("tags", {})) <= {
+        "major_brand",
+        "minor_version",
+        "compatible_brands",
+        "encoder",
+    }
+
+
+def test_max_video_kbps_keeps_long_videos_under_the_instagram_cap():
+    cap = encode.size_cap_bytes()
+    assert cap == 300 * 1024**2  # Instagram, the smallest limit
+    assert encode.max_video_kbps(30) == encode.MAX_VIDEO_KBPS  # short videos keep the full ceiling
+    for seconds in (200, 420, 900):
+        kbps = encode.max_video_kbps(seconds)
+        assert kbps < encode.MAX_VIDEO_KBPS
+        assert (kbps + encode.AUDIO_KBPS) * 1000 / 8 * seconds <= cap * encode.SIZE_MARGIN * 1.001
+    assert encode.max_video_kbps(900) >= 2000  # still a decent picture at the longest allowed length
+    cmd = " ".join(build_encode_command(Path("a"), Path("b"), has_audio=True, max_kbps=2500))
+    assert "-maxrate 2500k -bufsize 5000k" in cmd
+
+
+def test_oversized_encode_is_redone_at_a_lower_bitrate(sample_video, tmp_path, monkeypatch):
+    """The file must fit the smallest platform limit: if rate control overshoots, encode again."""
+    monkeypatch.setattr(get_settings(), "encode_preset", "ultrafast")
+    ref = tmp_path / "ref.mp4"
+    encode_for_platforms(sample_video, ref)
+    cap = int(ref.stat().st_size * 0.6)
+    monkeypatch.setattr(encode, "size_cap_bytes", lambda: cap)
+    seen_kbps: list[int] = []
+    real = encode.build_encode_command
+
+    def spy(*a, **kw):
+        seen_kbps.append(kw["max_kbps"])
+        return real(*a, **kw)
+
+    monkeypatch.setattr(encode, "build_encode_command", spy)
+    out = tmp_path / "capped.mp4"
+    encode_for_platforms(sample_video, out)
+    assert out.stat().st_size <= cap
+    assert len(seen_kbps) >= 2 and seen_kbps[1] < seen_kbps[0]
+    # A file that cannot be made small enough is an error, not a silent over-limit upload.
+    monkeypatch.setattr(encode, "size_cap_bytes", lambda: 2000)
+    with pytest.raises(EncodeError, match="limit of the smallest platform"):
+        encode_for_platforms(sample_video, tmp_path / "never.mp4")
+    assert not (tmp_path / "never.mp4").exists() and not list(tmp_path.glob(".*.part"))
+
+
+def test_ffmpeg_disk_full_is_its_own_retryable_error(tmp_path):
+    full = ["sh", "-c", "echo 'av_interleaved_write_frame(): No space left on device' >&2; exit 1"]
+    with pytest.raises(DiskFullError) as exc:
+        encode._run_ffmpeg(full, timeout_s=5, what="encoding")
+    assert not isinstance(exc.value, EncodeError)  # the importer must not fail the video for it
+    assert isinstance(exc.value, MediaToolError)
+    with pytest.raises(EncodeError):
+        encode._run_ffmpeg(["sh", "-c", "echo 'Invalid data' >&2; exit 1"], timeout_s=5, what="encoding")
+
+
+# --------------------------------------------------------------------------- colour (HDR) and geometry
+
+
+def _hdr_clip(path: Path, *, kind: str, base: Path, rotate: bool = False) -> Path:
+    """An iPhone/Android-style HEVC Main10 clip tagged BT.2020 HLG or PQ (BT.2408: SDR white is
+    203 cd/m2), made from the SDR clip `base` with zscale. `rotate` adds the phone's display matrix."""
+    transfer = {"hlg": "arib-std-b67", "pq": "smpte2084"}[kind]
+    vf = (
+        f"zscale=tin=bt709:pin=bt709:min=bt709:rin=tv:t={transfer}:p=bt2020:m=bt2020nc:r=tv:npl=203,"
+        "format=yuv420p10le"
+    )
+    plain = path.with_name(f"{path.stem}.plain.mkv") if rotate else path
+    ffmpeg(
+        "-i", str(base), "-vf", vf, "-c:v", "libx265", "-preset", "ultrafast", "-crf", "8",
+        "-x265-params", f"colorprim=bt2020:transfer={transfer}:colormatrix=bt2020nc:range=limited:log-level=error",
+        "-tag:v", "hvc1", "-an", str(plain),
+    )  # fmt: skip
+    if rotate:
+        ffmpeg("-display_rotation", "-90", "-i", str(plain), "-c", "copy", str(path))
+    return path
+
+
+@pytest.fixture(scope="module")
+def sdr_reference(clips: Path) -> Path:
+    """SDR BT.709 pictures with saturated colours, portrait, the way a phone records them."""
+    out = clips / "sdr_reference.mp4"
+    ffmpeg(
+        "-f", "lavfi", "-i", "mandelbrot=size=360x640:rate=30,trim=duration=1,setpts=PTS-STARTPTS,format=yuv420p",
+        "-c:v", "libx264", "-crf", "10", "-preset", "ultrafast",
+        "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", str(out),
+    )  # fmt: skip
+    return out
+
+
+@pytest.mark.skipif(not filters.hdr_tools_available(), reason="ffmpeg without zscale/tonemap")
+@pytest.mark.parametrize("kind", ["hlg", "pq"])
+def test_hdr_sources_are_tone_mapped_to_tagged_sdr(kind, clips, sdr_reference, tmp_path, monkeypatch):
+    """import-media-3: HDR was truncated to 8 bit and kept its BT.2020/HLG tags, so every SDR
+    player showed it dull and dark. Now the output is BT.709 SDR and looks like the SDR original."""
+    monkeypatch.setattr(get_settings(), "encode_preset", "ultrafast")
+    hdr = _hdr_clip(clips / f"{kind}.mkv", kind=kind, base=sdr_reference)
+    info = probe(hdr)
+    assert info.is_hdr and info.bit_depth == 10 and info.color_primaries == "bt2020"
+    out = tmp_path / f"{kind}.mp4"
+    encode_for_platforms(hdr, out)
+
+    v = next(s for s in ffprobe_streams(out) if s["codec_type"] == "video")
+    assert v["pix_fmt"] == "yuv420p" and v["codec_name"] == "h264"
+    assert (v["color_space"], v["color_transfer"], v["color_primaries"]) == ("bt709", "bt709", "bt709")
+
+    reference = decode_rgb(sdr_reference, encode.video_filter(None))
+    converted = decode_rgb(out)
+    naive = tmp_path / "naive.mp4"  # what the old filter graph produced: no conversion at all
+    ffmpeg(
+        "-i",
+        str(hdr),
+        "-vf",
+        encode.video_filter(None),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        str(naive),
+    )
+    old = decode_rgb(naive)
+    assert np.abs(reference - converted).mean() < 8
+    assert abs(mean_luma(converted) / mean_luma(reference) - 1) < 0.05  # not washed out, not dark
+    assert np.abs(reference - old).mean() > 20 and mean_luma(old) < 0.95 * mean_luma(reference)
+
+
+@pytest.mark.skipif(not filters.hdr_tools_available(), reason="ffmpeg without zscale/tonemap")
+def test_rotated_hlg_phone_clip_keeps_orientation_and_colours(clips, sdr_reference, tmp_path, monkeypatch):
+    monkeypatch.setattr(get_settings(), "encode_preset", "ultrafast")
+    landscape_sdr = clips / "sdr_landscape.mp4"
+    ffmpeg("-i", str(sdr_reference), "-vf", "transpose=2", "-c:v", "libx264", "-crf", "10", "-preset", "ultrafast",
+           "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", str(landscape_sdr))  # fmt: skip
+    hdr = _hdr_clip(clips / "hlg_rot.mov", kind="hlg", base=landscape_sdr, rotate=True)
+    assert probe(hdr).rotation == 90 and (probe(hdr).width, probe(hdr).height) == (360, 640)
+    out = tmp_path / "rot.mp4"
+    info = encode_for_platforms(hdr, out)
+    assert (info.width, info.height, info.rotation) == (1080, 1920, 0)
+    converted = decode_rgb(out)
+    reference = decode_rgb(sdr_reference, encode.video_filter(None))
+    assert (
+        np.abs(reference - converted).mean() < 12
+        and abs(mean_luma(converted) / mean_luma(reference) - 1) < 0.08
+    )
+
+
+def test_hdr_filter_chain_is_built_from_the_probe():
+    base = {
+        "duration_s": 5.0, "width": 1080, "height": 1920, "fps": 30.0, "video_codec": "hevc",
+        "audio_codec": None, "has_audio": False, "size_bytes": 1, "pix_fmt": "yuv420p10le", "bit_depth": 10,
+        "color_space": "bt2020nc", "color_primaries": "bt2020", "color_range": "tv",
+    }  # fmt: skip
+    hlg = filters.colour_filter(ProbeResult(**base, color_transfer="arib-std-b67"))
+    assert "tin=arib-std-b67:pin=bt2020:min=bt2020nc:rin=tv:t=linear:npl=203" in hlg
+    assert "tonemap=tonemap=mobius:param=0.8:peak=4.93" in hlg  # 1000 cd/m2 / 203
+    assert hlg.endswith("t=bt709:m=bt709:r=tv:dither=ordered,format=yuv420p")
+    pq = filters.colour_filter(ProbeResult(**base, color_transfer="smpte2084", peak_nits=4000.0))
+    assert "tin=smpte2084" in pq and "peak=19.70" in pq  # HDR10 MaxCLL / mastering peak is honoured
+    pq_default = filters.colour_filter(ProbeResult(**base, color_transfer="smpte2084"))
+    assert "peak=4.93" in pq_default
+    wide = filters.colour_filter(ProbeResult(**base, color_transfer="bt2020-10"))
+    assert "tonemap" not in wide and "tin=bt2020-10" in wide and "p=bt709:t=bt709" in wide
+    sdr = ProbeResult(
+        **{**base, "color_space": "bt709", "color_primaries": "bt709", "bit_depth": 8, "pix_fmt": "yuv420p"},
+        color_transfer="bt709",
+    )
+    assert filters.colour_filter(sdr) == "" and filters.colour_filter(None) == ""
+
+
+def test_hdr_without_zscale_is_a_tool_error_not_a_wrong_picture(monkeypatch):
+    monkeypatch.setattr(filters, "hdr_tools_available", lambda *a, **k: False)
+    hlg = ProbeResult(5.0, 1080, 1920, 30.0, "hevc", None, False, 1, color_transfer="arib-std-b67")
+    with pytest.raises(filters.HdrToolsMissing, match="zscale") as exc:
+        encode.video_filter(hlg)
+    assert isinstance(exc.value, MediaToolError)  # the importer retries it, then reports it
+    assert "zscale" not in encode.video_filter(ProbeResult(5.0, 1080, 1920, 30.0, "h264", None, False, 1))
+
+
+def test_filter_listing_is_parsed_from_ffmpeg(monkeypatch):
+    filters._filter_names.cache_clear()
+    names = filters._filter_names("ffmpeg")
+    assert {"scale", "pad", "fps", "format"} <= names
+    assert filters.hdr_tools_available("ffmpeg") == ({"zscale", "tonemap"} <= names)
+    assert filters.hdr_tools_available("/nonexistent/ffmpeg") is False
+
+
+def _anamorphic(path: Path, *, size: str, sar: str) -> Path:
+    ffmpeg("-f", "lavfi", "-i", f"testsrc2=size={size}:rate=30:duration=2,setsar={sar.replace(':', '/')}",
+           "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(path))  # fmt: skip
+    return path
+
+
+def test_probe_applies_the_pixel_aspect_ratio(clips):
+    """import-media-12: a 1440x1080 clip with 4:3 pixels is shown 1920x1080, not 1440x1080."""
+    hdv = _anamorphic(clips / "hdv.mp4", size="1440x1080", sar="4:3")
+    info = probe(hdv)
+    assert (info.width, info.height) == (1920, 1080) and info.is_landscape
+    square = _anamorphic(clips / "square_pixels.mp4", size="1440x1080", sar="1:1")
+    assert (probe(square).width, probe(square).height) == (1440, 1080)
+    tall = _anamorphic(clips / "narrow.mp4", size="1080x1080", sar="4:3")
+    assert (probe(tall).width, probe(tall).height) == (1440, 1080)
+
+
+def test_anamorphic_source_is_encoded_with_square_pixels(clips, tmp_path, monkeypatch):
+    monkeypatch.setattr(get_settings(), "encode_preset", "ultrafast")
+    hdv = _anamorphic(clips / "hdv2.mp4", size="1440x1080", sar="4:3")
+    out = tmp_path / "hdv.enc.mp4"
+    info = encode_for_platforms(hdv, out)
+    v = next(s for s in ffprobe_streams(out) if s["codec_type"] == "video")
+    assert (info.width, info.height) == (1080, 1920)
+    assert v["sample_aspect_ratio"] == "1:1" and v["display_aspect_ratio"] == "9:16"
+    # 1920x1080 on display: fitted to 1080 wide gives a 608 px band, not the 810 px of the coded size.
+    frame = decode_rgb(out)
+    content_rows = [y for y in range(0, 1920, 8) if frame[y].max() > 40]
+    assert 590 <= (content_rows[-1] - content_rows[0]) <= 625
+
+
+def test_parse_probe_json_reads_colour_tags_and_hdr_peak():
+    info = parse_probe_json(
+        _probe_json(
+            pix_fmt="yuv420p10le",
+            color_space="bt2020nc",
+            color_transfer="smpte2084",
+            color_primaries="bt2020",
+            color_range="tv",
+            side_data_list=[
+                {"side_data_type": "Mastering display metadata", "max_luminance": "10000000/10000"},
+                {"side_data_type": "Content light level metadata", "max_content": 1200, "max_average": 300},
+            ],
+        )
+    )
+    assert info.is_hdr and info.bit_depth == 10 and info.peak_nits == 1200.0
+    assert (info.color_space, info.color_transfer, info.color_primaries, info.color_range) == (
+        "bt2020nc", "smpte2084", "bt2020", "tv",
+    )  # fmt: skip
+    only_mastering = parse_probe_json(
+        _probe_json(
+            color_transfer="arib-std-b67",
+            side_data_list=[{"side_data_type": "Mastering display metadata", "max_luminance": "4000/1"}],
+        )
+    )
+    assert only_mastering.peak_nits == 4000.0 and only_mastering.is_hdr
+    plain = parse_probe_json(_probe_json(pix_fmt="yuv420p", color_transfer="bt709", color_primaries="bt709"))
+    assert (
+        not plain.is_hdr and not plain.is_wide_gamut_sdr and plain.bit_depth == 8 and plain.peak_nits is None
+    )
+    wide = parse_probe_json(_probe_json(color_primaries="smpte432", color_transfer="iec61966-2-1"))
+    assert wide.is_wide_gamut_sdr and not wide.is_hdr
+    # Values from an untrusted file only reach ffmpeg's filter graph when they are known names.
+    odd = parse_probe_json(
+        _probe_json(color_transfer="smpte2084,evil=1", color_space="x:y", color_range="pc")
+    )
+    assert odd.color_transfer == "" and odd.color_space == "" and odd.color_range == "pc"
+    # Absurd pixel aspect ratios are ignored rather than producing a gigantic picture.
+    assert parse_probe_json(_probe_json(sample_aspect_ratio="1000:1")).width == 1920
+    assert parse_probe_json(_probe_json(sample_aspect_ratio="0:1")).width == 1920
+
+
 def test_encode_landscape_is_padded_to_vertical_30fps(sample_video_landscape, tmp_path):
     out = encode_for_platforms(sample_video_landscape, tmp_path / "land.mp4")
-    assert (out.width, out.height, out.fps) == (1080, 1920, 30)
+    assert (out.width, out.height) == (1080, 1920) and abs(out.fps - 30) < 0.5
     assert abs(out.duration_s - 3.0) < 0.2
 
 
@@ -324,6 +683,53 @@ def test_make_thumbnail_jpeg_540x960(encoded_sample, sample_video_landscape, tmp
         assert img.size == (540, 960)
         assert img.convert("L").getpixel((270, 5)) < 30  # black pad band at the top
     assert not list(tmp_path.glob(".*.part"))
+
+
+def test_thumbnail_seek_past_the_video_stream_falls_back_to_the_first_frame(tmp_path):
+    """A short video track with longer audio: the seek finds no frame. ffmpeg 6.x exits 0 without
+    output, 7.x exits non-zero ("Non full-range YUV is non-standard"); both give the first frame."""
+    clip = tmp_path / "short_video_long_audio.mp4"
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc2=size=360x640:rate=30:duration=1",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=5",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(clip),
+        ],
+        check=True,
+    )  # fmt: skip
+    thumb = make_thumbnail(clip, tmp_path / "t.jpg", at_s=3.0)
+    with Image.open(thumb) as img:
+        assert img.format == "JPEG" and img.size == (540, 960)
+
+
+def test_thumbnail_retries_at_zero_when_the_seeked_attempt_exits_non_zero(tmp_path, monkeypatch):
+    calls: list[float] = []
+
+    def fake_run(cmd, *, timeout_s, what, redact=()):
+        position = float(cmd[cmd.index("-ss") + 1])
+        calls.append(position)
+        if position > 0:
+            raise EncodeError("thumbnail failed (ffmpeg exit code 234)")
+        Path(cmd[-1]).write_bytes(b"\xff\xd8jpeg")
+
+    monkeypatch.setattr(encode, "_run_ffmpeg", fake_run)
+    out = make_thumbnail(tmp_path / "in.mp4", tmp_path / "t.jpg", at_s=2.5)
+    assert out.read_bytes().startswith(b"\xff\xd8") and calls == [2.5, 0.0]
+    # A real failure at the start is still an error, and a timeout is not retried.
+    monkeypatch.setattr(encode, "_run_ffmpeg", lambda *a, **k: (_ for _ in ()).throw(EncodeError("bad")))
+    with pytest.raises(EncodeError):
+        make_thumbnail(tmp_path / "in.mp4", tmp_path / "u.jpg", at_s=1.0)
+    attempts: list[int] = []
+
+    def slow(*a, **k):
+        attempts.append(1)
+        raise EncodeTimeout("thumbnail timed out")
+
+    monkeypatch.setattr(encode, "_run_ffmpeg", slow)
+    with pytest.raises(EncodeTimeout):
+        make_thumbnail(tmp_path / "in.mp4", tmp_path / "v.jpg", at_s=1.0)
+    assert attempts == [1]
 
 
 def test_make_thumbnail_error(tmp_path):
@@ -433,6 +839,134 @@ def test_phash_frames_of_unreadable_file_is_empty(tmp_path):
     assert fingerprint.phash_frames(bad, 4.0) == []
 
 
+# --------------------------------------------------------------------------- display-normalised and audio fingerprints
+
+
+def _picture_audio_clip(path: Path, *, size: str, notes: list[int], seconds: int = 6, rate: int = 30) -> Path:
+    """Moving fractal pictures with a melody (one note sequence per audio identity)."""
+    expr = "+".join(
+        f"0.3*sin(2*PI*t*{220 * 2 ** (n / 12):.3f})*between(mod(t*3\\,{len(notes)})\\,{i}\\,{i + 1})"
+        for i, n in enumerate(notes)
+    )
+    ffmpeg(
+        "-f", "lavfi", "-i", f"mandelbrot=size={size}:rate={rate},trim=duration={seconds},setpts=PTS-STARTPTS",
+        "-f", "lavfi", "-i", f"aevalsrc='{expr}':d={seconds}:s=44100",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(path),
+    )  # fmt: skip
+    return path
+
+
+MELODY_A = [0, 4, 7, 12, 7, 4, 0, -5]
+MELODY_B = [2, 5, 9, 14, 9, 5, 2, -3]
+
+
+def _fingerprint(path: Path) -> tuple[list[str], float, str | None]:
+    info = probe(path)
+    fp = fingerprint.fingerprint_video(path, info)
+    return fp.frames, info.duration_s, fp.audio
+
+
+@pytest.mark.parametrize("size", ["640x360", "640x800", "640x640", "360x640"])
+def test_letterboxed_repost_fingerprints_like_the_original(size, clips, tmp_path, monkeypatch):
+    """import-media-2: Repeater's own 1080x1920 letterboxed post, re-encoded by the platform at
+    720p, came back as a new video because the original was hashed un-padded."""
+    monkeypatch.setattr(get_settings(), "encode_preset", "ultrafast")
+    original = _picture_audio_clip(clips / f"orig_{size}.mp4", size=size, notes=MELODY_A)
+    posted = tmp_path / "posted.mp4"
+    encode_for_platforms(original, posted)
+    platform_copy = tmp_path / "platform_copy.mp4"
+    ffmpeg("-i", str(posted), "-vf", "scale=720:1280", "-c:v", "libx264", "-crf", "28", "-preset", "veryfast",
+           "-c:a", "aac", "-b:a", "128k", str(platform_copy))  # fmt: skip
+    a_frames, a_dur, a_audio = _fingerprint(original)
+    for other in (posted, platform_copy):
+        b_frames, b_dur, b_audio = _fingerprint(other)
+        distances = [fingerprint.hamming(x, y) for x, y in zip(a_frames, b_frames, strict=True)]
+        assert max(distances) <= fingerprint.MAX_FRAME_DISTANCE, distances
+        assert a_audio and b_audio and fingerprint.audio_match(a_audio, b_audio) is True
+        assert fingerprint.is_duplicate(a_frames, a_dur, b_frames, b_dur, a_audio, b_audio)
+
+
+def test_same_pictures_with_different_sound_are_different_videos(clips, tmp_path):
+    """import-media-8: a series over the same b-roll with a new voice-over is not a duplicate."""
+    one = _picture_audio_clip(clips / "ep1.mp4", size="360x640", notes=MELODY_A)
+    two = _picture_audio_clip(clips / "ep2.mp4", size="360x640", notes=MELODY_B)
+    a_frames, a_dur, a_audio = _fingerprint(one)
+    b_frames, b_dur, b_audio = _fingerprint(two)
+    assert all(
+        fingerprint.hamming(x, y) <= 2 for x, y in zip(a_frames, b_frames, strict=True)
+    )  # same pictures
+    assert a_audio and b_audio and fingerprint.audio_match(a_audio, b_audio) is False
+    assert not fingerprint.is_duplicate(a_frames, a_dur, b_frames, b_dur, a_audio, b_audio)
+    # ...while the same pictures with the same sound, re-encoded the way a platform does, still are.
+    copy = clips / "ep1_copy.mp4"
+    ffmpeg("-i", str(one), "-vf", "scale=270:480", "-c:v", "libx264", "-crf", "30", "-preset", "ultrafast",
+           "-c:a", "aac", "-b:a", "64k", "-ar", "44100", "-ac", "1", str(copy))  # fmt: skip
+    c_frames, c_dur, c_audio = _fingerprint(copy)
+    assert fingerprint.is_duplicate(a_frames, a_dur, c_frames, c_dur, a_audio, c_audio)
+
+
+def test_audio_that_cannot_be_compared_does_not_veto_a_picture_match(clips, tmp_path):
+    melody = _picture_audio_clip(clips / "with_sound.mp4", size="360x640", notes=MELODY_A)
+    silent = tmp_path / "muted.mp4"  # a platform muted the track (copyright), Repeater adds silence
+    ffmpeg("-i", str(melody), "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+           "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-shortest", str(silent))  # fmt: skip
+    mute = tmp_path / "no_track.mp4"
+    ffmpeg("-i", str(melody), "-an", "-c:v", "copy", str(mute))
+    a_frames, a_dur, a_audio = _fingerprint(melody)
+    assert a_audio is not None
+    for other in (silent, mute):
+        b_frames, b_dur, b_audio = _fingerprint(other)
+        assert b_audio is None  # silence and a missing track are "unknown", not "different"
+        assert fingerprint.is_duplicate(a_frames, a_dur, b_frames, b_dur, a_audio, b_audio)
+    short = tmp_path / "short.mp4"
+    ffmpeg("-i", str(melody), "-t", "1.5", "-c", "copy", str(short))
+    assert fingerprint.audio_fingerprint(short) is None  # too short for Chromaprint
+
+
+def _token(items: np.ndarray) -> str:
+    raw = items.astype("<u4").tobytes()
+    return fingerprint.AUDIO_PREFIX + base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+
+def test_audio_match_rules():
+    rng = np.random.default_rng(7)
+    a = rng.integers(0, 2**32, size=200, dtype=np.uint64).astype("<u4")
+    noisy = a ^ (
+        rng.integers(0, 2**32, size=200, dtype=np.uint64).astype("<u4")
+        & rng.integers(0, 2**32, size=200, dtype=np.uint64).astype("<u4")
+        & rng.integers(0, 2**32, size=200, dtype=np.uint64).astype("<u4")
+    )
+    other = rng.integers(0, 2**32, size=200, dtype=np.uint64).astype("<u4")
+    assert fingerprint.audio_match(_token(a), _token(a)) is True
+    assert fingerprint.audio_match(_token(a), _token(noisy)) is True  # ~12% of the bits flipped
+    assert fingerprint.audio_match(_token(a), _token(other)) is False  # ~50%
+    assert fingerprint.audio_match(_token(a), _token(np.concatenate([other[:3], a]))) is True  # shifted by 3
+    assert fingerprint.audio_match(_token(a), _token(a[:40])) is True  # shorter copy (overlap is enough)
+    assert fingerprint.audio_match(_token(a), None) is None and fingerprint.audio_match(None, None) is None
+    assert fingerprint.audio_match(_token(a), "a:not-base64!!") is None
+    assert fingerprint.audio_match(_token(a), _token(a[:5])) is None  # too short to judge
+
+
+def test_pack_and_unpack_round_trip():
+    frames = ["00" * 8, "ff" * 8]
+    text = fingerprint.pack(frames, "a:abc")
+    assert text == "0000000000000000 ffffffffffffffff a:abc"
+    assert fingerprint.unpack(text) == (frames, "a:abc")
+    assert fingerprint.unpack("0000000000000000") == (["0000000000000000"], None)  # no audio part
+    assert fingerprint.unpack(None) == ([], None) and fingerprint.pack([], None) is None
+
+
+def test_fingerprint_reports_missing_samples_at_the_end(clips, tmp_path):
+    full = make_clip(clips / "fp_full.mp4", size="360x640", seconds=8, extra=("-movflags", "+faststart"))
+    cut = tmp_path / "cut.mp4"
+    cut.write_bytes(full.read_bytes()[: int(full.stat().st_size * 0.4)])
+    info = probe(cut)  # the moov atom is at the front: the duration is still the full one
+    assert info.duration_s > 7
+    fp = fingerprint.fingerprint_video(cut, info)
+    assert 0 < len(fp.frames) < fingerprint.PHASH_FRAMES and fp.tail_missing >= 3
+    assert fingerprint.fingerprint_video(full, probe(full)).tail_missing == 0
+
+
 # --------------------------------------------------------------------------- retention
 
 
@@ -509,3 +1043,53 @@ def test_purge_skips_paths_outside_media_root(db, workspace, clean_media):
     assert retention.purge_expired_originals(db, older_than_days=30) == 0
     db.refresh(v)
     assert v.original_path == "../../etc/passwd"
+
+
+def test_purge_removes_originals_of_old_failed_videos(db, workspace, clean_media):
+    """import-media-14: originals of FAILED videos (up to 4 GB) were never purged."""
+    old_failed = _video_with_files(db, workspace, status=VideoStatus.FAILED, encoded=False)
+    recent_failed = _video_with_files(db, workspace, status=VideoStatus.FAILED, encoded=False)
+    old_processing = _video_with_files(db, workspace, status=VideoStatus.PROCESSING, encoded=False)
+    for v, days in ((old_failed, 8), (recent_failed, 3), (old_processing, 40)):
+        v.updated_at = utcnow() - timedelta(days=days)
+    db.commit()
+    paths = {v.id: storage.abs_path(v.original_path) for v in (old_failed, recent_failed, old_processing)}
+
+    assert retention.purge_expired_originals(db, older_than_days=30) == 0  # failed ones are opt-in there
+    assert retention.purge_failed_originals(db) == 1
+    db.commit()
+    db.refresh(old_failed)
+    assert old_failed.original_path is None and not paths[old_failed.id].exists()
+    for v in (recent_failed, old_processing):
+        db.refresh(v)
+        assert v.original_path is not None and paths[v.id].is_file()
+    assert retention.purge_failed_originals(db) == 0
+    # The window is configurable and counted from the last change; one pass can do both kinds.
+    assert retention.purge_expired_originals(db, older_than_days=30, failed_older_than_days=1) == 1
+    db.refresh(recent_failed)
+    assert recent_failed.original_path is None and paths[old_processing.id].is_file()
+
+
+def test_sweep_partial_files_removes_only_abandoned_ones(db, workspace, clean_media):
+    import os
+
+    video_dir = storage.ensure_video_dir(workspace.id, 1)
+    old, fresh = utcnow().timestamp() - 3 * 86400, utcnow().timestamp() - 600
+    stale_encode = video_dir / ".encoded.mp4.0123456789ab.part"
+    stale_download = video_dir / "original.mp4.part"
+    running = video_dir / ".encoded.mp4.ba9876543210.part"
+    keep = video_dir / "encoded.mp4"
+    upload = storage.uploads_dir() / "abc.part"
+    for path, mtime in (
+        (stale_encode, old),
+        (stale_download, old),
+        (running, fresh),
+        (keep, old),
+        (upload, old),
+    ):
+        path.write_bytes(b"x")
+        os.utime(path, (mtime, mtime))
+    assert retention.sweep_partial_files() == 3
+    assert not stale_encode.exists() and not stale_download.exists() and not upload.exists()
+    assert running.exists() and keep.exists()
+    assert retention.sweep_partial_files() == 0

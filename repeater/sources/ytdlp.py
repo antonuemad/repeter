@@ -12,6 +12,7 @@ Isolation rules:
 
 from __future__ import annotations
 
+import errno
 import itertools
 import logging
 import re
@@ -218,6 +219,8 @@ def classify_error(exc: BaseException, *, proxy: str | None = None) -> PlatformE
     ) -> RetryableError:
         return cls(f"{message} ({detail})", code=code, status=status, retry_after=after)
 
+    if "no space left on device" in low or "disk quota exceeded" in low:
+        return retryable("The server's disk is full; will retry when space is free.", "disk_full", after=1800)
     if any(isinstance(e, UnsupportedError) for e in chain) or "unsupported url" in low:
         return permanent("This link is not a supported TikTok or YouTube link.", "unsupported_url")
     if "not a bot" in low:
@@ -390,6 +393,12 @@ def _run(fn: Callable[[YoutubeDL], Any], params: dict[str, Any], proxy: str | No
         log.warning("yt-dlp failed (%s): %s", err.code, err.message)
         raise err from None
     except OSError as exc:
+        if exc.errno in (errno.ENOSPC, errno.EDQUOT):
+            raise RetryableError(
+                "The server's disk is full; will retry when space is free.",
+                code="disk_full",
+                retry_after=1800,
+            ) from None
         raise RetryableError(
             f"Could not write the downloaded file ({type(exc).__name__}).", code="io"
         ) from None

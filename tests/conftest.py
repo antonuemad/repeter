@@ -45,6 +45,9 @@ def _test_env(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         "REPEATER_GOOGLE_CLIENT_SECRET": "g-secret",
         "REPEATER_META_APP_ID": "m-id",
         "REPEATER_META_APP_SECRET": "m-secret",
+        # The suite exercises an audited TikTok app (any privacy level); the unaudited path has its
+        # own tests that switch the setting off.
+        "REPEATER_TIKTOK_AUDITED": "true",
         "REPEATER_TELEGRAM_BOT_TOKEN": "",
         "REPEATER_TELEGRAM_CHAT_ID": "",
     }

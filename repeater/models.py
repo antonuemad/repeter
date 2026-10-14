@@ -143,6 +143,10 @@ class User(TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     locale: Mapped[str] = mapped_column(String(8), default="ar")
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Acceptance of the Terms of Service and Privacy Policy (YouTube Developer Policies III.A.2):
+    # when, and which version of the legal texts (repeater.web.consent.LEGAL_VERSION).
+    terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    terms_version: Mapped[str | None] = mapped_column(String(32))
 
     memberships: Mapped[list[WorkspaceMember]] = relationship(
         back_populates="user", cascade="all, delete-orphan"

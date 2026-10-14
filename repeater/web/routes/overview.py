@@ -11,6 +11,7 @@ from fastapi.responses import Response
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session, selectinload
 
+from repeater import backups
 from repeater.engine.rules import rule_problems
 from repeater.media import storage
 from repeater.models import (
@@ -55,6 +56,8 @@ def overview(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
         "reconnect_accounts": _reconnect_accounts(db, ws_id),
         "setup": _setup_steps(db, ws_id),
         "disk": _disk_usage(),
+        # Only owners can act on the server's backup job.
+        "backup_stale_hours": backups.stale_hours() if ctx.is_owner else None,
         "activity": _recent_activity(db, ws_id),
     }
     return render(request, "overview.html", context)

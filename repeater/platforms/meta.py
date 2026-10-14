@@ -20,6 +20,7 @@ Official references (checked 2026-10-14):
     https://developers.facebook.com/docs/development/create-an-app/app-dashboard/data-deletion-callback
     https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/error-codes
     https://developers.facebook.com/docs/video-api/reference/error-codes
+    https://developers.facebook.com/docs/video-api/guides/get-videos
 """
 
 from __future__ import annotations
@@ -63,14 +64,44 @@ FACEBOOK_WEB_URL = "https://www.facebook.com"
 # Facebook Login permissions (names checked against the permissions reference). Instagram API
 # with Facebook Login needs instagram_basic + instagram_content_publish + pages_read_engagement;
 # Page Reels need pages_show_list + pages_read_engagement + pages_manage_posts.
+#
+# ads_read: every Instagram publishing endpoint Repeater calls (GET content_publishing_limit,
+# POST /{ig-user-id}/media, GET /{container-id}, POST /{ig-user-id}/media_publish) documents that
+# "if the app user was granted a role on the Page via the Business Manager" (a business portfolio,
+# which is how Magic Lap runs its Pages), the app also needs ONE of ads_management or ads_read.
+# Without it Meta answers 403 code 200 "App lacks ads_management permission for the target" and the
+# account loops between connected and needs-reconnect. ads_read is the smaller of the two options
+# (read-only Ads Insights; Repeater never calls an ads endpoint), so that is the one requested.
+# business_management stays: it is the documented alternative to ads_read / ads_management for
+# reading GET /{ig-user-id}/media (the importer), and was requested before this change.
+# Sources (checked 2026-10-14):
+#   https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/media_publish
+#   https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/content_publishing_limit
+#   https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-container
+#   https://developers.facebook.com/docs/instagram-platform/content-publishing (Requirements)
 SCOPES = (
     "pages_show_list",
     "pages_read_engagement",
     "pages_manage_posts",
     "instagram_basic",
     "instagram_content_publish",
+    "ads_read",
     "business_management",
 )
+# Permissions an account needs to publish. A platform whose permissions were switched off in the
+# Facebook dialog is not connected: its first post would fail with a permission error.
+# ads_read is not listed: it is only needed when the Page role comes from a business portfolio,
+# which Repeater cannot tell at connect time (see SCOPES).
+PLATFORM_PERMISSIONS: dict[Platform, tuple[str, ...]] = {
+    Platform.FACEBOOK: ("pages_show_list", "pages_read_engagement", "pages_manage_posts"),
+    Platform.INSTAGRAM: (
+        "pages_show_list",
+        "pages_read_engagement",
+        "instagram_basic",
+        "instagram_content_publish",
+    ),
+}
+ADS_SCOPES = frozenset({"ads_read", "ads_management"})
 # "meta" connects everything the login returns; "facebook"/"instagram" keep only that platform so
 # a click on "Connect Instagram" never silently adds Facebook Pages to the rotation.
 PURPOSE_PLATFORMS: dict[str, frozenset[Platform]] = {
@@ -79,6 +110,9 @@ PURPOSE_PLATFORMS: dict[str, frozenset[Platform]] = {
     "instagram": frozenset({Platform.INSTAGRAM}),
 }
 PUBLISH_TASK = "CREATE_CONTENT"
+# Listing a Page's videos (GET /{page-id}/videos) needs a Page token requested by a person who can
+# perform the MANAGE task (https://developers.facebook.com/docs/video-api/guides/get-videos).
+MANAGE_TASK = "MANAGE"
 PAGE_FIELDS = (
     "id,name,access_token,tasks,picture{url},instagram_business_account{id,username,name,profile_picture_url}"
 )
@@ -89,6 +123,7 @@ DEFAULT_MAX_PAGES = 20
 MAX_SIGNED_REQUEST_CHARS = 8192
 _VERSION_RE = re.compile(r"^v\d+\.\d+$")
 _SECRET_PARAMS = frozenset({"access_token", "appsecret_proof", "client_secret", "code", "fb_exchange_token"})
+_ADS_RE = re.compile(r"\bads_(?:management|read)\b", re.IGNORECASE)
 
 # --------------------------------------------------------------------------- configuration
 
@@ -174,8 +209,12 @@ IG_RESTRICTED_SUBCODE = 2207050
 # Instagram subcodes whose documented fix is "try again" or "generate a new container".
 IG_RETRYABLE_SUBCODES = frozenset({2207001, 2207003, 2207006, 2207008, 2207020, 2207032, 2207052, 2207053})
 # Facebook video upload/session subcodes whose documented fix is "retry the upload".
-FB_RETRYABLE_SUBCODES = frozenset({6000, 1363011, 1363019, 1363021, 1363030, 1363033, 1363037, 1363041})
+FB_RETRYABLE_SUBCODES = frozenset({1363011, 1363019, 1363021, 1363030, 1363033, 1363037, 1363041})
 FB_NO_UPLOAD_PERMISSION = 1363042
+# "There was a problem uploading your video file" (video_reels / Video API error table, action
+# "Retry several times"). Meta returns it as the top-level `code`, often with a 1363xxx subcode, but
+# the Video API table headlines the column "Error Subcode", so it is honoured in both places.
+FB_UPLOAD_RETRY_CODE = 6000
 
 DEFAULT_RATE_LIMIT_RETRY = 15 * 60.0
 CUSTOM_RATE_LIMIT_RETRY = 60 * 60.0  # 613: e.g. 30 API-published Reels per Page per 24 h
@@ -247,8 +286,27 @@ PERMISSION_EXPLANATION = (
     "allow every permission Repeater asks for; the Facebook user must still be able to create content "
     "on the Page."
 )
+# The documented failure of a Page role granted through a business portfolio without ads_read /
+# ads_management (Instagram error table: 403, code 200, "App lacks ads_management permission").
+ADS_PERMISSION_EXPLANATION = (
+    "Instagram refused the request because the Facebook user who connected this account has the Page "
+    "role through a Meta Business portfolio, which also needs the ads_read permission. Reconnect the "
+    "account and allow ads_read (Repeater never uses it to read or change ads)."
+)
+ADS_PERMISSION_HINT = (
+    "If this Facebook user has the Page role through a Meta Business portfolio, Instagram publishing "
+    "also needs the ads_read permission: reconnect the account and allow it."
+)
+UPLOAD_RETRY_EXPLANATION = "Facebook had a problem with the video upload; Repeater will try again."
 RATE_LIMIT_EXPLANATION = "Meta's API rate limit was reached; Repeater will try again later."
 TRANSIENT_EXPLANATION = "Meta had a temporary problem; Repeater will try again."
+
+
+class PermissionDeniedError(AuthError):
+    """A Graph permission error (codes 10 and 200-299, or no upload permission): the token itself
+    is valid but lacks a permission or a Page task. Publishing treats it like any AuthError
+    (reconnecting asks for the permissions again); read paths that reconnecting cannot fix, such as
+    listing a Page's videos without the MANAGE task, turn it into a PermanentError instead."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -341,6 +399,8 @@ def graph_error(
     if subcode is not None and (is_auth or subcode not in AUTH_SUBCODES):
         explanation = EXPLANATIONS.get(subcode)
     explanation = explanation or EXPLANATIONS.get(code if code is not None else -1)
+    if explanation is None and code in PERMISSION_CODES and _ADS_RE.search(info.message):
+        explanation = ADS_PERMISSION_EXPLANATION
     kw: dict[str, Any] = {"code": _code_str(info), "status": status}
 
     def msg(default: str | None = None) -> str:
@@ -349,7 +409,7 @@ def graph_error(
     if is_auth:
         return AuthError(msg(), **kw)
     if subcode == FB_NO_UPLOAD_PERMISSION or code in PERMISSION_CODES:
-        return AuthError(msg(PERMISSION_EXPLANATION), **kw)
+        return PermissionDeniedError(msg(PERMISSION_EXPLANATION), **kw)
     if subcode == IG_PUBLISH_LIMIT_SUBCODE:
         retry = rate_limit_retry_after(headers, IG_PUBLISH_LIMIT_RETRY)
         return RateLimitedError(msg(), retry_after=retry, **kw)
@@ -368,6 +428,10 @@ def graph_error(
         or subcode == IG_NOT_READY_SUBCODE
     ):
         return RetryableError(msg(), retry_after=TRANSIENT_RETRY, **kw)
+    if explanation is None and FB_UPLOAD_RETRY_CODE in (code, subcode):
+        # Known permanent subcodes (format, duration ...) keep their explanation and stay permanent;
+        # the engine's bounded retries are the stop condition for everything else.
+        return RetryableError(msg(UPLOAD_RETRY_EXPLANATION), retry_after=TRANSIENT_RETRY, **kw)
     if info.is_transient or code in TRANSIENT_CODES or status >= 500:
         return RetryableError(msg(TRANSIENT_EXPLANATION), retry_after=TRANSIENT_RETRY, **kw)
     if explanation is not None or status < 400:
@@ -645,13 +709,15 @@ def _facebook_account(
     page: dict[str, Any], token: str, fb_user_id: str, scopes: list[str]
 ) -> ConnectedAccountData:
     page_id = str(page["id"])
+    tasks = page.get("tasks") if isinstance(page.get("tasks"), list) else []
     return ConnectedAccountData(
         platform=Platform.FACEBOOK,
         external_id=page_id,
         display_name=str(page.get("name") or f"Facebook Page {page_id}"),
         tokens=_page_tokens(token, scopes),
         avatar_url=_page_avatar(page),
-        extra={"page_id": page_id, "fb_user_id": fb_user_id},
+        # can_manage: the user holds the MANAGE task, which listing the Page's videos requires.
+        extra={"page_id": page_id, "fb_user_id": fb_user_id, "can_manage": MANAGE_TASK in tasks},
     )
 
 
@@ -690,7 +756,28 @@ def _publishable_pages(user: Graph) -> list[tuple[dict[str, Any], str]]:
     return pages
 
 
-def _no_accounts_error(platforms: frozenset[Platform], declined: list[str]) -> PermanentError:
+def _platform_label(platform: Platform) -> str:
+    return "Facebook Pages" if platform == Platform.FACEBOOK else "Instagram"
+
+
+def _permissions_declined_error(missing: dict[Platform, list[str]]) -> PermanentError:
+    parts = [
+        f"{_platform_label(platform)} needs {', '.join(names)}"
+        for platform, names in sorted(missing.items(), key=lambda item: item[0].value)
+    ]
+    return PermanentError(
+        "Facebook did not give Repeater every permission it needs to publish: "
+        + "; ".join(parts)
+        + ". Connect again and keep every permission switched on in the Facebook dialog.",
+        code="permissions_declined",
+    )
+
+
+def _no_accounts_error(
+    platforms: frozenset[Platform], declined: list[str], missing: dict[Platform, list[str]]
+) -> PermanentError:
+    if missing:
+        return _permissions_declined_error(missing)
     if platforms == {Platform.INSTAGRAM}:
         message = (
             "None of your Facebook Pages has a linked Instagram professional (Business or Creator) account "
@@ -702,9 +789,9 @@ def _no_accounts_error(platforms: frozenset[Platform], declined: list[str]) -> P
             "Facebook did not return any Page you can publish to. Select at least one Page in the Facebook "
             "dialog and make sure you have full control or content-creation access to it, then connect again."
         )
-    missing = [p for p in SCOPES if p in declined]
-    if missing:
-        message += f" These permissions were declined and are needed: {', '.join(missing)}."
+    absent = [p for p in SCOPES if p in declined]
+    if absent:
+        message += f" These permissions were declined and are needed: {', '.join(absent)}."
     return PermanentError(message, code="no_publishable_accounts")
 
 
@@ -743,18 +830,39 @@ class MetaOAuth:
                 pages = _publishable_pages(user)
         accounts: list[ConnectedAccountData] = []
         seen: set[tuple[Platform, str]] = set()
+        missing: dict[Platform, list[str]] = {}
+        granted_set = set(granted)
         for page, token in pages:
             candidates = [
                 _facebook_account(page, token, fb_user_id, granted),
                 _instagram_account(page, token, fb_user_id, granted),
             ]
             for account in candidates:
-                key = (account.platform, account.external_id) if account else None
-                if account and account.platform in platforms and key not in seen:
+                if account is None or account.platform not in platforms:
+                    continue
+                # A platform whose permission was switched off in the dialog would only fail at its
+                # first scheduled post: leave it out and say why.
+                absent = [p for p in PLATFORM_PERMISSIONS[account.platform] if p not in granted_set]
+                if absent:
+                    missing.setdefault(account.platform, absent)
+                    continue
+                key = (account.platform, account.external_id)
+                if key not in seen:
                     seen.add(key)
                     accounts.append(account)
         if not accounts:
-            raise _no_accounts_error(platforms, declined)
+            raise _no_accounts_error(platforms, declined, missing)
+        for platform, names in missing.items():
+            log.warning(
+                "Meta login: %s accounts were not connected because these permissions were declined: %s",
+                platform.value,
+                ", ".join(names),
+            )
+        if Platform.INSTAGRAM in platforms and not ADS_SCOPES & granted_set:
+            log.info(
+                "Meta login: neither ads_read nor ads_management was granted; Instagram publishing fails "
+                "for users whose Page role comes from a business portfolio"
+            )
         log.info(
             "Meta login: %d Page(s) with %s, %d account(s) returned",
             len(pages),

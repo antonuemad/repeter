@@ -13,12 +13,21 @@ Every platform module implements some of these protocols and exposes module-leve
 
 Conventions for ConnectedAccount.extra (non-secret identifiers):
     tiktok    {"open_id", "username"}
-    youtube   {"channel_id", "uploads_playlist_id", "custom_url"}
-    gdrive    {"email"}
-    facebook  {"page_id", "fb_user_id"}
+    youtube   {"channel_id", "uploads_playlist_id", "custom_url", "google_sub"}
+    gdrive    {"email", "google_sub"}
+    facebook  {"page_id", "fb_user_id", "can_manage"}
     instagram {"ig_user_id", "page_id", "username", "fb_user_id"}
 `fb_user_id` is the app-scoped Facebook user id that authorized the Page; Meta's
 deauthorize/data-deletion callbacks identify users by it.
+`google_sub` is the Google account id (OpenID "sub") of the login that authorized a YouTube channel or
+a Drive folder. Revoking one Google token removes every scope that user granted the project, so the
+dashboard revokes remotely only when no other active Google account has the same sub. Absent on
+accounts connected before it was stored (then a remote revoke is skipped while any other Google
+account is active) or when Google gave none.
+`can_manage` (bool) is True when the connecting user holds the MANAGE task on the Page, which
+listing the Page's videos needs; absent on accounts connected before it was stored.
+The engine keeps its own bookkeeping in extra under keys starting with "_" (_disconnected_at,
+_refreshed_at); other modules must not overwrite `extra` wholesale.
 
 Other cross-module functions:
     repeater.platforms.tiktok.creator_info(account: AccountContext) -> TikTokCreatorInfo

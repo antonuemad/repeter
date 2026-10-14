@@ -5,7 +5,10 @@ every time the form is rendered (and again on save), the privacy dropdown only o
 `privacy_level_options` and has no default, interaction toggles start unchecked and are disabled
 when the creator turned them off, commercial content disclosure offers "Your brand" and
 "Branded content" (branded content cannot be private), and the Music Usage Confirmation consent
-is an explicit checkbox."""
+is an explicit checkbox.
+
+While TikTok has not audited the app (settings.tiktok_audited is false) every API post is
+restricted to private viewing, so only "Only me" is offered and a public account is warned about."""
 
 from __future__ import annotations
 
@@ -24,6 +27,7 @@ from starlette.datastructures import FormData
 
 from repeater import accounts as account_service
 from repeater.activity import log_activity
+from repeater.config import get_settings
 from repeater.crypto import CryptoError
 from repeater.engine import actions
 from repeater.engine import rules as engine_rules
@@ -48,6 +52,7 @@ router = APIRouter()
 
 TIKTOK_PRIVACY_LEVELS = ("PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "SELF_ONLY")
 TIKTOK_PRIVATE = "SELF_ONLY"
+TIKTOK_PUBLIC = "PUBLIC_TO_EVERYONE"
 YOUTUBE_PRIVACY = ("public", "unlisted", "private")
 # Assignable YouTube video categories (videoCategories.list); the description is translated.
 YOUTUBE_CATEGORIES = ("1", "2", "10", "15", "17", "19", "20", "22", "23", "24", "25", "26", "27", "28", "29")
@@ -279,7 +284,13 @@ def _render_rule(
     status_code: int = 200,
 ) -> Response:
     platform = Platform(account.platform)
-    privacy_options = creator.info.privacy_level_options if creator.info else []
+    privacy_options = list(creator.info.privacy_level_options) if creator.info else []
+    unaudited = platform == Platform.TIKTOK and not get_settings().tiktok_audited
+    # An unaudited app can only post "Only me", and only to a private account: a public account
+    # is the one that is offered PUBLIC_TO_EVERYONE.
+    account_is_public = unaudited and TIKTOK_PUBLIC in privacy_options
+    if unaudited:
+        privacy_options = [opt for opt in privacy_options if opt == TIKTOK_PRIVATE]
     saved_privacy = values["settings"].get("privacy_level")
     context = {
         "nav": "rules",
@@ -293,6 +304,8 @@ def _render_rule(
         # Pre-select only the user's own earlier choice, and only if TikTok still offers it.
         "selected_privacy": saved_privacy if saved_privacy in privacy_options else None,
         "privacy_options": privacy_options,
+        "tiktok_unaudited": unaudited,
+        "tiktok_account_public": account_is_public,
         "engine_cap": engine_rules.ENGINE_DAILY_CAPS.get(platform, 1),
         "problems": engine_rules.rule_problems(rule),
         "youtube_privacy": YOUTUBE_PRIVACY,
@@ -443,6 +456,8 @@ def _parse_tiktok(
     privacy = privacy if isinstance(privacy, str) and privacy else None
     if privacy is not None and privacy not in info.privacy_level_options:
         raise FormError("rules.error_privacy_option")
+    if mode == "direct" and privacy not in (None, TIKTOK_PRIVATE) and not get_settings().tiktok_audited:
+        raise FormError("rules.error_unaudited_privacy")
     disclose = form_bool(form, "disclose")
     brand_organic = disclose and form_bool(form, "brand_organic")
     brand_content = disclose and form_bool(form, "brand_content")

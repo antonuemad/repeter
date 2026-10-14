@@ -46,10 +46,11 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
-      - name: Install ffmpeg
+      # rclone: the off-site backup rules in tests/test_deploy.py run against its local backend.
+      - name: Install ffmpeg and rclone
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends ffmpeg
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg rclone
 
       - name: Install Repeater with dev tools
         run: python -m pip install -e ".[dev]"
@@ -66,7 +67,20 @@ jobs:
   docker:
     name: Docker image and deploy files
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
+    # The image's own ffmpeg (Debian's, newer than the runner's) runs the media tests below.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -76,7 +90,7 @@ jobs:
 
       - name: Lint shell scripts
         run: |
-          bash -n deploy/bootstrap.sh deploy/deploy.sh deploy/backup.sh
+          bash -n deploy/*.sh
           shellcheck -x deploy/*.sh
 
       - name: Validate docker-compose.yml with .env.example
@@ -89,7 +103,17 @@ jobs:
             caddy:2.11-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
       - name: Build the image
-        run: docker build -t repeater:ci .
+        run: |
+          docker build --target app -t repeater:ci .
+          # docker-compose.yml runs repeater-app:<tag>, never pulls it.
+          docker tag repeater:ci repeater-app:latest
+
+      - name: Media and import tests on the shipped image
+        env:
+          REPEATER_TEST_PG: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/postgres
+        run: |
+          docker build --target test -t repeater:ci-test .
+          docker run --rm --network host -e REPEATER_TEST_PG -v "$PWD/tests:/app/tests:ro" repeater:ci-test
 
       - name: Smoke-test the image
         run: |
@@ -101,3 +125,7 @@ jobs:
             python -c "import repeater.cli, repeater.web.app, repeater.jobs.worker, yt_dlp_ejs"
             python -m repeater.cli --help > /dev/null
           '
+
+      - name: Backup, restore and forwarded-header self-test (throwaway compose project)
+        run: bash deploy/selftest.sh repeater-app:latest
+

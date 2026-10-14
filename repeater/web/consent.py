@@ -5,12 +5,11 @@ before they can access it. Dashboard users are created by the operator (CLI), so
 form: after the first sign-in every user sees a one-time consent screen (routes/consent.py), and no
 other page works until it has been accepted.
 
-Storage: the consent timestamp and the policy version belong on the user. When the User model
-has the columns `terms_accepted_at` and `terms_version` they are used. Until then (no schema
-change is needed for this to work) the acceptance is an activity-log entry of the user's
-workspace (category "auth", data event="terms_accepted", user_id, policy_version). The log is
-purged after 90 days, which at worst asks the user to accept again. A verified acceptance is
-cached in the signed session cookie only as a speed-up; the stored record is authoritative.
+Storage: User.terms_accepted_at and User.terms_version are the record (the version of the legal
+texts that was accepted). Each acceptance also leaves an activity-log entry of the user's workspace
+(category "auth", data event="terms_accepted") as an audit trail; the log is purged after 90 days,
+the columns are not. A verified acceptance is cached in the signed session cookie only as a
+speed-up; the stored record is authoritative.
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from repeater.activity import log_activity
-from repeater.models import ActivityLevel, ActivityLog, User, WorkspaceMember
+from repeater.models import ActivityLevel, User, WorkspaceMember
 from repeater.timeutil import utcnow
 
 # Version of the legal texts (the effective date shown on /privacy and /terms). Change it
@@ -32,37 +31,19 @@ SESSION_KEY = "consent"
 EVENT = "terms_accepted"
 
 
-def _has_columns() -> bool:
-    return hasattr(User, "terms_accepted_at") and hasattr(User, "terms_version")
-
-
 def _marker(user: User) -> str:
     return f"{user.id}:{LEGAL_VERSION}"
 
 
-def _stored(db: Session, user: User) -> bool:
-    if _has_columns():
-        return getattr(user, "terms_accepted_at", None) is not None and (
-            getattr(user, "terms_version", None) == LEGAL_VERSION
-        )
-    found = db.execute(
-        select(ActivityLog.id)
-        .where(
-            ActivityLog.category == "auth",
-            ActivityLog.data["event"].astext == EVENT,
-            ActivityLog.data["user_id"].astext == str(user.id),
-            ActivityLog.data["policy_version"].astext == LEGAL_VERSION,
-        )
-        .limit(1)
-    ).first()
-    return found is not None
+def _stored(user: User) -> bool:
+    return user.terms_accepted_at is not None and user.terms_version == LEGAL_VERSION
 
 
 def has_consented(session: MutableMapping[str, Any], db: Session, user: User) -> bool:
     """True when this user accepted the current version of the terms and privacy policy."""
     if session.get(SESSION_KEY) == _marker(user):
         return True
-    if not _stored(db, user):
+    if not _stored(user):
         return False
     session[SESSION_KEY] = _marker(user)
     return True
@@ -70,9 +51,8 @@ def has_consented(session: MutableMapping[str, Any], db: Session, user: User) ->
 
 def record_consent(session: MutableMapping[str, Any], db: Session, user: User) -> None:
     """Store the acceptance (timestamp + policy version) and commit nothing: the caller commits."""
-    if _has_columns():
-        user.terms_accepted_at = utcnow()  # type: ignore[attr-defined]
-        user.terms_version = LEGAL_VERSION  # type: ignore[attr-defined]
+    user.terms_accepted_at = utcnow()
+    user.terms_version = LEGAL_VERSION
     workspace_id = db.execute(
         select(WorkspaceMember.workspace_id)
         .where(WorkspaceMember.user_id == user.id)

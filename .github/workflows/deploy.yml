@@ -5,8 +5,12 @@ name: Deploy
 # did not finish) or deploy/deploy.sh.
 # Setup and the list of secrets: docs/ar/00-deploy.md.
 #
-# Required secrets: VPS_HOST, VPS_USER, VPS_SSH_KEY, REPEATER_DOMAIN
-# Optional secrets: VPS_PORT (22), VPS_KNOWN_HOSTS (output of `ssh-keyscan -p PORT HOST`),
+# Required secrets: VPS_HOST, VPS_USER, VPS_SSH_KEY, REPEATER_DOMAIN, VPS_KNOWN_HOSTS (the server's
+#   SSH host key, output of `ssh-keyscan -p PORT HOST`, checked against the fingerprint hPanel shows:
+#   without it every run would trust whatever key answers and then send the admin password and the
+#   platform secrets over that connection)
+# Optional secrets: VPS_PORT (22),
+#   REPEATER_PROXY (first deploy only: auto, caddy or external; docs/ar/00-deploy.md),
 #   ADMIN_EMAIL + ADMIN_PASSWORD (first deploy, or with reset_admin),
 #   REPEATER_TIKTOK_CLIENT_KEY/SECRET, REPEATER_GOOGLE_CLIENT_ID/SECRET, REPEATER_META_APP_ID/SECRET,
 #   REPEATER_TELEGRAM_BOT_TOKEN/CHAT_ID, REPEATER_YTDLP_PROXY (copied into deploy/.env when set).
@@ -51,10 +55,11 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
           REPEATER_DOMAIN: ${{ secrets.REPEATER_DOMAIN }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
           missing=()
-          for name in VPS_HOST VPS_USER VPS_SSH_KEY REPEATER_DOMAIN; do
+          for name in VPS_HOST VPS_USER VPS_SSH_KEY REPEATER_DOMAIN VPS_KNOWN_HOSTS; do
             [ -n "${!name}" ] || missing+=("$name")
           done
           if [ "${#missing[@]}" -eq 0 ]; then
@@ -62,7 +67,7 @@ jobs:
             exit 0
           fi
           echo "ready=false" >> "$GITHUB_OUTPUT"
-          msg="Missing repository secrets: ${missing[*]} (Settings > Secrets and variables > Actions; see docs/ar/00-deploy.md)."
+          msg="Missing repository secrets: ${missing[*]} (Settings > Secrets and variables > Actions; see docs/ar/00-deploy.md). VPS_KNOWN_HOSTS: from your own machine run ssh-keyscan -p PORT HOST and compare ssh-keygen -lf of the output with ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub run on the server."
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             echo "::error::$msg"
             exit 1
@@ -117,18 +122,13 @@ jobs:
             echo "::error::VPS_SSH_KEY is not a valid private key without a passphrase"
             exit 1
           fi
-          if [ -n "$VPS_KNOWN_HOSTS" ]; then
-            printf '%s\n' "$VPS_KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts
-          else
-            echo "::warning::VPS_KNOWN_HOSTS is not set: trusting the host key the server presents right now. Save the ssh-keyscan output below as the VPS_KNOWN_HOSTS secret."
-            ssh-keyscan -T 20 -p "$VPS_PORT" "$VPS_HOST" > ~/.ssh/known_hosts 2> /dev/null || true
-            if [ ! -s ~/.ssh/known_hosts ]; then
-              echo "::error::cannot reach $VPS_HOST:$VPS_PORT over SSH"
-              exit 1
-            fi
-            cat ~/.ssh/known_hosts
-            ssh-keygen -lf ~/.ssh/known_hosts
+          # No trust on first use: a key accepted on the spot would protect nothing, and this
+          # connection carries the admin password and the platform secrets.
+          if [ -z "$VPS_KNOWN_HOSTS" ]; then
+            echo "::error::VPS_KNOWN_HOSTS is required. Save the server's host key as that secret: run ssh-keyscan -p $VPS_PORT $VPS_HOST on your own machine and compare its fingerprint (ssh-keygen -lf) with ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub run on the server (hPanel terminal)."
+            exit 1
           fi
+          printf '%s\n' "$VPS_KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
           cat > ~/.ssh/config << EOF
           Host vps
@@ -195,6 +195,7 @@ jobs:
           REPEATER_TELEGRAM_BOT_TOKEN: ${{ secrets.REPEATER_TELEGRAM_BOT_TOKEN }}
           REPEATER_TELEGRAM_CHAT_ID: ${{ secrets.REPEATER_TELEGRAM_CHAT_ID }}
           REPEATER_YTDLP_PROXY: ${{ secrets.REPEATER_YTDLP_PROXY }}
+          REPEATER_PROXY: ${{ secrets.REPEATER_PROXY }}
         run: |
           deploy_dir="$APP_DIR/deploy"
           # $SUDO and $deploy_dir expand locally on purpose; they are not secrets.
@@ -220,7 +221,7 @@ jobs:
           set -e
           if [ "$status" -eq 1 ]; then
             echo "First deploy: running bootstrap.sh"
-            { credentials; admin; printf 'REPEATER_DOMAIN=%s\n' "$REPEATER_DOMAIN"; } |
+            { credentials; admin; printf 'REPEATER_DOMAIN=%s\nREPEATER_PROXY=%s\n' "$REPEATER_DOMAIN" "$REPEATER_PROXY"; } |
               remote "$SUDO bash $deploy_dir/bootstrap.sh --stdin-env"
           elif [ "$status" -eq 0 ]; then
             if [ -n "$(credentials)" ]; then
