@@ -1,0 +1,88 @@
+"""Application settings, read from environment variables prefixed with REPEATER_."""
+
+from __future__ import annotations
+
+from functools import lru_cache
+from pathlib import Path
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="REPEATER_", env_file=".env", extra="ignore")
+
+    env: str = "development"  # development | production | test
+    # Public HTTPS origin of the dashboard and media URLs, e.g. https://rotator.magic-lap.com
+    base_url: str = "http://localhost:8000"
+    database_url: str = "postgresql+psycopg://repeater:repeater@localhost:5432/repeater"
+
+    # Secret for sessions, CSRF and signed media URLs. Must be long and random in production.
+    secret_key: str = "dev-insecure-secret-key-change-me"  # noqa: S105 - dev default; `check` rejects it in production
+    # Key ring for OAuth token encryption: comma-separated "kid:base64url(32 bytes)".
+    # The first entry encrypts new data; all entries can decrypt.
+    token_encryption_keys: str = ""
+
+    media_root: Path = Path("/srv/repeater/media")
+    media_url_ttl_seconds: int = 6 * 3600
+    max_upload_mb: int = 500
+
+    default_timezone: str = "Africa/Cairo"
+    default_locale: str = "ar"
+
+    # Platform credentials (developer apps). Empty means the platform is not configured.
+    tiktok_client_key: str = ""
+    tiktok_client_secret: str = ""
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    meta_app_id: str = ""
+    meta_app_secret: str = ""
+    meta_graph_version: str = "v26.0"
+
+    # Notifications
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+
+    # Unofficial import (yt-dlp). Off unless a source opts in.
+    ytdlp_proxy: str = ""
+    ytdlp_cookies_dir: Path | None = None
+
+    # Worker
+    worker_poll_seconds: float = 2.0
+    worker_threads: int = 2
+    job_lock_timeout_minutes: int = 30
+
+    # Retention
+    original_retention_days: int = 30
+    platform_data_retention_days: int = 30  # YouTube API policy: refresh or delete within 30 days
+
+    ffmpeg_bin: str = "ffmpeg"
+    ffprobe_bin: str = "ffprobe"
+
+    session_cookie_name: str = "repeater_session"
+    session_max_age_seconds: int = 14 * 24 * 3600
+
+    trusted_hosts: list[str] = Field(default_factory=lambda: ["*"])
+
+    @property
+    def is_production(self) -> bool:
+        return self.env == "production"
+
+    def oauth_redirect_uri(self, provider: str) -> str:
+        return f"{self.base_url.rstrip('/')}/oauth/{provider}/callback"
+
+    def platform_configured(self, provider: str) -> bool:
+        return {
+            "tiktok": bool(self.tiktok_client_key and self.tiktok_client_secret),
+            "google": bool(self.google_client_id and self.google_client_secret),
+            "meta": bool(self.meta_app_id and self.meta_app_secret),
+        }.get(provider, False)
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+def reset_settings_cache() -> None:
+    get_settings.cache_clear()
