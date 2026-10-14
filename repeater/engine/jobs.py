@@ -38,6 +38,7 @@ from repeater.media import storage
 from repeater.models import (
     AccountStatus,
     ActivityLevel,
+    ActivityLog,
     ConnectedAccount,
     DataDeletionRequest,
     Job,
@@ -215,6 +216,7 @@ def delete_user_data(session: Session, request_id: int) -> bool:
             select(ConnectedAccount)
             .where(ConnectedAccount.extra["fb_user_id"].astext == external_user_id)
             .order_by(ConnectedAccount.id)
+            .with_for_update()
         ).scalars()
     )
     for account in accounts:
@@ -233,6 +235,12 @@ def delete_user_data(session: Session, request_id: int) -> bool:
             actor="meta",
             request_id=request.id,
         )
+    # Account retention deliberately keeps the imported library, with this minimal deletion
+    # key. The account and source FKs may already be NULL when Meta sends its callback.
+    detached = session.execute(
+        select(Video.id, Video.workspace_id).where(Video.meta_deletion_user_id == external_user_id)
+    ).all()
+    _delete_videos(session, detached)
     request.status = "completed"
     request.completed_at = utcnow()
     session.commit()
@@ -247,10 +255,25 @@ def _delete_account_videos(session: Session, account: ConnectedAccount) -> list[
             or_(Video.source_account_id == account.id, Video.source_id.in_(source_ids))
         )
     ).all()
+    return _delete_videos(session, videos)
+
+
+def _delete_videos(session: Session, videos) -> list[int]:
+    """Erase files, rows and references, including notices quoting another video's caption."""
     for video_id, workspace_id in videos:
         storage.delete_video_dir(workspace_id, video_id)
-    ids = [int(v.id) for v in videos]
+    ids = [int(video_id) for video_id, _ in videos]
     if ids:
+        text_ids = [str(i) for i in ids]
+        session.execute(
+            delete(ActivityLog).where(
+                or_(
+                    ActivityLog.data["video_id"].astext.in_(text_ids),
+                    ActivityLog.data["duplicate_of_id"].astext.in_(text_ids),
+                )
+            )
+        )
+        session.execute(delete(Job).where(Job.payload["video_id"].astext.in_(text_ids)))
         session.execute(delete(Video).where(Video.id.in_(ids)))  # their posts cascade
     return ids
 

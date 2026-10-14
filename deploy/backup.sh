@@ -6,7 +6,7 @@
 #                                            with rclone when RCLONE_REMOTE is set in deploy/.env.
 #                                            A failure sends a Telegram alert (when configured).
 #   sudo bash backup.sh pre-deploy           local dump only; deploy.sh runs it before it migrates
-#                                            (repeater-predeploy-*, the newest 5 are kept)
+#                                            (repeater-predeploy-*, kept for 30 days)
 #   sudo bash backup.sh status [--alert]     age of the last successful backup; exit 1 when older than
 #                                            36 hours (--alert also tells Telegram)
 #   sudo bash backup.sh restore FILE --yes [--resume]
@@ -28,7 +28,6 @@ ENV_FILE="$SCRIPT_DIR/.env"
 PREFIX="repeater-db-"
 PREDEPLOY_PREFIX="repeater-predeploy-"
 PRERESTORE_PREFIX="repeater-prerestore-"
-PREDEPLOY_KEEP=5
 PRERESTORE_KEEP=3
 # Safety dumps also expire by age: the privacy policy says data deleted from the service leaves
 # the backups within 30 days (the off-site dumps expire after BACKUP_REMOTE_RETENTION_DAYS, 30).
@@ -184,8 +183,10 @@ dump_failed() {
 dump_database() {
     local prefix="$1" stamp final
     stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-    final="$BACKUP_DIR/${prefix}${stamp}.sql.gz"
     TMP_DUMP="$(mktemp "$BACKUP_DIR/.${prefix}${stamp}.XXXXXX")"
+    # Retries can happen in the same second. Keep the unique suffix when publishing the dump
+    # so a new attempt cannot overwrite the snapshot taken before the first migration.
+    final="$BACKUP_DIR/${prefix}${stamp}-${TMP_DUMP##*.}.sql.gz"
     # --clean --if-exists makes the dump replace existing objects when it is loaded by hand.
     compose exec -T db pg_dump -U repeater -d repeater --no-owner --no-privileges --clean --if-exists |
         gzip -6 >"$TMP_DUMP" || {
@@ -345,7 +346,8 @@ pre_deploy() {
     prepare_backup_dir 900
     require_db_running
     dump_database "$PREDEPLOY_PREFIX"
-    prune_keep "$PREDEPLOY_PREFIX" "$PREDEPLOY_KEEP"
+    # Failed deploys/rollbacks take more dumps too. Count rotation could evict the only snapshot
+    # predating a migration; keep every pre-deploy dump until the privacy retention deadline.
     prune_safety_dumps
     log "pre-deploy backup finished: $DUMP_FILE (roll back with: REPEATER_IMAGE_TAG=previous bash $SCRIPT_DIR/backup.sh restore $DUMP_FILE --yes)"
 }
@@ -355,7 +357,7 @@ pre_deploy() {
 PAUSE_IN_DUMP_SQL="DO \$\$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'workspaces' AND column_name = 'paused') THEN UPDATE public.workspaces SET paused = true; END IF; END \$\$;"
 
 restore() {
-    local file="" confirm=0 resume=0 arg tag stamp
+    local file="" confirm=0 resume=0 arg tag stamp start_command
     for arg in "$@"; do
         case "$arg" in
             --yes) confirm=1 ;;
@@ -396,7 +398,7 @@ restore() {
         printf '\n%s\nCOMMIT;\n' "$PAUSE_IN_DUMP_SQL"
     } | compose exec -T db psql -U repeater -d repeater -v ON_ERROR_STOP=1 -q >/dev/null; then
         warn "the restore failed and was rolled back: the database is as it was before. web and worker stay stopped."
-        warn "fix the problem and run the restore again (or start them with: docker compose up -d web worker)."
+        warn "fix the problem and run the restore again before starting web or worker."
         exit 1
     fi
 
@@ -419,7 +421,9 @@ restore() {
     if ((resume)); then
         log "The worker is running (imports, encodes and polling continue)."
     else
-        log "The worker is stopped. Start it with: docker compose --env-file $ENV_FILE -f $SCRIPT_DIR/docker-compose.yml up -d worker"
+        printf -v start_command 'REPEATER_IMAGE_TAG=%q WORKER_STOP_GRACE_S=%q docker compose --project-directory %q --env-file %q -f %q up -d worker' \
+            "$tag" "$(worker_stop_grace)" "$SCRIPT_DIR" "$ENV_FILE" "$SCRIPT_DIR/docker-compose.yml"
+        log "The worker is stopped. Start it with: $start_command"
     fi
 }
 

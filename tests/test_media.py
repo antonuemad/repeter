@@ -281,7 +281,7 @@ def test_build_encode_command_matches_plan_profile(tmp_path, monkeypatch):
     cmd = build_encode_command(src, out, has_audio=True, ffmpeg_bin="ffmpeg")
     joined = " ".join(cmd)
     assert (
-        "-vf scale=w=trunc(min(iw*sar\\,4096)/2)*2:h=ih,setsar=1,"
+        "-vf scale=w=max(2\\,trunc(min(iw*sar\\,4096)/2)*2):h=max(2\\,trunc(ih*ow/(iw*sar)/2)*2),setsar=1,"
         "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1,"
         "fps=30,format=yuv420p" in joined
     )
@@ -423,6 +423,68 @@ def test_ffmpeg_disk_full_is_its_own_retryable_error(tmp_path):
 
 
 # --------------------------------------------------------------------------- colour (HDR) and geometry
+
+
+@pytest.mark.parametrize("matrix", ["smpte170m", "bt470bg"])
+@pytest.mark.parametrize("source_range", ["tv", "pc"])
+def test_bt601_encode_converts_pixels_instead_of_only_retagging(matrix, source_range, tmp_path, monkeypatch):
+    monkeypatch.setattr(get_settings(), "encode_preset", "ultrafast")
+    original, legacy, encoded = (tmp_path / name for name in ("709.mkv", "601.mkv", "encoded.mp4"))
+    ffmpeg(
+        "-f",
+        "lavfi",
+        "-i",
+        "smptehdbars=size=360x640:rate=30:duration=1",
+        "-c:v",
+        "ffv1",
+        "-colorspace",
+        "bt709",
+        "-color_range",
+        "tv",
+        str(original),
+    )
+    ffmpeg(
+        "-i",
+        str(original),
+        "-vf",
+        f"scale=in_color_matrix=bt709:out_color_matrix={matrix}:in_range=tv:out_range={source_range}:flags=accurate_rnd+full_chroma_int",
+        "-c:v",
+        "ffv1",
+        "-colorspace",
+        matrix,
+        "-color_range",
+        source_range,
+        str(legacy),
+    )
+    assert probe(legacy).color_space == matrix
+    encode_for_platforms(legacy, encoded)
+    expected = decode_rgb(original, size=(360, 640))
+    actual = decode_rgb(encoded, size=(360, 640))
+    assert np.abs(expected - actual).mean() < 3.0
+    assert probe(encoded).color_space == "bt709"
+
+
+@pytest.mark.parametrize(
+    ("size", "sar", "display_ratio"),
+    [
+        ("5120x1280", "1/1", 4.0),
+        ("3840x1080", "2/1", 7680 / 1080),
+    ],
+)
+def test_picture_filter_preserves_aspect_above_the_width_cap(size, sar, display_ratio, tmp_path):
+    original = tmp_path / "wide.mkv"
+    ffmpeg(
+        "-f",
+        "lavfi",
+        "-i",
+        f"color=white:size={size}:rate=1:duration=1,setsar={sar}",
+        "-c:v",
+        "ffv1",
+        str(original),
+    )
+    rgb = decode_rgb(original, filters.picture_filter(probe(original), 360, 640), at_s=0, size=(360, 640))
+    band_height = np.count_nonzero(rgb[:, 180].mean(axis=1) > 200)
+    assert abs(band_height - 360 / display_ratio) <= 2
 
 
 def _hdr_clip(path: Path, *, kind: str, base: Path, rotate: bool = False) -> Path:

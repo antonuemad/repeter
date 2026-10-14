@@ -550,6 +550,89 @@ def test_delete_user_data(db, workspace, make_account, sample_video):
 # =========================================================================== maintenance
 
 
+def test_meta_deletion_after_account_retention_removes_imports_and_quoted_activity(
+    db,
+    workspace,
+    make_account,
+    sample_video,
+):
+    from repeater.accounts import disconnect
+    from repeater.sources import importer
+
+    page = make_account("facebook", extra={"fb_user_id": "deleted-user"})
+    other = make_account("facebook", extra={"fb_user_id": "other-user"})
+    source = Source(
+        workspace_id=workspace.id,
+        kind=SourceKind.PLATFORM_API,
+        platform=Platform.FACEBOOK,
+        connected_account_id=page.id,
+    )
+    db.add(source)
+    db.commit()
+    direct = ready_video(db, workspace, sample_video, source_account_id=page.id, title="PRIVATE META TITLE")
+    via_source = ready_video(db, workspace, sample_video, source_id=source.id)
+    copy = ready_video(db, workspace, sample_video, title="Drive copy")
+    copy.original_path = copy.encoded_path
+    keep = ready_video(db, workspace, sample_video, source_account_id=other.id)
+    importer._mark_duplicate(db, copy, direct)
+    # A second notice quotes the original even after the duplicate link is released.
+    importer._release_duplicates_of(db, direct)
+    db.add(
+        Job(kind="import_video", payload={"video_id": direct.id, "download_url": "https://meta.cdn/secret"})
+    )
+    db.commit()
+    ids = (direct.id, via_source.id)
+    dirs = [storage.media_root() / storage.video_dir_rel(workspace.id, i) for i in ids]
+    page_id = page.id
+    disconnect(db, page, revoke=False)
+    db.commit()
+    assert (
+        maintenance.run_maintenance(
+            db, now=utcnow() + maintenance.DISCONNECTED_RETENTION + timedelta(hours=1)
+        )["disconnected_accounts"]
+        == 1
+    )
+    db.commit()
+    db.expire_all()
+    assert db.get(ConnectedAccount, page_id) is None
+    assert all(db.get(Video, i) is not None for i in ids), "imports stay until explicit deletion"
+    notices = list(
+        db.execute(
+            select(ActivityLog).where(ActivityLog.data["duplicate_of_id"].astext == str(ids[0]))
+        ).scalars()
+    )
+    assert len(notices) == 2 and all("PRIVATE META TITLE" in a.message for a in notices)
+    request = DataDeletionRequest(provider="meta", external_user_id="deleted-user", confirmation_code="late")
+    db.add(request)
+    db.commit()
+    assert engine_jobs.delete_user_data(db, request.id)
+    db.expire_all()
+    assert all(db.get(Video, i) is None for i in ids)
+    assert all(not d.exists() for d in dirs)
+    assert db.get(Video, keep.id) is not None and db.get(Video, copy.id) is not None
+    assert db.get(ConnectedAccount, other.id) is not None
+    assert db.get(DataDeletionRequest, request.id).status == "completed"
+    activity = " ".join(a.message for a in db.execute(select(ActivityLog)).scalars())
+    assert "PRIVATE META TITLE" not in activity
+    assert "meta.cdn" not in json.dumps([j.payload for j in db.execute(select(Job)).scalars()])
+
+
+def test_meta_deletion_removes_duplicate_notice_for_an_active_account(
+    db, workspace, make_account, sample_video
+):
+    from repeater.sources import importer
+
+    account = make_account("instagram", extra={"fb_user_id": "active-user"})
+    original = ready_video(db, workspace, sample_video, source_account_id=account.id, title="PRIVATE TITLE")
+    copy = ready_video(db, workspace, sample_video, title="Drive copy")
+    importer._mark_duplicate(db, copy, original)
+    request = DataDeletionRequest(provider="meta", external_user_id="active-user", confirmation_code="active")
+    db.add(request)
+    db.commit()
+    assert engine_jobs.delete_user_data(db, request.id)
+    assert "PRIVATE TITLE" not in " ".join(a.message for a in db.execute(select(ActivityLog)).scalars())
+
+
 def _age(db, model, row_id, column: str, when: datetime) -> None:
     db.execute(update(model).where(model.id == row_id).values({column: when}))
     db.commit()

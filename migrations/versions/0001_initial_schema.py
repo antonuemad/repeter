@@ -176,6 +176,7 @@ def upgrade() -> None:
     sa.Column('source_id', sa.Integer(), nullable=True),
     sa.Column('source_platform', sa.Enum('tiktok', 'youtube', 'instagram', 'facebook', 'gdrive', name='video_source_platform', native_enum=False, length=32), nullable=True),
     sa.Column('source_account_id', sa.Integer(), nullable=True),
+    sa.Column('meta_deletion_user_id', sa.String(length=128), nullable=True),
     sa.Column('external_id', sa.String(length=128), nullable=True),
     sa.Column('permalink', sa.Text(), nullable=True),
     sa.Column('title', sa.Text(), nullable=False),
@@ -207,6 +208,7 @@ def upgrade() -> None:
     op.create_index('ix_video_sha256', 'videos', ['workspace_id', 'sha256'], unique=False)
     op.create_index('ix_video_ws_status', 'videos', ['workspace_id', 'status'], unique=False)
     op.create_index(op.f('ix_videos_source_id'), 'videos', ['source_id'], unique=False)
+    op.create_index(op.f('ix_videos_meta_deletion_user_id'), 'videos', ['meta_deletion_user_id'], unique=False)
     op.create_index('uq_video_source_external', 'videos', ['workspace_id', 'source_platform', 'external_id'], unique=True, postgresql_where=sa.text('external_id IS NOT NULL'))
     op.create_table('scheduled_posts',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -248,6 +250,7 @@ def downgrade() -> None:
     op.drop_table('scheduled_posts')
     op.drop_index('uq_video_source_external', table_name='videos', postgresql_where=sa.text('external_id IS NOT NULL'))
     op.drop_index(op.f('ix_videos_source_id'), table_name='videos')
+    op.drop_index(op.f('ix_videos_meta_deletion_user_id'), table_name='videos')
     op.drop_index('ix_video_ws_status', table_name='videos')
     op.drop_index('ix_video_sha256', table_name='videos')
     op.drop_table('videos')

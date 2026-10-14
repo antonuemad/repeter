@@ -28,8 +28,9 @@ HLG_PEAK_NITS = 1000.0
 DEFAULT_PQ_PEAK_NITS = 1000.0
 MAX_PQ_PEAK_NITS = 10000.0
 TONEMAP_KNEE = 0.8
-# Pixel aspect ratio is applied to the width (even number, capped), then reset to square pixels.
-SAR_SCALE = "scale=w=trunc(min(iw*sar\\,4096)/2)*2:h=ih,setsar=1"
+# Apply pixel aspect ratio, reducing both dimensions when display width exceeds the cap.
+# Use the rounded output width for height too, so rounding cannot stretch the picture.
+SAR_SCALE = "scale=w=max(2\\,trunc(min(iw*sar\\,4096)/2)*2):h=max(2\\,trunc(ih*ow/(iw*sar)/2)*2),setsar=1"
 _FILTER_PROBE_TIMEOUT_S = 20
 
 
@@ -65,7 +66,17 @@ def hdr_tools_available(ffmpeg_bin: str | None = None) -> bool:
 def colour_filter(info: ProbeResult | None) -> str:
     """Filters that convert `info`'s picture to 8-bit SDR BT.709 limited range ("" if it already
     is one). Raises HdrToolsMissing when ffmpeg cannot do the conversion."""
-    if info is None or not (info.is_hdr or info.is_wide_gamut_sdr):
+    if info is None:
+        return ""
+    if _is_bt601_sdr(info):
+        # SD Y'CbCr uses the BT.601 matrix: tagging those pixels BT.709 changes their colours.
+        # swscale performs the matrix/range conversion without requiring the HDR tools.
+        return (
+            f"scale=in_color_matrix={info.color_space}:out_color_matrix=bt709:"
+            f"in_range={info.color_range or 'tv'}:out_range=tv:flags=accurate_rnd+full_chroma_int,"
+            "setparams=colorspace=bt709:range=tv"
+        )
+    if not (info.is_hdr or info.is_wide_gamut_sdr):
         return ""
     if not hdr_tools_available():
         raise HdrToolsMissing(
@@ -84,6 +95,14 @@ def colour_filter(info: ProbeResult | None) -> str:
         f"zscale={src}:t=linear:npl={REFERENCE_WHITE_NITS:g},format=gbrpf32le,zscale=p=bt709,"
         f"tonemap=tonemap=mobius:param={TONEMAP_KNEE}:peak={peak / REFERENCE_WHITE_NITS:.2f},"
         f"zscale={sdr},format=yuv420p"
+    )
+
+
+def _is_bt601_sdr(info: ProbeResult | None) -> bool:
+    return (
+        info is not None
+        and not (info.is_hdr or info.is_wide_gamut_sdr)
+        and info.color_space in ("smpte170m", "bt470bg")
     )
 
 
@@ -107,7 +126,12 @@ def picture_filter(info: ProbeResult | None, width: int, height: int) -> str:
     ]
     colour = colour_filter(info)
     if colour:
-        parts.append(colour)
+        if _is_bt601_sdr(info):
+            # swscale may normalise full range while resizing. Convert first, while the probed
+            # range still describes the pixels, otherwise the later conversion expands twice.
+            parts.insert(0, colour)
+        else:
+            parts.append(colour)
     parts.append(f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2")
     parts.append("setsar=1")
     return ",".join(parts)

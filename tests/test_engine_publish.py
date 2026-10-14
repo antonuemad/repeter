@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import pytest
+import respx
 from sqlalchemy import select
 
 from repeater.accounts import load_tokens
@@ -152,6 +153,61 @@ def fake(platform: str = "youtube", **kw) -> FakePublisher:
 
 def jobs(db, kind: str) -> list[Job]:
     return list(db.execute(select(Job).where(Job.kind == kind).order_by(Job.id)).scalars())
+
+
+def test_publish_now_restarts_a_terminal_tiktok_upload(db, setup):
+    """A deliberate retry after fixing the rule must not keep polling a dead publish_id."""
+    from repeater.platforms import tiktok as tt
+
+    post, _, _, rule = setup(
+        "tiktok",
+        status=PostStatus.NEEDS_ATTENTION,
+        publish_state={"publish_id": "dead-upload", "source": "FILE_UPLOAD"},
+        error="TikTok rejected the video format.",
+        attempts=4,
+    )
+    rule.settings = {
+        **rule.settings,
+        "privacy_level": "SELF_ONLY",
+        "music_consent_at": utcnow().isoformat(),
+    }
+    db.commit()
+    with respx.mock(assert_all_called=False) as router:
+        router.post(tt.CREATOR_INFO_URL).respond(
+            200,
+            json={
+                "data": {"privacy_level_options": ["SELF_ONLY"], "max_video_post_duration_sec": 300},
+                "error": {"code": "ok"},
+            },
+        )
+        dead = router.post(tt.STATUS_URL).respond(
+            200,
+            json={
+                "data": {"status": "FAILED", "fail_reason": "file_format_check_failed"},
+                "error": {"code": "ok"},
+            },
+        )
+        init = router.post(tt.DIRECT_INIT_URL).respond(
+            200,
+            json={
+                "data": {"publish_id": "fresh-upload"},
+                "error": {"code": "ok"},
+            },
+        )
+        actions.publish_now(db, post, actor="owner")
+        db.commit()
+        result = publisher.publish_post(db, post.id)
+    assert result.status == PostStatus.PROCESSING
+    assert init.call_count == 1 and dead.call_count == 0
+    db.refresh(post)
+    assert post.publish_state["publish_id"] == "fresh-upload" and post.attempts == 0
+
+
+@pytest.mark.parametrize("status", [PostStatus.SCHEDULED, PostStatus.FAILED])
+def test_publish_now_keeps_recoverable_upload_state(db, setup, status):
+    post, _, _, _ = setup(status=status, publish_state={"publish_id": "possibly-live"})
+    actions.publish_now(db, post, actor="owner")
+    assert post.publish_state == {"publish_id": "possibly-live"}
 
 
 def activities(db, level: ActivityLevel | None = None) -> list[ActivityLog]:

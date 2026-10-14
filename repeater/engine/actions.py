@@ -68,6 +68,12 @@ def publish_now(session: Session, post: ScheduledPost, *, actor: str) -> None:
     _check_can_publish(session, post.workspace_id, session.get(ConnectedAccount, post.connected_account_id))
     if post.status == PostStatus.NEEDS_ATTENTION:
         post.attempts = 0
+        # This is an explicit new upload after the dashboard's confirmation (including the
+        # may-be-live warning). A terminal TikTok publish_id must not be polled forever.
+        post.publish_state = {}
+        post.platform_post_id = None
+        post.permalink = None
+        post.published_at = None
     now = utcnow()
     post.status = PostStatus.SCHEDULED
     post.scheduled_at = now

@@ -1087,6 +1087,7 @@ def _release_duplicates_of(session: Session, failed: Video) -> None:
                 f"Video '{_video_label(dependent)}' was taken for a copy of '{_video_label(failed)}', which "
                 "failed, so it is being processed on its own.",
                 video_id=dependent.id,
+                duplicate_of_id=failed.id,
                 source_id=dependent.source_id,
             )
         else:

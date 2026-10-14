@@ -21,6 +21,7 @@ from repeater.models import (
     ScheduledPost,
     Source,
     SourceKind,
+    Video,
 )
 from repeater.platforms import get_provider_for_platform
 from repeater.platforms.base import (
@@ -329,6 +330,16 @@ def delete_account_records(
     cascade). Imported library videos are not touched (the caller passes `video_ids` when they are
     deleted too). Used by the retention job a few days after a disconnect and by Meta data
     deletion. Returns what was removed."""
+    # Library imports outlive a disconnect. Preserve only the deletion key before the FK to
+    # this account (and its sources) is lost, so a later callback can still erase the imports.
+    meta_user = (account.extra or {}).get("fb_user_id")
+    if account.platform in (Platform.INSTAGRAM, Platform.FACEBOOK) and meta_user:
+        imported_sources = select(Source.id).where(Source.connected_account_id == account.id)
+        session.execute(
+            update(Video)
+            .where(or_(Video.source_account_id == account.id, Video.source_id.in_(imported_sources)))
+            .values(meta_deletion_user_id=str(meta_user))
+        )
     conditions = [ActivityLog.data["account_id"].astext == str(account.id)]
     source_ids = list(
         session.execute(
@@ -339,6 +350,7 @@ def delete_account_records(
     )
     if video_ids:
         conditions.append(ActivityLog.data["video_id"].astext.in_([str(v) for v in video_ids]))
+        conditions.append(ActivityLog.data["duplicate_of_id"].astext.in_([str(v) for v in video_ids]))
     if source_ids:
         conditions.append(ActivityLog.data["source_id"].astext.in_([str(i) for i in source_ids]))
     name = (account.display_name or "").strip()

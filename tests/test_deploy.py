@@ -1377,7 +1377,7 @@ def test_stopped_database_with_data_is_started_for_the_backup(sandbox: dict) -> 
     assert "pg_dump" in (sandbox["logs"] / "exec.log").read_text()
 
 
-def test_only_the_newest_five_predeploy_dumps_are_kept(sandbox: dict) -> None:
+def test_predeploy_dumps_survive_retries_until_the_age_limit(sandbox: dict) -> None:
     make_env(sandbox)
     backups = Path(sandbox["env"]["REPEATER_BACKUP_DIR"])
     for day in range(1, 9):
@@ -1385,8 +1385,19 @@ def test_only_the_newest_five_predeploy_dumps_are_kept(sandbox: dict) -> None:
     daily = _old_dump(backups, "repeater-db-20260101T000000Z.sql.gz", 10)
     assert deploy(sandbox).returncode == 0
     kept = sorted(p.name for p in backups.glob("repeater-predeploy-*.sql.gz"))
-    assert len(kept) == 5 and kept[0] == "repeater-predeploy-20260105T000000Z.sql.gz"
+    assert len(kept) == 9 and kept[0] == "repeater-predeploy-20260101T000000Z.sql.gz"
     assert daily.exists(), "the daily dumps follow their own retention"
+
+
+def test_failed_rollbacks_do_not_evict_or_overwrite_pre_migration_dumps(sandbox: dict) -> None:
+    make_env(sandbox)
+    backups = Path(sandbox["env"]["REPEATER_BACKUP_DIR"])
+    original = _old_dump(backups, "repeater-predeploy-20261001T000000Z.sql.gz", 2)
+    for _ in range(6):
+        result = deploy(sandbox, "--no-build", REPEATER_IMAGE_TAG="previous", STUB_MIGRATE_RC="1")
+        assert result.returncode != 0
+    assert original.exists()
+    assert len(list(backups.glob("repeater-predeploy-*.sql.gz"))) == 7
 
 
 def test_migration_failure_on_a_rollback_points_at_the_restore(sandbox: dict) -> None:
@@ -1953,6 +1964,22 @@ def test_restore_applies_the_migrations_of_the_chosen_release(sandbox: dict) -> 
     missing = backup(sandbox, "restore", dump, "--yes", REPEATER_IMAGE_TAG="build-gone")
     assert missing.returncode != 0
     assert "image repeater-app:build-gone does not exist" in missing.stderr
+
+
+@pytest.mark.parametrize("tag", ["previous", "build-20261014120000"])
+def test_restore_printed_worker_command_uses_the_restored_release(sandbox: dict, tag: str) -> None:
+    make_env(sandbox)
+    if tag != "previous":
+        images = sandbox["root"] / "state" / "images"
+        images.mkdir(exist_ok=True)
+        (images / f"repeater-app_{tag}").write_text("sha256:older")
+    result = backup(sandbox, "restore", str(restore_dump(sandbox)), "--yes", REPEATER_IMAGE_TAG=tag)
+    assert result.returncode == 0, result.stderr
+    command = re.search(r"Start it with: (.+)", result.stdout).group(1)
+    assert f"REPEATER_IMAGE_TAG={tag}" in command
+    started = run(sandbox, ["bash", "-c", command])
+    assert started.returncode == 0, started.stderr
+    assert f"REPEATER_IMAGE_TAG={tag}" in (sandbox["logs"] / "docker-env.log").read_text().splitlines()[-1]
 
 
 def test_restore_keeps_a_safety_dump_of_what_it_replaces(sandbox: dict) -> None:

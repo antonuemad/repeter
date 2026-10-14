@@ -10,7 +10,7 @@ Production packaging for Repeater on a single VPS (Magic Lap's Hostinger KVM 4),
 | `Caddyfile` | HTTPS for `$REPEATER_DOMAIN`, 600 MB bodies, long upload timeouts, reverse proxy to `web:8000`. |
 | `.env.example` | Every setting with comments. `bootstrap.sh` turns it into `deploy/.env` (mode 600, never committed). |
 | `bootstrap.sh` | First install, idempotent, as root: OS check, Docker, `/srv/repeater/{app,media,backups}`, secrets, reverse-proxy detection (re-checked on every run; `--redetect-proxy`), build and start, admin, backup cron. |
-| `deploy.sh` | Every deploy: (`--pull`: refresh postgres/caddy too), build, pre-deploy dump, migrate, `up -d --remove-orphans`, wait for health. Never edits `.env`. `:previous` moves only when a build differs. |
+| `deploy.sh` | Every deploy: (`--pull`: refresh postgres/caddy too), build, pre-deploy dump (kept 30 days), migrate, `up -d --remove-orphans`, wait for health. Never edits `.env`. `:previous` moves only when a build differs. |
 | `backup.sh` | Daily `pg_dump` to `/srv/repeater/backups` (14 days), Telegram alert on failure, optional `rclone` off-site copy (dumps copied and expired by age, media mirrored with a trash and a delete cap); `pre-deploy`, `status`, and `restore FILE --yes [--resume]` (one transaction, workspaces paused, web only). |
 | `selftest.sh` | Real-container check in a throwaway compose project: atomic restore (also over a newer schema), pause-on-restore, trusted-proxy handling of `X-Forwarded-For`. CI runs it. |
 
@@ -40,6 +40,11 @@ docker compose --env-file .env ps         # status
 docker compose --env-file .env logs -f --tail 200 web worker
 docker compose --env-file .env exec web python -m repeater.cli check
 ```
+
+After a restore, use the worker start command printed by `backup.sh`: it carries the same
+`REPEATER_IMAGE_TAG` used for the restore. Keep that tag on subsequent compose commands too.
+Pre-deploy dumps expire after 30 days; retries never prune them by count or overwrite a dump
+taken in the same second.
 
 ## Reverse proxy
 

@@ -244,6 +244,9 @@ class Video(TimestampMixin, Base):
     source_account_id: Mapped[int | None] = mapped_column(
         ForeignKey("connected_accounts.id", ondelete="SET NULL")
     )
+    # Minimal deletion lineage for imports kept after the disconnected account is purged.
+    # It leaves with the video and lets a later Meta callback still find that user's data.
+    meta_deletion_user_id: Mapped[str | None] = mapped_column(String(128), index=True)
     external_id: Mapped[str | None] = mapped_column(String(128))
     permalink: Mapped[str | None] = mapped_column(Text)
     title: Mapped[str] = mapped_column(Text, default="")

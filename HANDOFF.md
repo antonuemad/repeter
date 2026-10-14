@@ -15,10 +15,10 @@ Written 2026-10-14 from a long Claude Code session. Read this first, then `PLAN.
 | Item | State |
 |---|---|
 | Code | Phase 0 implemented: about 19.5k lines of source and 24k lines of tests |
-| Tests | 1657 passed, 10 skipped (shellcheck/rclone variants) on the integration run; `ruff check` and `ruff format --check` clean; `alembic upgrade head` + `alembic check` clean |
+| Tests | Follow-up Linux run: **1673 passed, 8 skipped** (Docker CLI checks unavailable inside the disposable test container); `ruff check`, `ruff format --check`, `bash -n` and `shellcheck -x` clean. Alembic upgrade/check, downgrade to base, then upgrade/check again all clean. |
 | Docker | Image builds; compose stack smoke-tested (db, migrate, web, worker); `deploy/selftest.sh` passes as a non-root user |
-| CI | GitHub Actions `ci.yml`. The last run before the final fix failed only the "Docker image and deploy files" job (selftest ran as non-root and the status dir was created by Docker as root). Fixed in `deploy/selftest.sh` and `deploy/deploy.sh`; confirm CI is green on the newest commit |
-| Review | 86 confirmed findings fixed by six owners and re-verified by independent skeptics: **81 fully fixed, 5 partial**, plus 18 new minor issues the re-verification found (section 7). No critical finding remains; none blocks internal use, five medium ones should be closed before the first deploy |
+| CI | GitHub Actions `ci.yml`: both `8423949` (non-root selftest fix) and `d9e961d` passed. The five-medium-issue follow-up below adds regression coverage; check the run on the current commit. |
+| Review | 86 confirmed findings fixed by six owners and re-verified by independent skeptics: **81 fully fixed, 5 partial**, plus 18 new minor issues the re-verification found (section 7). These are the original review counts; the follow-up in section 7 resolves the five medium issues and the two Meta-deletion partial findings. No critical finding remains |
 | Deployed | **Nothing is deployed.** The sandbox that built this had no SSH key, no server address and no credentials |
 
 ## 3. Blocked on the user (do these first, they cannot be done from the repo)
@@ -84,19 +84,20 @@ Sandbox-only notes (ignore if your environment differs): Docker had to be starte
 - **Worker:** 2 threads by default; jobs hold a lease (`job_lease_refresh_seconds`); stale jobs are requeued; due publish/poll jobs are claimed ahead of import backfills; on SIGTERM in-flight jobs get `worker_shutdown_grace_s` (compose grace = that + 60 s).
 - **Internationalisation:** Arabic first (RTL), English second; every UI string goes through `repeater/web/i18n.py`. Rule problems are machine codes with `rules.PROBLEM_MESSAGES` as the English fallback.
 
-## 7. Known open issues (final re-verification; full trace in `docs/review/2026-10-14-findings.md`)
+## 7. Follow-up fixes and known open issues ( full trace in `docs/review/2026-10-14-findings.md`)
 
 Each needs a regression test that fails on the current code. The reviewers' reproduction scripts lived in a temporary scratch directory that is gone; the findings file and the descriptions below are the specification.
 
-**Medium (close before the first deploy):**
-1. **Meta data-deletion request arriving after the 5-day account purge** deletes nothing yet reports `completed` (`repeater/jobs/maintenance.py` `_delete_disconnected_accounts` with `repeater/engine/jobs.py` `delete_user_data`). Imported videos and activity rows that quote their captions must still be found and deleted by external user id.
-2. **TikTok "Publish now" on a needs-attention post** re-polls the dead upload instead of uploading again (`repeater/platforms/tiktok.py`).
-3. **Rollback restore prints (and `docs/ar/05-operations.md`, `docs/ar/00-deploy.md` section 8 repeat) a worker start command without `REPEATER_IMAGE_TAG`**, which brings the broken release back (`deploy/backup.sh`). Related: pre-deploy dumps rotate by count, so reruns and failed rollback attempts can evict the only pre-migration dump.
-4. **BT.601 SDR sources** (smpte170m / bt470bg) are retagged BT.709 without a matrix conversion, so colours shift (`repeater/media/filters.py`).
-5. **`SAR_SCALE` clamps width to 4096 without scaling the height**, distorting any source wider than 4096 px (`repeater/media/filters.py`).
+**Five medium issues resolved in the follow-up:**
+1. Late Meta deletion: imports retain `Video.meta_deletion_user_id` when account retention removes their account/source FKs. The deletion job removes these videos/files, their queued imports, and activity entries quoting them through `duplicate_of_id`. Duplicate-release notices now carry that id too. The initial migration was amended because nothing is deployed; privacy text and `PLAN.md` describe the deletion key.
+2. TikTok "Publish now": an explicit confirmed retry of a needs-attention post starts a fresh upload. Scheduled/failed retries retain recoverable upload state; the existing may-be-live confirmation remains required in the dashboard.
+3. Rollback: the printed worker command carries the selected `REPEATER_IMAGE_TAG`, project paths and stop grace. Pre-deploy dumps now expire by age (30 days), without count eviction by retries; unique filenames preserve dumps taken within the same second. Arabic operator guides match.
+4. BT.601 SDR: `smpte170m` / `bt470bg` pixels are matrix/range-converted to BT.709 before output tagging, tested with limited- and full-range colour bars.
+5. Wide video: the 4096-pixel intermediate cap scales both axes proportionally, including anamorphic inputs. The shared picture filter also protects fingerprints.
+
+Regression tests are in `tests/test_worker.py`, `tests/test_engine_publish.py`, `tests/test_deploy.py`, and `tests/test_media.py`. See the follow-up section of the review trace for validation.
 
 **Partially fixed:**
-- `engine-8` / `ux-compliance-missed-2`: the activity row written by `importer._mark_duplicate` quotes a deleted video's caption and carries only `duplicate_of_id`, so it survives `delete_user_data`.
 - `api-tiktok-youtube-5`: no exact per-day ledger of YouTube `videos.insert` session starts and no project-wide circuit breaker; attempts-weighting under-counts some cases. The planner uses `youtube_daily_upload_quota` (default 100, budget 90 percent).
 - `ux-compliance-8`: activity entries and error strings written by the engine, publisher, importer, platforms and notify carry no message key and show in English in the Arabic UI (also `sources/manual.py` "not a supported video file"). Needs message keys end to end.
 
@@ -110,7 +111,7 @@ Each needs a regression test that fails on the current code. The reviewers' repr
 
 ## 8. Backlog, in priority order
 
-1. Close the medium items in section 7, then the partial and low ones.
+1. Close the remaining partial and low items in section 7; the five medium items above are resolved.
 2. Deploy phase 0 once the user supplies section 3; run `deploy/selftest.sh` and `server-inspect` first; verify `https://rotator.magic-lap.com/healthz`; create the admin; connect Magic Lap's accounts (Meta Pages and Instagram in Development mode, Google in Testing, TikTok sandbox/private).
 3. Soak for 30 days: no manual interventions, failure rate under 5 percent (phase 0 exit criterion in `PLAN.md`). Add uptime monitoring (Uptime Kuma or healthchecks.io on `/healthz`) and off-site backups (`RCLONE_REMOTE`).
 4. Phase 1, **not started**: self-service sign-up with email verification and password reset, workspace invites and roles, plan limits enforcement, onboarding, landing page (Arabic/English), billing (Paymob for EGP, Paddle as merchant of record for USD; Stripe does not support Egyptian companies), support email.

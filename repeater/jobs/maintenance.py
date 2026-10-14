@@ -308,7 +308,7 @@ def _delete_disconnected_accounts(session: Session, now: datetime) -> int:
     already wiped at the disconnect itself."""
     cutoff = (now if now.tzinfo else now.replace(tzinfo=UTC)) - DISCONNECTED_RETENTION
     accounts = session.execute(
-        select(ConnectedAccount).where(ConnectedAccount.status == AccountStatus.DISABLED)
+        select(ConnectedAccount).where(ConnectedAccount.status == AccountStatus.DISABLED).with_for_update()
     ).scalars()
     count = 0
     for account in list(accounts):

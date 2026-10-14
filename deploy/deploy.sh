@@ -13,8 +13,8 @@
 #   HEALTH_TIMEOUT    seconds to wait for the containers to become healthy (default 240)
 #   SKIP_PREDEPLOY_BACKUP=1   migrate without the pre-deploy database dump (not recommended)
 #
-# Before migrating, a dump of the running database is taken (backup.sh pre-deploy, the newest 5 are
-# kept). The previous release stays available as repeater-app:previous (it moves only when a build
+# Before migrating, a dump of the running database is taken (backup.sh pre-deploy, kept for 30
+# days). The previous release stays available as repeater-app:previous (it moves only when a build
 # produces a different image) and as repeater-app:build-<time> (the newest 4).
 set -Eeuo pipefail
 
