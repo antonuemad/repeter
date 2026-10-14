@@ -6,7 +6,7 @@ Repeater watches a creator's source platform (or a Google Drive folder, or manua
 
 ## Status
 
-Phase 0 (internal Magic Lap deployment at `rotator.magic-lap.com`) is implemented and tested; it is not deployed yet. The product and technical plan, with every platform fact sourced from official documentation, is in [PLAN.md](PLAN.md) (Arabic).
+Phase 0 is deployed at **https://repeater.magic-lap.com** on Magic Lap’s VPS. Platform app credentials and account connections are configured separately. The product and technical plan, with every platform fact sourced from official documentation, is in [PLAN.md](PLAN.md) (Arabic).
 
 | Area | Where |
 |---|---|

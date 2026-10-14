@@ -17,6 +17,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -66,7 +67,11 @@ case "$1" in
   rmi) rm -f "$(tag_file "$2")"; exit 0 ;;
   inspect)
     if [[ " $* " == *PortBindings* ]]; then cat "${STUB_INSPECT:-/dev/null}";
-    elif [[ " $* " == *NetworkSettings.Networks* ]]; then echo "${STUB_PROXY_IP:-172.18.0.1}";
+    elif [[ " $* " == *NetworkSettings.Networks* ]]; then
+      if [[ -n "${STUB_PROXY_JSON:-}" ]]; then
+        if [[ " $* " == *'{{json '* ]]; then printf '%s\n' "$STUB_PROXY_JSON";
+        else printf '%s\n' '172.19.0.1' 'invalid IP'; fi
+      else echo "${STUB_PROXY_IP:-172.18.0.1}"; fi;
     else echo "${STUB_HEALTH:-healthy}"; fi
     exit 0 ;;
   exec) cat "${STUB_CADDYFILE:-/dev/null}"; exit 0 ;;
@@ -117,7 +122,14 @@ case "$sub" in
         if [[ " $* " == *" -c "* ]]; then exit "${STUB_PSQL_C_RC:-0}"; fi
         cat > "$STUB_STDIN_FILE"; exit "${STUB_PSQL_RC:-0}" ;;
       python)
-        if [[ " $* " == *" check-proxy "* ]]; then exit "${STUB_PROXY_CHECK_RC:-0}"; fi
+        if [[ " $* " == *" check-proxy "* ]]; then
+          if [[ -n "${STUB_PROXY_PYTHON:-}" ]]; then
+            while [[ "${1:-}" != check-proxy ]]; do shift; done
+            shift
+            exec "$STUB_PROXY_PYTHON" -m repeater.cli check-proxy "$@"
+          fi
+          exit "${STUB_PROXY_CHECK_RC:-0}"
+        fi
         cat > "$STUB_STDIN_FILE"
         echo "Warning: Password input may be echoed." >&2
         printf 'Password: admin created\n'
@@ -2391,3 +2403,43 @@ def test_docker_version_gate(sandbox: dict, engine: str, compose: str, error: st
     else:
         assert result.returncode != 0
         assert error in result.stderr
+
+
+@pytest.mark.parametrize(
+    "addresses,allow",
+    [
+        ('"172.19.0.1"\n""', "127.0.0.1,172.16.0.0/12"),
+        ('null\n"fd00::1"', "127.0.0.1,fd00::/64"),
+    ],
+)
+def test_proxy_check_uses_docker_json_for_zero_value_ip_addresses(sandbox, addresses, allow):
+    """Docker 29's netip.Addr renders an absent IPv6 gateway as 'invalid IP', but JSON as ''."""
+    make_env(sandbox)
+    script = f'set -Eeuo pipefail; source "{sandbox["deploy"]}/deploy.sh"; check_proxy_trust'
+    result = run(
+        sandbox,
+        ["bash", "-c", script],
+        extra_env={
+            "STUB_PROXY_JSON": addresses,
+            "STUB_PROXY_PYTHON": sys.executable,
+            "FORWARDED_ALLOW_IPS": allow,
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    call = next(call for call in compose_calls(sandbox) if "check-proxy" in call)
+    assert "invalid IP" not in call and "null" not in call and '"' not in call
+
+
+def test_proxy_check_still_refuses_an_untrusted_json_address(sandbox):
+    make_env(sandbox)
+    script = f'set -Eeuo pipefail; source "{sandbox["deploy"]}/deploy.sh"; check_proxy_trust'
+    result = run(
+        sandbox,
+        ["bash", "-c", script],
+        extra_env={
+            "STUB_PROXY_JSON": '"10.99.0.1"\n""',
+            "STUB_PROXY_PYTHON": sys.executable,
+            "FORWARDED_ALLOW_IPS": "127.0.0.1,172.16.0.0/12",
+        },
+    )
+    assert result.returncode != 0 and "trusted proxy mismatch: 10.99.0.1" in result.stderr

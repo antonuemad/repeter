@@ -255,14 +255,20 @@ check_proxy_trust() {
     local -a addresses=()
     web="$(compose ps -q web | head -n 1)"
     [[ -n "$web" ]] || die "cannot determine the web container for the trusted proxy check"
+    # Docker 29 renders a zero netip.Addr as "invalid IP"; its JSON form is the empty
+    # string. JSON also keeps this compatible with older APIs that return plain strings.
     while read -r addr; do
-        [[ -z "$addr" ]] || addresses+=("$addr")
-    done < <(docker inspect --format '{{range .NetworkSettings.Networks}}{{.Gateway}}{{"\n"}}{{.IPv6Gateway}}{{"\n"}}{{end}}' "$web")
+        addr="${addr#\"}"
+        addr="${addr%\"}"
+        [[ -z "$addr" || "$addr" == null ]] || addresses+=("$addr")
+    done < <(docker inspect --format '{{range .NetworkSettings.Networks}}{{json .Gateway}}{{"\n"}}{{json .IPv6Gateway}}{{"\n"}}{{end}}' "$web")
     caddy="$(compose ps --status running -q caddy | head -n 1)"
     if [[ -n "$caddy" ]]; then
         while read -r addr; do
-            [[ -z "$addr" ]] || addresses+=("$addr")
-        done < <(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{"\n"}}{{.GlobalIPv6Address}}{{"\n"}}{{end}}' "$caddy")
+            addr="${addr#\"}"
+            addr="${addr%\"}"
+            [[ -z "$addr" || "$addr" == null ]] || addresses+=("$addr")
+        done < <(docker inspect --format '{{range .NetworkSettings.Networks}}{{json .IPAddress}}{{"\n"}}{{json .GlobalIPv6Address}}{{"\n"}}{{end}}' "$caddy")
     fi
     bind="$(env_get REPEATER_WEB_BIND "$ENV_FILE")"
     [[ -z "$bind" ]] || addresses+=("$bind")

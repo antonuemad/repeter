@@ -7,7 +7,7 @@ Written 2026-10-14 from a long Claude Code session. Read this first, then `PLAN.
 **Repeater** is a multi-tenant SaaS that watches a creator's *source* platform (Instagram, Facebook Page, a Google Drive folder, manual uploads, or an opt-in yt-dlp path for TikTok/YouTube), stores each new short video once, encodes one file that all four platforms accept, and re-publishes it to **TikTok, YouTube Shorts, Instagram Reels and Facebook Reels** on a rotation schedule. It uses the official APIs only for publishing.
 
 - Owner/operator: Antonius (antonius@twemix.com), company **Magic Lab / Magic Lap**. The user writes Egyptian Arabic; keep user-facing replies in Arabic, code and docs in English unless a file is already Arabic (`PLAN.md`, `docs/ar/`).
-- First deployment (phase 0): Magic Lap's own accounts at **https://rotator.magic-lap.com** on an existing Hostinger **KVM 4 VPS** that may also run other Magic Lap projects. The main site `magic-lap.com` is on Hostinger web hosting (hPanel) behind Cloudflare and must not be touched. The `rotator` subdomain does not exist yet.
+- First deployment (phase 0): Magic Lap's own accounts at **https://repeater.magic-lap.com** on an existing Hostinger **KVM 4 VPS** that may also run other Magic Lap projects. The main site `magic-lap.com` is on Hostinger web hosting (hPanel) behind Cloudflare and must not be touched. The requested `repeater` subdomain is now deployed (2026-10-15, Cairo time).
 - Repo: `antonuemad/repeter`. Develop on branch `claude/saas-video-platform-plan-tfi4ar`. **No pull request has been opened**; do not open one unless the user asks.
 
 ## 2. State at handoff
@@ -19,16 +19,16 @@ Written 2026-10-14 from a long Claude Code session. Read this first, then `PLAN.
 | Docker | Image builds; compose stack smoke-tested (db, migrate, web, worker); `deploy/selftest.sh` passes as a non-root user |
 | CI | GitHub Actions `ci.yml` verifies lint/tests and the Docker image/deploy self-test. The medium follow-up `2d63977` passed; verify the exact final commit of the partial/low follow-up in Actions before deploying. |
 | Review | 86 confirmed findings fixed by six owners and re-verified by independent skeptics: **81 fully fixed, 5 partial** at the original independent review snapshot. The follow-ups in section 7 resolve the remaining original partial findings and the subsequently reported medium/low issues; regression coverage verifies the changes. No independent re-review is claimed |
-| Deployed | **Nothing is deployed.** The sandbox that built this had no SSH key, no server address and no credentials |
+| Deployed | **Phase 0 is live at https://repeater.magic-lap.com.** Existing local SSH alias `magic-lap-vps` reaches the VPS as `deploy` with passwordless sudo. App files: `/srv/repeater/app`; nginx forwards only this subdomain to `127.0.0.1:8091` (8090 belongs to the existing WhatsApp project). PostgreSQL/web/worker are healthy. Platform keys/accounts remain unconfigured. |
 
-## 3. Blocked on the user (do these first, they cannot be done from the repo)
+## 3. Production access and remaining setup
 
-1. DNS: create an `A` record `rotator` -> the VPS IP in Cloudflare, **DNS only (grey cloud)**. Reasons are in `docs/ar/00-deploy.md` (100 MB body limit, bot protection blocking Meta/TikTok fetchers, Let's Encrypt).
-2. GitHub repository secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_KNOWN_HOSTS` (now mandatory for deploys), `REPEATER_DOMAIN=rotator.magic-lap.com`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`. Platform keys later.
-3. Run the read-only workflow **Server inspect** (`.github/workflows/server-inspect.yml`) first: it shows what already serves ports 80/443. `deploy/bootstrap.sh` never takes those ports when another proxy exists; it prints a ready nginx/Traefik/Caddy snippet pointing at `127.0.0.1:8090` instead.
-4. Create the developer apps and give the keys (guides with exact URLs and values): `docs/ar/01-tiktok.md`, `02-google.md`, `03-meta.md`, `04-telegram.md`.
-
-The user believed the SSH access was available to the previous agent. It was not. Do not assume you have it; ask.
+- Deployment used the existing, pinned local SSH alias `magic-lap-vps`; GitHub Actions deployment secrets are currently empty. Do not assume CI can deploy: it only validates code until those secrets are configured. Do not create or broaden SSH keys merely to enable automation.
+- Cloudflare now has an A record `repeater` -> the VPS, DNS only. nginx has a separate virtual host at `/etc/nginx/sites-available/repeater.magic-lap.com`. The Let's Encrypt certificate uses the existing ACME account and `/var/www/repeater-acme` webroot. Existing sites and their proxy settings were preserved.
+- Admin login details are in a mode-600 local file under `/Users/mac/dev/repeter-deploy/`, outside this repository. Never copy credentials into Git or logs. The owner must accept the app's terms/privacy screen themselves.
+- Platform applications/credentials still need setup using docs/ar/01-04; use **https://repeater.magic-lap.com** for all callbacks, privacy and terms links. No real platform accounts were connected during deployment.
+- Daily local backup/backup-age cron jobs are installed; off-site rclone and Telegram alerts still need operator credentials/configuration.
+- **The production database has now applied revision 0001. From this point on, never amend that initial migration: add new Alembic revisions.**
 
 ## 4. Repository map
 
@@ -76,7 +76,7 @@ Sandbox-only notes (ignore if your environment differs): Docker had to be starte
 - **Official APIs only for publishing.** Rules are created **disabled**; the user enables each target account explicitly. YouTube made-for-kids has **no default answer** and must be given. TikTok rules stay disabled until the user picks a privacy level from `creator_info` and accepts the Music Usage Confirmation. While `REPEATER_TIKTOK_AUDITED` is false, the form offers only "Only me".
 - **Unknown outcome never retries blindly.** Adapters raise `UnknownOutcomeError(state=...)` once bytes may have been delivered (lost final-chunk response, unreadable 2xx). The engine stores `state` in `publish_state` and polls; empty state means needs-attention ("may be live"). Any non-platform exception after the UPLOADING commit also means needs-attention. `PublishRequest.state` carries earlier attempts' state back to the adapter. `RestartPublish` (from `poll`) means the platform confirmed nothing was published.
 - **yt-dlp is isolated.** Sources of kind `ytdlp` never use OAuth tokens or the official listers, need an explicit acknowledgement (`unofficial_ack_at`), and are opt-in. Every platform's terms forbid unofficial downloading even for your own content; this is a business risk the operator accepts. The product is framed and built around "your own original library" (uploads, Drive, official Instagram/Facebook import).
-- **Delivery to platforms by URL:** the encoded MP4 is served at `/m/<video_id>/<expires>/<hmac>.mp4` (HMAC-signed, expiring, no session, GET/HEAD/Range, no redirects, `noindex`). Instagram and Facebook fetch it; TikTok uses `PULL_FROM_URL` and falls back to chunked `FILE_UPLOAD` only on `url_ownership_unverified`. The TikTok app must verify the URL prefix `https://rotator.magic-lap.com/m/`.
+- **Delivery to platforms by URL:** the encoded MP4 is served at `/m/<video_id>/<expires>/<hmac>.mp4` (HMAC-signed, expiring, no session, GET/HEAD/Range, no redirects, `noindex`). Instagram and Facebook fetch it; TikTok uses `PULL_FROM_URL` and falls back to chunked `FILE_UPLOAD` only on `url_ownership_unverified`. The TikTok app must verify the URL prefix `https://repeater.magic-lap.com/m/`.
 - **Tokens** are envelope-encrypted (per-value data key wrapped by a key ring); never log tokens, upload URLs, session URIs or `publish_state`. `rotate-keys` re-wraps stored values.
 - **Retention contract** (implemented in `jobs/maintenance.py` and `engine/jobs.py`, described in the privacy policy, keep them in sync): tokens deleted on disconnect; account record, post history and owned log entries for a disconnected account deleted after 5 days (`DISCONNECTED_RETENTION`, inside the 7-day promise in the privacy policy); YouTube-derived identifiers refreshed or scrubbed within 30 days (YouTube Developer Policies III.E.4.c); Meta data-deletion requests delete matching accounts, imported videos/files, posts and log entries; originals purged after `REPEATER_ORIGINAL_RETENTION_DAYS`.
 - **Duplicates:** `(platform, external_id)` unique, then SHA-256, then a display-normalised perceptual hash plus audio check. A DUPLICATE video makes its original skip that origin platform/account and cancels already scheduled posts there.
@@ -98,7 +98,7 @@ Each needs a regression test that fails on the current code. The reviewers' repr
 Regression tests are in `tests/test_worker.py`, `tests/test_engine_publish.py`, `tests/test_deploy.py`, and `tests/test_media.py`. See the follow-up section of the review trace for validation.
 
 **Remaining partial and low issues resolved (2026-10-15):**
-- YouTube insert accounting now records a durable reservation before every HTTP session-start request, including adapter retries and expired-session restarts. Pacific-day rows serialize concurrent starts across all workspaces and hold a project-wide exhaustion circuit until reset. Post retry/reset/deletion cannot refund spent quota; the planner combines the ledger with pending reservations. A crash immediately before HTTP can conservatively consume one reservation. There is no production database yet, so the initial migration includes the quota tables and nullable error-message metadata.
+- YouTube insert accounting now records a durable reservation before every HTTP session-start request, including adapter retries and expired-session restarts. Pacific-day rows serialize concurrent starts across all workspaces and hold a project-wide exhaustion circuit until reset. Post retry/reset/deletion cannot refund spent quota; the planner combines the ledger with pending reservations. A crash immediately before HTTP can conservatively consume one reservation. Before the first deployment, the initial migration was amended to include quota tables and nullable error-message metadata. That migration is now immutable.
 - Domain activities and errors carry stable message keys/parameters. Post, video, source and account error metadata survives database reloads, nested messages translate, and every dashboard error surface uses the viewer's language. Actions/manual uploads raise keyed UserError refusals; the old regex is only a compatibility fallback. Telegram follows the workspace locale while preserving the existing default of withholding private details. Legacy unkeyed records retain their original diagnostic; English diagnostics remain available in English.
 - TikTok pull-init 5xx is an unknown outcome and cannot trigger another init automatically. Facebook polling is held while publishing is halted because it can send a deferred finish request.
 - Account deletion uses structured ownership, preserving unrelated similarly named accounts' logs. Legacy exact-name mentions are redacted; channel refresh also redacts nested translation parameters.
@@ -115,7 +115,7 @@ and generated media live outside the repository in /Users/mac/dev/repeter-previe
 ## 8. Backlog, in priority order
 
 1. The known review partial/low follow-up in section 7 is complete; check the final commit CI before deployment.
-2. Deploy phase 0 once the user supplies section 3; run `deploy/selftest.sh` and `server-inspect` first; verify `https://rotator.magic-lap.com/healthz`; create the admin; connect Magic Lap's accounts (Meta Pages and Instagram in Development mode, Google in Testing, TikTok sandbox/private).
+2. Phase 0 is deployed and the admin exists. Next connect Magic Lap's accounts after supplying platform app credentials (Meta Pages/Instagram Development mode, Google Testing, TikTok sandbox/private).
 3. Soak for 30 days: no manual interventions, failure rate under 5 percent (phase 0 exit criterion in `PLAN.md`). Add uptime monitoring (Uptime Kuma or healthchecks.io on `/healthz`) and off-site backups (`RCLONE_REMOTE`).
 4. Phase 1, **not started**: self-service sign-up with email verification and password reset, workspace invites and roles, plan limits enforcement, onboarding, landing page (Arabic/English), billing (Paymob for EGP, Paddle as merchant of record for USD; Stripe does not support Egyptian companies), support email.
 5. Phase 2, approvals (start early, they take weeks): TikTok app audit for the **multi-creator product**; Google OAuth verification (sensitive scopes, no CASA) and YouTube API compliance audit for quota above 100 uploads/day; Meta Business Verification and App Review (screencasts per permission, data deletion callback already implemented).
@@ -135,6 +135,16 @@ Sourced details (dates, URLs) are in `docs/research/*.md`; policies change, re-v
 - Tests first: every bug fix gets a regression test that fails on the old code. Never skip or weaken a test to get green.
 - Keep `deploy/.env.example` in sync with `repeater/config.py`; keep `PLAN.md`, the privacy policy text and the retention jobs consistent.
 - No secrets in logs, exceptions, the activity log, CI output or commits. `deploy/.env` is chmod 600 and git-ignored.
-- Schema changes: edit `models.py` and amend the single initial migration only while nothing is deployed; after the first deploy, add real Alembic revisions.
+- Schema changes: production is deployed. Edit `models.py` and add a new Alembic revision for every schema change; do not amend 0001.
 - Commit trailers from earlier commits (`Co-Authored-By: Claude ...`, `Claude-Session: ...`) were added by the previous tool; you do not need to keep them.
 - Do not push to branches other than the one above without the user's say-so, and do not open a PR unprompted.
+
+
+## First production deployment notes (2026-10-15)
+
+The application release was cf8aa5b (both CI jobs green). The VPS runs Docker 29, whose text Go
+formatter prints an empty netip.Addr IPv6 gateway as `invalid IP`. The deploy guard now reads
+JSON-formatted IP fields, omits only empty/null fields, and still rejects untrusted addresses.
+Three regressions exercise real CLI validation through the shell guard for IPv4, IPv6 and an
+untrusted subnet. Bootstrap resumed successfully after this compatibility fix. Keep future
+releases on `claude/saas-video-platform-plan-tfi4ar` unless the owner requests otherwise.
