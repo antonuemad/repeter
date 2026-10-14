@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('access.customers') }}{% endblock %}
+{% block content %}
+<div class="page-heading"><div><h1>{{ t('access.customers') }}</h1><p class="muted">{{ t('access.customers_help') }}</p></div><a class="button secondary" href="/admin/recovery">{{ t('access.recovery_queue') }}</a></div>
+<section class="card">
+  <h2>{{ t('access.new_customer') }}</h2>
+  <form method="post" action="/admin/customers" class="stack access-form">
+    {{ m.csrf() }}
+    <label>{{ t('access.workspace_name_label') }}<input type="text" name="name" required maxlength="200" dir="auto"></label>
+    <label>{{ t('access.owner_email') }}<input type="email" name="email" required maxlength="320" dir="ltr" autocomplete="email"></label>
+    <label>{{ t('access.language') }}<select name="locale"><option value="ar">العربية</option><option value="en">English</option></select></label>
+    <button class="button" type="submit">{{ t('access.create_customer') }}</button>
+  </form>
+</section>
+<section class="card">
+  <h2>{{ t('access.workspaces') }}</h2>
+  <ul class="access-list">{% for customer in customers %}<li><div><strong dir="auto">{{ customer.name }}</strong><p class="muted small">{{ t('access.paused') if customer.paused else t('access.active') }} · #{{ customer.id }}</p><details><summary>{{ t('access.invite_owner') }}</summary><form method="post" action="/admin/customers/{{ customer.id }}/invite" class="stack access-form">{{ m.csrf() }}<label>{{ t('access.owner_email') }}<input type="email" name="email" required maxlength="320" dir="ltr"></label><button class="button secondary" type="submit">{{ t('access.create_invite') }}</button></form></details></div></li>{% endfor %}</ul>
+  {% if next_before %}<a href="/admin/customers?before={{ next_before }}">{{ t('access.next_page') }}</a>{% endif %}
+</section>
+<section class="card"><h2>{{ t('access.pending_invites') }}</h2>{% if invitations %}<ul class="access-list">{% for invitation in invitations %}<li><div><strong dir="ltr">{{ invitation.email }}</strong><p class="muted small">#{{ invitation.workspace_id }} · {{ t('access.role_' ~ invitation.role) }} · {{ t('access.expires') }} {{ fmt_dt(invitation.expires_at, zone) }}</p></div><form method="post" action="/admin/customers/{{ invitation.workspace_id }}/invitations/{{ invitation.id }}/revoke">{{ m.csrf() }}<button class="button secondary small" type="submit">{{ t('access.revoke') }}</button></form></li>{% endfor %}</ul>{% else %}<p class="muted">{{ t('access.no_invites') }}</p>{% endif %}</section>
+{% endblock %}

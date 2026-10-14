@@ -153,8 +153,11 @@ def test_consent_is_stored_on_the_user_with_version_and_time(db, workspace, admi
 def test_session_cache_is_bound_to_user_and_version(db, workspace, admin_user):
     other = SimpleNamespace(id=admin_user.id + 1, email="x@y.z", terms_accepted_at=None, terms_version=None)
     session = {consent.SESSION_KEY: f"{admin_user.id}:{consent.LEGAL_VERSION}"}
+    assert consent.has_consented(session, db, admin_user) is False
+    consent.record_consent(session, db, admin_user)
     assert consent.has_consented(session, db, admin_user) is True
     assert consent.has_consented(session, db, other) is False  # type: ignore[arg-type]
+    admin_user.terms_version = "1999-01-01"
     session = {consent.SESSION_KEY: f"{admin_user.id}:1999-01-01"}
     assert consent.has_consented(session, db, admin_user) is False
 

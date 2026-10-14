@@ -98,7 +98,10 @@ def run_maintenance(
     now = now or utcnow()
     settings = get_settings()
     retention_days = settings.platform_data_retention_days
+    from repeater.access import purge_access_records
+
     steps: list[tuple[str, Callable[[], int]]] = [
+        ("access_records", lambda: purge_access_records(session, now)),
         ("requeued_jobs", lambda: queue.requeue_stale(session, queue.lease_timeout_minutes())),
         ("purged_jobs", lambda: queue.purge_finished(session, FINISHED_JOB_RETENTION_DAYS)),
         ("oauth_states", lambda: _delete_old_oauth_states(session, now)),

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('access.invite_title') if kind == 'invite' else t('access.reset_title') }}{% endblock %}
+{% block content %}
+<section class="card access-card">
+  <h1>{{ t('access.invite_title') if kind == 'invite' else t('access.reset_title') }}</h1>
+  <p class="muted">{{ t('access.open_help') }}</p>
+  {% if error %}<div class="flash flash-error" role="alert">{{ t(error) }}</div>{% endif %}
+  <form method="post" action="/{{ kind }}/open" class="stack" data-access-open>
+    {{ m.csrf() }}
+    <label>{{ t('access.code') }}<input name="token" type="text" dir="ltr" autocomplete="off" required minlength="43" maxlength="43" spellcheck="false" data-access-token></label>
+    <button class="button" type="submit">{{ t('access.continue') }}</button>
+  </form>
+  <p class="muted small">{{ t('access.code_help') }}</p>
+  <a href="/login">{{ t('nav.login') }}</a>
+</section>
+{% endblock %}

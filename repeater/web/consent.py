@@ -26,7 +26,7 @@ from repeater.timeutil import utcnow
 
 # Version of the legal texts (the effective date shown on /privacy and /terms). Change it
 # whenever either text changes in substance: every user is then asked to accept it again.
-LEGAL_VERSION = "2026-10-14"
+LEGAL_VERSION = "2026-10-15"
 SESSION_KEY = "consent"
 EVENT = "terms_accepted"
 
@@ -41,9 +41,8 @@ def _stored(user: User) -> bool:
 
 def has_consented(session: MutableMapping[str, Any], db: Session, user: User) -> bool:
     """True when this user accepted the current version of the terms and privacy policy."""
-    if session.get(SESSION_KEY) == _marker(user):
-        return True
     if not _stored(user):
+        session.pop(SESSION_KEY, None)
         return False
     session[SESSION_KEY] = _marker(user)
     return True

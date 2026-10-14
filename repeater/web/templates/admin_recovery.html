@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('access.recovery_queue') }}{% endblock %}
+{% block content %}
+<h1>{{ t('access.recovery_queue') }}</h1>
+<p class="muted measure">{{ t('access.identity_help') }}</p>
+<p><a href="/admin/customers">{{ t('access.customers') }}</a></p>
+{% for row, email in requests %}
+<section class="card">
+  <h2 dir="ltr">{{ email }}</h2><p class="muted small">#{{ row.id }} · {{ fmt_dt(row.created_at, zone) }}</p>
+  <form method="post" action="/admin/recovery/{{ row.id }}" class="stack access-form">
+    {{ m.csrf() }}
+    <label class="check"><input type="checkbox" name="verified" value="1"><span>{{ t('access.identity_verified') }}</span></label>
+    <label>{{ t('access.current_password') }}<input name="current_password" type="password" autocomplete="current-password" maxlength="1024"></label>
+    <div class="actions"><button name="action" value="issue" class="button" type="submit">{{ t('access.issue_reset') }}</button><button name="action" value="close" class="button secondary" type="submit">{{ t('access.close_request') }}</button></div>
+  </form>
+</section>
+{% else %}<section class="card"><h2>{{ t('access.no_requests') }}</h2><p class="muted">{{ t('access.no_requests_help') }}</p></section>{% endfor %}
+{% endblock %}

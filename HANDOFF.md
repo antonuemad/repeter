@@ -2,7 +2,40 @@
 
 Written 2026-10-14 from a long Claude Code session. Read this first, then `PLAN.md` (Arabic product and technical plan, the source of truth for intent), then `docs/review/2026-10-14-findings.md` (what the last review found and how it was resolved).
 
-## Latest update: invitation trial and Magic Lap UI (2026-10-15)
+## Latest update: manual invited-customer access (2026-10-15)
+
+The invitation/password setup/manual recovery lifecycle is implemented. Read
+[the operator guide](docs/ar/07-invitations.md) and
+[the fresh access review](docs/review/2026-10-15-invited-access.md).
+Settings now lives at `/settings/workspace`, with members at `/settings/members`.
+Platform operators use `/admin/customers` and `/admin/recovery`; workspace ownership
+never implies platform administration. `grant-operator --email` explicitly promotes
+an existing authorized operator without resetting its password. `create-admin`
+retains owner-only semantics. New migration **0002**, never edit deployed 0001.
+
+User confirmed **manual copied links**, no automatic email. Invites expire after
+72 hours; reset links after 30 minutes; both are one-use. Customer workspaces start
+paused. Existing registered email addresses cannot be invited into another workspace
+in this initial flow. Recovery requires verified identity plus operator password;
+operator account recovery uses the trusted CLI. Stored legal consent is now always
+authoritative; legal version 2026-10-15 requires users to accept the updated policy
+for themselves. Never accept it in the production browser on their behalf.
+
+The account-access gap is closed for the managed pilot. Real platform setup and
+publication, offsite recovery and alerts remain open gates; full member removal,
+workspace closure and account session management remain later lifecycle work.
+Deployment must follow green CI on the exact SHA, a pre-migration backup, explicit
+operator grant for the existing production owner, and health/revision verification.
+No synthetic customer or publishing data belongs in production.
+
+Pre-push validation: 425 broad web/message/core/migration/CLI checks passed,
+then 71 final access/migration/CLI checks passed after the last concurrency fixes.
+Ruff and diff checks clean. Independent access UI review: **ship**, no material
+fixes, with desktop AR/mobile EN and public password/recovery captures. Source-only
+coverage for issued-link/code/error visuals; no automated production password entry
+or legal acceptance. The pushed SHA still requires the complete Linux CI jobs.
+
+## Previous update: invitation trial and Magic Lap UI (2026-10-15)
 
 The user selected **a trial for invited customers**, and explicitly requested the
 approved Sentinel Eye UI/UX. Read [docs/ar/06-readiness.md](docs/ar/06-readiness.md)

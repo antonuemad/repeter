@@ -39,30 +39,5 @@
   {% endif %}
 </section>
 
-<section class="card" id="workspace">
-  <h2>{{ t('rules.workspace_title') }}</h2>
-  <form method="post" action="/settings/workspace" class="stack">
-    {{ m.csrf() }}
-    <label>{{ t('field.timezone') }}
-      <select name="timezone" required>
-        {% for z in timezones %}
-        <option value="{{ z }}"{% if z == ws_values.timezone %} selected{% endif %}>{{ z }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <div class="grid-2">
-      <label>{{ t('field.cross_gap_hours') }}
-        <input type="number" name="cross_gap_hours" min="0" max="{{ limits.max_cross_gap }}" required value="{{ ws_values.cross_gap_hours | int }}">
-        <span class="muted small">{{ t('rules.cross_gap_help') }}</span>
-      </label>
-      <label>{{ t('field.horizon_hours') }}
-        <input type="number" name="horizon_hours" min="{{ limits.min_horizon }}" max="{{ limits.max_horizon }}" required value="{{ ws_values.horizon_hours }}">
-        <span class="muted small">{{ t('rules.horizon_help') }}</span>
-      </label>
-    </div>
-    <label class="check"><input type="checkbox" name="paused" value="1"{% if ws_values.paused %} checked{% endif %}> {{ t('rules.pause_all') }}</label>
-    <p class="muted small">{{ t('rules.pause_help') }}</p>
-    <button type="submit" class="button">{{ t('common.save') }}</button>
-  </form>
-</section>
+<p><a href="/settings/workspace">{{ t('nav.settings') }}</a></p>
 {% endblock %}

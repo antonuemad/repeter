@@ -1,0 +1,25 @@
+# Invited-customer access review — 2026-10-15
+
+Scope: authentication/session/consent, tenant guards, settings navigation and forms, invitation provisioning, manual recovery, schema evolution/retention, and regression coverage of the existing library/account/source/rule/scheduler/publisher/deployment suites. This is a source and functional review, not an independent penetration test or evidence of successful live platform publishing.
+
+| Finding / gap | Resolution | Evidence |
+|---|---|---|
+| Workspace settings linked to `/rules#workspace`, leaving Rules selected and combining two tasks | Dedicated `/settings/workspace` page, active Settings navigation, separate members tab, corrected pause/resume and validation redirects; JS migrates the old bookmark and Rules retains a visible settings link without JS | Bilingual route and save tests; Chrome desktop/mobile captures |
+| No invited-customer enrollment or customer-owned password setup | Explicit platform-admin permission; separate paused workspaces; scoped owner/editor invitations; hashed 256-bit bearer secrets; 72-hour lifetime, revoke/reissue and one-use locked redemption; explicit current legal consent | Real PostgreSQL end-to-end, role/tenant, existing-email takeover, password, expiry/replay/revoke and concurrent redemption tests |
+| No recovery lifecycle for pilot customers | Generic encrypted recovery queue; identity verification and administrator reauthentication; 30-minute one-use links; prior tokens invalidated; password change invalidates all signed-in sessions; no automatic sign-in | Known/unknown response equality, CSRF, authorization, wrong identity/password, inactive/operator account refusal, replay, concurrency and session tests |
+| A signed cookie consent marker could bypass a revoked or outdated database consent record | Stored consent is authoritative on every request; stale marker is removed | Regression for an already authenticated cookie after database revocation; version-change tests |
+| Global operator authority could be conflated with tenant ownership | Default-false explicit database permission and trusted `grant-operator`; `create-admin` retains its previous tenant-owner semantics; owners cannot reset global member passwords | Owner/editor denied admin routes, existing-session permission removal and CLI password-preservation tests |
+| Reset issuance could retain a stale ORM password version during a concurrent password change | Refresh the locked user before deriving the version; recheck active/operator eligibility under the same lock | Two-session stale-identity regression and operator-only CLI recovery test |
+| New secret-bearing links could enter URL access logs or be generated from an attacker-controlled Host | URL fragments, POST opening, clean confirmation URLs, short-lived signed proof, no-store/no-referrer issuance; base URL from trusted configuration | Browser observed clean confirmation URL; token absent from cookies and stored digests; malicious Host regression |
+| Abuse counters and sensitive workflow records needed bounded persistence | Atomic PostgreSQL HMAC counters, encrypted request addresses, hourly maintenance retention; key rotation discovers the new `*_enc` column | Persistent/parallel throttle tests, retention and maintenance tests; existing encryption-key rotation suite |
+| Installed migration 0001 must remain immutable | New revision 0002 with all existing operators unprivileged until explicitly granted | Upgrade from a populated 0001, downgrade/upgrade twice, unchanged account hash and membership, metadata comparison clean |
+
+UI inherits the approved Sentinel Eye system, including AR/EN, logical sidebar, explicit dark preference, local fonts and accessible form labels. Local browser fixtures are synthetic and no worker runs there. Password entry and real legal consent were not automated in the user's production browser; credential flows are exercised through the backend integration tests.
+
+Manual delivery is the selected pilot constraint. Possession of a privately delivered invitation is used for enrollment; there is no automatic email ownership verification service. Do not issue a recovery link until identity is verified through an established channel. Administrator recovery remains a trusted server operation.
+
+Remaining release gates: developer app credentials/approvals and real publication acceptance, off-host database/media recovery, reachable operator alerts, measured tenant resource limits, full member/session/workspace lifecycle. These cannot be closed by simulated tests. See [readiness](../ar/06-readiness.md) and [operator flow](../ar/07-invitations.md).
+
+Before push: 425 broad web/message/core/migration/CLI checks passed; 71 final access/migration/CLI checks passed after concurrency fixes. Ruff clean. Independent access UI disposition **ship**, no material fixes; issued-link/code/error visuals were source-only reviewed.
+
+Validation results and exact published revision are recorded in the delivery message and server `.deployed-revision`; CI must succeed on the pushed full SHA before deployment.

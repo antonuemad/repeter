@@ -23,6 +23,7 @@
       <label>{{ t('field.email') }}<input type="email" name="email" value="{{ email }}" autocomplete="username" required maxlength="320" dir="ltr"></label>
       <label>{{ t('field.password') }}<input type="password" name="password" autocomplete="current-password" required maxlength="1024" dir="ltr"></label>
       <button type="submit" class="button">{{ t('login.submit') }}</button>
+      <p><a href="/forgot-password">{{ t('access.forgot') }}</a></p>
       <p class="muted small">{{ t('login.agree_before') }} <a href="/terms">{{ t('footer.terms') }}</a>{{ t('login.agree_and') }}<a href="/privacy">{{ t('footer.privacy') }}</a>.</p>
     </form>
     <p class="invite-note">{{ m.icon('lock', 16) }}{{ t('login.invite_only') }}</p>

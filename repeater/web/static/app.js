@@ -155,6 +155,32 @@
   }
 
   onReady(function () {
+    if (window.location.pathname === "/rules" && window.location.hash === "#workspace") {
+      window.location.replace("/settings/workspace");
+      return;
+    }
+    var accessForm = document.querySelector("[data-access-open]");
+    if (accessForm && window.location.hash) {
+      var token = new URLSearchParams(window.location.hash.slice(1)).get("token");
+      window.history.replaceState(null, "", window.location.pathname);
+      if (token && /^[A-Za-z0-9_-]{43}$/.test(token)) {
+        accessForm.querySelector("[data-access-token]").value = token;
+        accessForm.requestSubmit();
+      }
+    }
+    document.querySelectorAll("[data-copy-link]").forEach(function (button) {
+      button.addEventListener("click", async function () {
+        var input = document.getElementById(button.dataset.copyLink);
+        input.focus();
+        input.select();
+        if (navigator.clipboard && window.isSecureContext) {
+          try {
+            await navigator.clipboard.writeText(input.value);
+            document.querySelector("[data-copy-status]").textContent = button.dataset.copied;
+          } catch (_) { /* The selected text remains available for manual copy. */ }
+        }
+      });
+    });
     setupNavigation();
     setupConfirm();
     setupUpload();

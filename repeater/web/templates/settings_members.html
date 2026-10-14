@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('access.members') }}{% endblock %}
+{% block content %}
+<h1>{{ t('access.members') }}</h1>
+{% include "settings_nav.html" %}
+<section class="card">
+  <h2>{{ t('access.current_members') }}</h2>
+  <ul class="access-list">{% for person in people %}<li><strong dir="ltr">{{ person.email }}</strong><span class="muted">{{ t('access.role_' ~ person.role) }}</span></li>{% endfor %}</ul>
+</section>
+{% if can_invite %}
+<section class="card">
+  <h2>{{ t('access.invite_editor') }}</h2><p class="muted measure">{{ t('access.editor_help') }}</p>
+  <form method="post" action="/settings/members/invite" class="stack access-form">
+    {{ m.csrf() }}<label>{{ t('field.email') }}<input type="email" name="email" required maxlength="320" autocomplete="email" dir="ltr"></label>
+    <button class="button" type="submit">{{ t('access.create_invite') }}</button>
+  </form>
+</section>
+<section class="card">
+  <h2>{{ t('access.pending_invites') }}</h2>
+  {% if invitations %}<ul class="access-list">{% for invitation in invitations %}<li><div><strong dir="ltr">{{ invitation.email }}</strong><p class="muted small">{{ t('access.expires') }} {{ fmt_dt(invitation.expires_at, zone) }}</p></div><form method="post" action="/settings/members/{{ invitation.id }}/revoke">{{ m.csrf() }}<button class="button secondary small" type="submit">{{ t('access.revoke') }}</button></form></li>{% endfor %}</ul>
+  {% else %}<p class="muted">{{ t('access.no_invites') }}</p>{% endif %}
+</section>
+{% else %}<p class="muted">{{ t('access.owner_invites') }}</p>{% endif %}
+{% endblock %}

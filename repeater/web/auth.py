@@ -200,6 +200,7 @@ class UserView:
     id: int
     email: str
     locale: str
+    is_platform_admin: bool = False
 
 
 @dataclass(frozen=True)
@@ -218,7 +219,9 @@ def signed_in_user(request: Request, db: DB) -> User:
         if USER_KEY in request.session:
             request.session.clear()
         raise LoginRequired()
-    request.state.user = UserView(id=user.id, email=user.email, locale=user.locale)
+    request.state.user = UserView(
+        id=user.id, email=user.email, locale=user.locale, is_platform_admin=user.is_platform_admin
+    )
     return user
 
 

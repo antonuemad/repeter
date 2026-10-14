@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('access.forgot') }}{% endblock %}
+{% block content %}
+<section class="card access-card">
+  <h1>{{ t('access.forgot') }}</h1>
+  <p class="muted">{{ t('access.manual_recovery') }}</p>
+  {% if submitted %}<div class="flash flash-success" role="status">{{ t('access.request_received') }}</div>
+  {% else %}
+  {% if error %}<div class="flash flash-error" role="alert">{{ t(error) }}</div>{% endif %}
+  <form method="post" action="/forgot-password" class="stack">
+    {{ m.csrf() }}
+    <label>{{ t('field.email') }}<input type="email" name="email" autocomplete="email" dir="ltr" required maxlength="320"></label>
+    <button class="button" type="submit">{{ t('access.request_reset') }}</button>
+  </form>
+  {% endif %}
+  <p><a href="/login">{{ t('nav.login') }}</a></p>
+</section>
+{% endblock %}

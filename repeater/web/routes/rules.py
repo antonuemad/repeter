@@ -171,24 +171,31 @@ def rules_page(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
 
 
 def _rules_list(request: Request, ctx: WorkspaceContext, rows: list[dict[str, Any]]) -> Response:
+    return render(request, "rules.html", {"nav": "rules", "rows": rows})
+
+
+@router.get("/settings/workspace")
+def workspace_settings(request: Request, ctx: CurrentWorkspace) -> Response:
     ws = ctx.workspace
-    context = {
-        "nav": "rules",
-        "rows": rows,
-        "timezones": timezones() if ws.timezone in timezones() else [ws.timezone, *timezones()],
-        "ws_values": {
-            "timezone": ws.timezone,
-            "cross_gap_hours": round((ws.cross_platform_gap_minutes or 0) / 60, 2),
-            "horizon_hours": ws.horizon_hours,
-            "paused": ws.paused,
+    return render(
+        request,
+        "settings_workspace.html",
+        {
+            "nav": "settings",
+            "timezones": timezones() if ws.timezone in timezones() else [ws.timezone, *timezones()],
+            "ws_values": {
+                "timezone": ws.timezone,
+                "cross_gap_hours": round((ws.cross_platform_gap_minutes or 0) / 60, 2),
+                "horizon_hours": ws.horizon_hours,
+                "paused": ws.paused,
+            },
+            "limits": {
+                "min_horizon": MIN_HORIZON_HOURS,
+                "max_horizon": MAX_HORIZON_HOURS,
+                "max_cross_gap": MAX_CROSS_GAP_HOURS,
+            },
         },
-        "limits": {
-            "min_horizon": MIN_HORIZON_HOURS,
-            "max_horizon": MAX_HORIZON_HOURS,
-            "max_cross_gap": MAX_CROSS_GAP_HOURS,
-        },
-    }
-    return render(request, "rules.html", context)
+    )
 
 
 @router.post("/settings/workspace")
@@ -202,7 +209,7 @@ def save_workspace(request: Request, db: DB, ctx: CurrentWorkspace, form: Form) 
         horizon = form_int(form, "horizon_hours", minimum=MIN_HORIZON_HOURS, maximum=MAX_HORIZON_HOURS)
     except FormError as exc:
         flash(request, "error", exc.key, **exc.params)
-        return RedirectResponse("/rules#workspace", status_code=303)
+        return RedirectResponse("/settings/workspace", status_code=303)
     paused = form_bool(form, "paused")
     changed_pause = paused != ws.paused
     plan_changed = (
@@ -227,7 +234,7 @@ def save_workspace(request: Request, db: DB, ctx: CurrentWorkspace, form: Form) 
     _replan(db, ctx, changed=plan_changed)
     db.commit()
     flash(request, "success", "rules.workspace_saved")
-    return RedirectResponse("/rules", status_code=303)
+    return RedirectResponse("/settings/workspace", status_code=303)
 
 
 def _replan(db: Session, ctx: WorkspaceContext, *, changed: bool, account_id: int | None = None) -> None:

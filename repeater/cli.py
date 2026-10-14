@@ -231,6 +231,38 @@ def cmd_create_admin(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_grant_operator(args: argparse.Namespace) -> int:
+    """Explicit server operator action; never resets a password or grants tenant membership."""
+    from repeater.access import email_address
+    from repeater.db import session_scope
+    from repeater.models import User
+
+    with session_scope() as db:
+        user = db.execute(select(User).where(User.email == email_address(args.email))).scalar_one_or_none()
+        if user is None or not user.is_active:
+            print("active user not found", file=sys.stderr)
+            return 2
+        user.is_platform_admin = True
+    print("platform administrator permission granted; password unchanged")
+    return 0
+
+
+def cmd_issue_password_reset(args: argparse.Namespace) -> int:
+    """Break-glass recovery via trusted server access. The output is a bearer secret."""
+    from repeater.access import email_address, issue_reset
+    from repeater.db import session_scope
+    from repeater.models import User
+
+    with session_scope() as db:
+        user = db.execute(select(User).where(User.email == email_address(args.email))).scalar_one_or_none()
+        if user is None or not user.is_active:
+            print("active user not found", file=sys.stderr)
+            return 2
+        _, url = issue_reset(db, user.id, None, allow_platform_admin=True)
+    print(url)
+    return 0
+
+
 def cmd_check(_: argparse.Namespace) -> int:
     from repeater import backups
     from repeater.config import get_settings
@@ -316,6 +348,16 @@ def main(argv: list[str] | None = None) -> int:
     ca.add_argument("--timezone", default="Africa/Cairo")
     ca.add_argument("--locale", default="ar", choices=["ar", "en"])
     ca.set_defaults(fn=cmd_create_admin)
+    grant = sub.add_parser(
+        "grant-operator", help="grant platform admin to an existing user without changing its password"
+    )
+    grant.add_argument("--email", required=True)
+    grant.set_defaults(fn=cmd_grant_operator)
+    reset = sub.add_parser(
+        "issue-password-reset", help="issue a one-time recovery link through trusted server access"
+    )
+    reset.add_argument("--email", required=True)
+    reset.set_defaults(fn=cmd_issue_password_reset)
     args = p.parse_args(argv)
     return args.fn(args)
 

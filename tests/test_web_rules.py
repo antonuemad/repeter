@@ -520,7 +520,7 @@ def test_workspace_settings(web_owner, db, workspace):
 )
 def test_workspace_settings_validation(web_owner, db, workspace, form):
     resp = post(web_owner, "/settings/workspace", form, page="/rules")
-    assert resp.status_code == 303 and resp.headers["location"] == "/rules#workspace"
+    assert resp.status_code == 303 and resp.headers["location"] == "/settings/workspace"
     db.expire_all()
     ws = db.get(Workspace, workspace.id)
     assert ws.timezone == "Africa/Cairo" and ws.horizon_hours == 48

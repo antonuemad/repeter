@@ -20,6 +20,7 @@ from repeater.config import get_settings
 from repeater.web import auth, csrf
 from repeater.web.middleware import SECURITY_HEADERS, BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from repeater.web.routes import (
+    access,
     accounts,
     activity,
     consent,
@@ -64,6 +65,7 @@ def create_app() -> FastAPI:
     app.state.login_limiter = auth.LoginRateLimiter()
     for router in (
         public.router,
+        access.router,
         meta.router,
         auth.router,
         consent.router,

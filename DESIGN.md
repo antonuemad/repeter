@@ -57,6 +57,13 @@ typography:
     fontSize: "12px"
     fontWeight: 400
     lineHeight: 1.65
+  caption:
+    fontFamily: "Inter, \"IBM Plex Sans Arabic\", system-ui, sans-serif"
+    fontSize: "11px"
+    fontWeight: 400
+    lineHeight: 1.65
+  code:
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
   metric:
     fontFamily: "Inter, \"IBM Plex Sans Arabic\", system-ui, sans-serif"
     fontSize: "30px"
@@ -111,6 +118,13 @@ components:
     rounded: "{rounded.control}"
     padding: "10px 12px"
   nav-item-active:
+    backgroundColor: "{colors.primary-bg}"
+    textColor: "{colors.primary}"
+  settings-nav:
+    textColor: "{colors.primary}"
+    rounded: "{rounded.control}"
+    padding: "9px 14px"
+  settings-nav-active:
     backgroundColor: "{colors.primary-bg}"
     textColor: "{colors.primary}"
   badge-neutral:
@@ -196,6 +210,8 @@ The light theme is the default. An explicit utility action selects the alternate
 - **Body** (`body`): working copy and form content.
 - **Label** (`label`): primary navigation. Field labels inherit the body size with medium weight.
 - **Small** (`small`): supporting copy and compact actions. Status and platform badges use a smaller annotation size (11px), with medium weight (500).
+- **Caption** (`caption`): brand, workspace, utility-account, and footer metadata; also narrow-screen metric labels. Badges use this size with medium weight.
+- **Code** (`code`): native code and preformatted diagnostics; it inherits the surrounding size. Content-caption previews explicitly retain the body face.
 - **Metric** (`metric`): summary values, with tabular numerals. On narrow screens the value size reduces (26px).
 
 Empty-state explanations have a readable measure (48ch). Legal pages increase line-height (1.85) inside a narrower reading container. Larger login-story type belongs to that surface and is not a general dashboard heading.
@@ -213,6 +229,8 @@ At the task-grid breakpoint (700px), common content grids become two columns. Be
 At the rail breakpoint (1000px), the fixed rail and workspace footer appear, summary metrics become four columns, and the account email appears in the utility bar. Below it, the rail becomes a document-flow header with a native navigation disclosure and a two-column navigation grid. JavaScript starts the disclosure closed on these screens; native disclosure remains usable when JavaScript is absent.
 
 Account-connection tiles expand from one column to two at the task-grid breakpoint, then four at the wide breakpoint (1400px). Data tables scroll inside their own wrappers. The public shell has its own utility-bar minimum height (72px; 64px below 700px); it does not reserve rail space.
+
+Access-management screens reuse the same shell and cards. Invitation, password setup, recovery, and issued-link forms use a centered card capped at an inline size (620px), with block margins (32px; 16px at 600px and below). Compact invitation, customer-creation, and recovery forms embedded in operational cards cap their inline size (580px). Longer help copy uses a readable measure (72ch). Access lists wrap their content and actions; at 600px and below each row's action form takes the full width.
 
 **The Logical Start Rule.** Use logical inline properties and start-aligned content so the rail and reading order follow Arabic RTL and English LTR without separate screen compositions.
 
@@ -244,15 +262,21 @@ Text fields, selects, and textareas use the surface fill, stronger control edge,
 
 Validation messages use explanatory alert content. The current shared styles do not define a separate invalid-field border token; do not infer one from the error badge.
 
+Access forms retain these native field styles. Email addresses, access codes, and copied links read LTR inside either document direction; workspace names resolve their own direction. Password guidance sits directly below the first password field, and legal acceptance uses the shared native checkbox row. Issued private links appear in a labeled, readonly multiline field with a copy action and a status message; the field remains manually selectable when clipboard enhancement is unavailable.
+
 ### Navigation
 
 Navigation items have medium text (13px), a generous hit height (44px), a line icon, and a rounded rectangular selection. Default text is muted; hover uses a quiet surface and ink text; the current page uses blue wash, primary text, and a small trailing dot. Set `aria-current="page"` on the selected destination.
 
 The mobile disclosure is native `details` and `summary`. The enhancement adapts it at the rail breakpoint; Escape closes it and returns focus to the summary. Its reveal animation lasts (160ms) with easing (`cubic-bezier(.16,1,.3,1)`) only when reduced motion is not requested. Keep navigation and form submissions usable without JavaScript.
 
+Workspace settings and members share a wrapping text subnavigation below the page title. It uses the control corner, compact padding, and blue-wash current-page treatment with semibold text. Native links carry `aria-current="page"`; this local navigation does not add a second rail.
+
 ### Cards / Containers
 
 Cards use the surface corner, soft edge, ambient shadow, and standard padding. Inside a card, separate repeating records with dividers rather than inventing another level of elevation. Metric cards share that grammar with smaller padding, a muted label, a primary line icon, and a tabular value.
+
+Member, customer, and invitation records use the same flat-list grammar: wrapping rows with moderate gaps (16px), block padding (16px), and a soft divider removed from the last row. Identity and explanatory metadata stay together; row actions wrap alongside them. Customer-owner invitation forms use native disclosures inside these records. Each recovery request occupies a separate task card.
 
 ### Status and platform labels
 

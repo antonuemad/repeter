@@ -47,6 +47,10 @@
 <h2 id="unofficial">9. Optional unofficial import (TikTok and YouTube)</h2>
 <p>TikTok and YouTube do not offer an official way to download your own videos. Repeater offers an <strong>optional</strong> import from a public TikTok or YouTube profile using the open-source tool yt-dlp. It is <strong>off by default</strong>; you must switch it on for each source and confirm that the profile and its content are yours and that you accept the risk. This import is <strong>not part of our TikTok or Google API integrations</strong> and never uses the tokens or the official API of any of your connected accounts: detecting and downloading the videos is done by yt-dlp alone. Downloading content this way may conflict with those platforms' terms, and you are responsible for using it. The safer alternatives are uploading the original file in the dashboard or using a Google Drive folder.</p>
 
+<h2>Invitations and account recovery</h2>
+<p>During the invitation-only pilot, administrators share invitation and recovery links manually through a verified contact channel. Invitation links expire after 72 hours and recovery links after 30 minutes; each works once. We store only link digests, password hashes, invitation email addresses and the operator audit record. Recovery request email addresses are encrypted. Abuse prevention uses keyed digests of email addresses and IP addresses. Requesting recovery does not change your password; completing it ends previous sign-in sessions.</p>
+<p>Expired invitation and reset records are scheduled for deletion after seven days, recovery requests after seven days from creation, and abuse prevention counters after one day. Audit events follow the activity-log retention below. We do not send these messages automatically during the pilot.</p>
+
 <h2 id="retention">10. How long we keep data</h2>
 <ul>
   <li><strong>Original files</strong> are deleted after {{ original_retention_days }} days (once the prepared copy exists). Originals of videos that failed to process are deleted after 7 days.</li>

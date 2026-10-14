@@ -10,8 +10,10 @@ web
 
 The first trial is for selected customers invited by Magic Lap (confirmed by the
 user, 2026-10-15). Creator and operator workflows already exist in PLAN.md and the
-application. Customer account provisioning is currently manual; a self-service
-invitation flow does not exist yet.
+application. The platform administrator creates separate paused customer workspaces and issues
+private invitation links. Customers set their own passwords and explicitly accept
+the current legal texts. During this pilot the administrator copies and delivers
+links manually; automatic email delivery is not configured.
 
 ## Product Purpose
 
@@ -34,7 +36,7 @@ different capabilities; not every platform is an official download source.
 - Rotation rules, publication history, attention states, pause and reconnect are
   existing capabilities and must remain available.
 - Real platform credentials are not configured on the deployed instance as of
-  this review. Real publishing, platform approvals and customer onboarding remain
+  this review. Real publishing and platform approvals remain
   launch gates; a healthy server does not establish publishing readiness.
 - Preserve owner/editor authorization, tenant isolation, CSRF, explicit consent,
   platform-required settings and unknown-outcome publication safeguards.
@@ -63,6 +65,8 @@ results or publication performance claims have been supplied.
 
 ## Open Decisions
 
-Invitation delivery, customer lifecycle, commercial packaging, support commitments
-and trial volume are not specified by this request. The review should identify
+Manual invitation/recovery link delivery is confirmed (2026-10-15). Existing registered
+email addresses cannot be invited into a second workspace in this initial flow.
+Full member removal, workspace closure, commercial packaging, support commitments
+and trial volume remain open. The review should identify
 their impact without inventing pricing, customers or operating guarantees.
