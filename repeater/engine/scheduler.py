@@ -42,8 +42,8 @@ Algorithm
      - at most `cap` active or published posts on the account per local calendar day;
      - for YouTube, at most youtube_daily_budget() videos.insert calls per Pacific day across all
        workspaces (the project's quota resets at midnight Pacific time): 90% of
-       settings.youtube_daily_upload_quota, where each post counts as 1 plus its failed attempts
-       (every attempt opens an upload session, which is a call).
+       settings.youtube_daily_upload_quota, using the durable insert ledger plus pending reservations
+       (legacy posts without ledger entries retain a conservative attempt estimate).
    Posts that ended as needs-attention (or canceled) but got as far as the platform probably went
    live: they count as active posts for all of the above, at the time of their upload.
    The first segment that can take the video wins; videos that fit nowhere wait for a later run.
@@ -73,6 +73,7 @@ from repeater.activity import log_activity
 from repeater.config import get_settings
 from repeater.engine import captions, rules
 from repeater.engine.publisher import engine_state, queue_publish, reached_platform
+from repeater.messages import Message
 from repeater.models import (
     ACTIVE_POST_STATUSES,
     PUBLISH_PLATFORMS,
@@ -87,6 +88,8 @@ from repeater.models import (
     Video,
     VideoStatus,
     Workspace,
+    YouTubeQuotaDay,
+    YouTubeUploadStart,
 )
 from repeater.platforms.base import LIMITS
 from repeater.timeutil import ensure_aware, tz, utcnow
@@ -179,6 +182,9 @@ def plan_workspace(session: Session, workspace_id: int, now: datetime | None = N
     pairs = _active_rules(session, workspace.id)
     if not pairs:
         return []
+    if any(account.platform == Platform.YOUTUBE for _, account in pairs):
+        # All channels share one Google project, including plans from different workspaces.
+        session.execute(select(func.pg_advisory_xact_lock(727002, 0)))
     ctx = _load_context(session, workspace, now)
     if ctx is None:
         return []
@@ -190,7 +196,11 @@ def plan_workspace(session: Session, workspace_id: int, now: datetime | None = N
             workspace.id,
             ActivityLevel.INFO,
             "publish",
-            f"Scheduled {len(ctx.created)} new post{'s' if len(ctx.created) != 1 else ''}.",
+            Message(
+                "publish.scheduled",
+                f"Scheduled {len(ctx.created)} new post{'s' if len(ctx.created) != 1 else ''}.",
+                {"p0": len(ctx.created), "p1": "s" if len(ctx.created) != 1 else ""},
+            ),
             post_ids=[p.id for p in ctx.created],
         )
     session.flush()
@@ -369,9 +379,21 @@ def _uploaded_at(state: dict[str, Any]) -> datetime | None:
 
 
 def _youtube_days(session: Session, start: datetime, end: datetime) -> Counter[date]:
-    """videos.insert calls per Pacific day, project-wide: each YouTube post that is active,
-    published or possibly live counts 1 plus its failed attempts (each attempt opened an upload
-    session, i.e. a call, that the post count alone would not show)."""
+    """Actual insert reservations plus pending work, shared by every workspace.
+
+    Old posts without ledger entries retain the conservative attempts estimate. New entries
+    count the actual HTTP starts even after manual retry, needs-attention, or post deletion.
+    """
+    first, last = start.astimezone(YOUTUBE_QUOTA_TZ).date(), end.astimezone(YOUTUBE_QUOTA_TZ).date()
+    days: Counter[date] = Counter(
+        dict(
+            session.execute(
+                select(YouTubeUploadStart.day, func.count())
+                .where(YouTubeUploadStart.day >= first, YouTubeUploadStart.day <= last)
+                .group_by(YouTubeUploadStart.day)
+            ).all()
+        )
+    )
     at = func.coalesce(ScheduledPost.published_at, ScheduledPost.scheduled_at)
     # The SQL twin of publisher.reached_platform: a platform id, adapter state, or the engine's
     # own record of an upload (processing_since) or of a possibly live video (may_be_live).
@@ -387,17 +409,34 @@ def _youtube_days(session: Session, start: datetime, end: datetime) -> Counter[d
         ),
     )
     rows = session.execute(
-        select(at, ScheduledPost.attempts).where(
+        select(
+            at,
+            ScheduledPost.attempts,
+            select(YouTubeUploadStart.id).where(YouTubeUploadStart.post_id == ScheduledPost.id).exists(),
+        ).where(
             ScheduledPost.platform == Platform.YOUTUBE,
-            or_(ScheduledPost.status.in_(COUNTED_STATUSES), possibly_live),
+            or_(
+                ScheduledPost.status.in_((PostStatus.SCHEDULED, PostStatus.FAILED)),
+                and_(
+                    or_(ScheduledPost.status.in_(COUNTED_STATUSES), possibly_live),
+                    ~select(YouTubeUploadStart.id)
+                    .where(YouTubeUploadStart.post_id == ScheduledPost.id)
+                    .exists(),
+                ),
+            ),
             at >= start,
             at <= end,
         )
     ).all()
-    days: Counter[date] = Counter()
-    for when, attempts in rows:
+    for when, attempts, recorded in rows:
         aware = when if when.tzinfo else when.replace(tzinfo=UTC)
-        days[aware.astimezone(YOUTUBE_QUOTA_TZ).date()] += 1 + max(int(attempts or 0), 0)
+        days[aware.astimezone(YOUTUBE_QUOTA_TZ).date()] += 1 if recorded else 1 + max(int(attempts or 0), 0)
+    for day in session.scalars(
+        select(YouTubeQuotaDay.day).where(
+            YouTubeQuotaDay.day >= first, YouTubeQuotaDay.day <= last, YouTubeQuotaDay.exhausted.is_(True)
+        )
+    ):
+        days[day] = max(days[day], youtube_daily_budget())
     return days
 
 
@@ -421,8 +460,19 @@ def _plan_account(ctx: _Context, rule: RotationRule, account: ConnectedAccount) 
         _warn_once(
             ctx,
             f"rule_not_ready:{rule.id}:{int(_ts(rule.updated_at))}",
-            f"Nothing is scheduled for {captions.platform_name(platform)} ({account.display_name}) until "
-            f"you {needed} in its posting settings.",
+            Message(
+                "publish.rule_incomplete",
+                f"Nothing is scheduled for {captions.platform_name(platform)} ({account.display_name}) until "
+                f"you {needed} in its posting settings.",
+                {
+                    "p0": captions.platform_name(platform),
+                    "p1": account.display_name,
+                    "p2": [
+                        Message("rule.problem." + code, rules.PROBLEM_MESSAGES.get(code, code))
+                        for code in problems
+                    ],
+                },
+            ),
             account_id=account.id,
             rule_id=rule.id,
         )
@@ -432,9 +482,17 @@ def _plan_account(ctx: _Context, rule: RotationRule, account: ConnectedAccount) 
         _warn_once(
             ctx,
             f"suspended:{account.id}:{failing}",
-            f"Scheduling for {captions.platform_name(platform)} ({account.display_name}) is on hold: the "
-            f"last {SUSPEND_AFTER_FAILURES} posts needed attention. Fix the problem shown on those posts "
-            "and publish one again, or edit the account's rule, to resume.",
+            Message(
+                "publish.suspended",
+                f"Scheduling for {captions.platform_name(platform)} ({account.display_name}) is on hold: the "
+                f"last {SUSPEND_AFTER_FAILURES} posts needed attention. Fix the problem shown on those posts "
+                "and publish one again, or edit the account's rule, to resume.",
+                {
+                    "p0": captions.platform_name(platform),
+                    "p1": account.display_name,
+                    "p2": SUSPEND_AFTER_FAILURES,
+                },
+            ),
             account_id=account.id,
         )
         return
@@ -594,8 +652,16 @@ def _eligible(ctx: _Context, plan: _AccountPlan, video: Video) -> bool:
             _warn_once(
                 ctx,
                 f"limits:{video.id}:{plan.platform.value}",
-                f"'{captions.video_label(video)}' will not be published to "
-                f"{captions.platform_name(plan.platform)}: {ctx.limit_notes[key]}.",
+                Message(
+                    "publish.limit",
+                    f"'{captions.video_label(video)}' will not be published to "
+                    f"{captions.platform_name(plan.platform)}: {ctx.limit_notes[key]}.",
+                    {
+                        "p0": captions.video_label(video),
+                        "p1": captions.platform_name(plan.platform),
+                        "p2": ctx.limit_notes[key],
+                    },
+                ),
                 video_id=video.id,
                 platform=plan.platform.value,
             )

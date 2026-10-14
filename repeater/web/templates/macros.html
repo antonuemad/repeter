@@ -40,8 +40,8 @@
 {% endif %}
 {% endmacro %}
 
-{# An error text reported by a platform or another module: shown as received, under a translated label. #}
-{% macro error_text(text, limit=300) %}<span class="muted small">{{ t('common.error_label') }} <bdi dir="auto">{{ text[:limit] }}</bdi></span>{% endmacro %}
+{# Domain errors use the stored key and parameters; legacy diagnostics remain readable. #}
+{% macro error_text(text, limit=300, info=none) %}<span class="muted small">{{ t('common.error_label') }} <bdi dir="auto">{{ t.error(text, info)[:limit] }}</bdi></span>{% endmacro %}
 
 {% macro video_title(video) %}{{ (video.overrides or {}).get('title') or video.title or (video.caption or '')[:60] or ('#' ~ video.id) }}{% endmacro %}
 

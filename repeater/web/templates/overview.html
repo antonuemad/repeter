@@ -40,7 +40,7 @@
     {% for a in reconnect_accounts %}
     <li>
       {{ m.platform(a.platform) }} <strong dir="auto">{{ a.display_name }}</strong> — {{ t('overview.needs_reconnect') }}
-      {% if a.last_error %}{{ m.error_text(a.last_error, 200) }}{% endif %}
+      {% if a.last_error %}{{ m.error_text(a.last_error, 200, a.last_error_info) }}{% endif %}
       <a class="button small" href="/connect/{{ 'meta' if a.platform in ['instagram', 'facebook'] else a.platform }}">{{ t('accounts.reconnect') }}</a>
     </li>
     {% endfor %}
@@ -54,19 +54,19 @@
     <li>
       {{ m.platform(p.platform) }} <a href="/library/{{ p.video_id }}" dir="auto">{{ m.video_title(p.video) }}</a>
       {{ t('common.flow_arrow') }} <span dir="auto">{{ p.connected_account.display_name }}</span>: {{ m.badge('post_status', p.status) }}
-      {% if p.error %}{{ m.error_text(p.error, 200) }}{% endif %}
+      {% if p.error %}{{ m.error_text(p.error, 200, p.error_info) }}{% endif %}
     </li>
     {% endfor %}
     {% for v in failed_videos %}
     <li>
       <a href="/library/{{ v.id }}" dir="auto">{{ m.video_title(v) }}</a> {{ m.badge('video_status', v.status) }}
-      {% if v.error %}{{ m.error_text(v.error, 200) }}{% endif %}
+      {% if v.error %}{{ m.error_text(v.error, 200, v.error_info) }}{% endif %}
     </li>
     {% endfor %}
     {% for s in failing_sources %}
     <li>
       {{ t('overview.source') }} <a href="/sources/{{ s.id }}/edit" dir="auto">{{ s.name }}</a>:
-      {{ m.error_text(s.last_error, 200) }}
+      {{ m.error_text(s.last_error, 200, s.last_error_info) }}
     </li>
     {% endfor %}
   </ul>

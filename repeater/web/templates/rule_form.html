@@ -68,7 +68,7 @@
   <section class="card tiktok-settings">
     <h2>{{ t('rules.tiktok_title') }}</h2>
     {% if creator_error %}
-    <div class="flash flash-error" role="alert">{{ t('rules.tiktok_creator_error') }} <span dir="auto">{{ t(creator_error) if t.has(creator_error) else creator_error }}</span></div>
+    <div class="flash flash-error" role="alert">{{ t('rules.tiktok_creator_error') }} <span dir="auto">{{ t(creator_error) if t.has(creator_error) else t.error(creator_error) }}</span></div>
     {% elif creator %}
     <div class="creator">
       {% if creator.avatar_url and creator.avatar_url.startswith('https://') %}<img class="avatar" src="{{ creator.avatar_url }}" alt="" width="48" height="48" referrerpolicy="no-referrer">{% endif %}

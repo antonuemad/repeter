@@ -25,6 +25,7 @@ from repeater.engine import actions, captions
 from repeater.engine import rules as engine_rules
 from repeater.jobs import kinds
 from repeater.media import storage
+from repeater.messages import Message
 from repeater.models import (
     PUBLISH_PLATFORMS,
     AccountStatus,
@@ -450,7 +451,11 @@ def _cancel_excluded_posts(db: Session, video: Video, excluded: list[str]) -> in
             ScheduledPost.platform.in_([Platform(p) for p in excluded]),
             ScheduledPost.status == PostStatus.SCHEDULED,
         )
-        .values(status=PostStatus.CANCELED, error="platform excluded for this video")
+        .values(
+            status=PostStatus.CANCELED,
+            error="platform excluded for this video",
+            error_info=Message("publish.excluded", "platform excluded for this video").info,
+        )
     )
     return int(result.rowcount or 0)
 

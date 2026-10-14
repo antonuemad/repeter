@@ -20,6 +20,7 @@ import re
 import httpx
 
 from repeater.config import get_settings
+from repeater.messages import Message, diagnostic, render
 
 log = logging.getLogger("repeater.notify")
 
@@ -87,21 +88,42 @@ def notify(
         token, chat_id = settings.telegram_bot_token, settings.telegram_chat_id
         if not token or not chat_id:
             return False
+        lang = _workspace_lang(workspace_id)
         if details_enabled():
-            message = format_message(text, workspace_id=workspace_id, level=level, category=category)
+            message = format_message(
+                text, workspace_id=workspace_id, level=level, category=category, lang=lang
+            )
         else:
-            message = format_minimal(workspace_id=workspace_id, level=level, category=category, count=count)
+            message = format_minimal(
+                workspace_id=workspace_id, level=level, category=category, count=count, lang=lang
+            )
         return _send(token, chat_id, message)
     except Exception as exc:  # noqa: BLE001 - notifications must never break the caller
         log.warning("Telegram notification failed (%s)", type(exc).__name__)
         return False
 
 
-def _header(workspace_id: int | None, level: str) -> str:
+def _workspace_lang(workspace_id: int | None) -> str:
+    # Alerts without a workspace belong to the operator; keep their established English default.
+    if workspace_id is not None:
+        from repeater.db import get_sessionmaker
+        from repeater.models import Workspace
+
+        with get_sessionmaker()() as session:
+            workspace = session.get(Workspace, workspace_id)
+            if workspace is not None and workspace.locale in ("ar", "en"):
+                return workspace.locale
+    return "en"
+
+
+def _header(workspace_id: int | None, level: str, lang: str = "en") -> str:
     label = _LEVEL_LABELS.get(level, level.capitalize() or "Info")
+    if lang == "ar":
+        label = {"info": "معلومة", "warning": "تنبيه", "error": "يحتاج إلى تدخل"}.get(level, "تنبيه")
     header = f"<b>Repeater · {html.escape(label, quote=False)}</b>"
     if workspace_id is not None:
-        header += f" (workspace {int(workspace_id)})"
+        label = "مساحة العمل" if lang == "ar" else "workspace"
+        header += f" ({label} {int(workspace_id)})"
     return header
 
 
@@ -111,24 +133,40 @@ def dashboard_link(category: str = "alert") -> str:
 
 
 def format_minimal(
-    *, workspace_id: int | None = None, level: str = "info", category: str = "alert", count: int = 1
+    *,
+    workspace_id: int | None = None,
+    level: str = "info",
+    category: str = "alert",
+    count: int = 1,
+    lang: str = "en",
 ) -> str:
     """The default alert: what kind of event, how many, and where to look. No names or titles."""
     singular, plural, _ = _CATEGORIES.get(category, _CATEGORIES["alert"])
     n = max(int(count), 1)
     sentence = (singular if n == 1 else plural).format(n=n)
+    if lang == "ar":
+        sentence = render(
+            Message("notify." + (category if category in _CATEGORIES else "alert"), sentence, {"n": n}).info,
+            lang,
+        )
     link = html.escape(dashboard_link(category), quote=False)
-    return f"{_header(workspace_id, level)}\n{html.escape(sentence, quote=False)}. Open the dashboard: {link}"
+    action = "افتح لوحة التحكم" if lang == "ar" else "Open the dashboard"
+    return f"{_header(workspace_id, level, lang)}\n{html.escape(sentence, quote=False)}. {action}: {link}"
 
 
 def format_message(
-    text: str, *, workspace_id: int | None = None, level: str = "info", category: str | None = None
+    text: str,
+    *,
+    workspace_id: int | None = None,
+    level: str = "info",
+    category: str | None = None,
+    lang: str = "en",
 ) -> str:
     """The full alert quoting `text` (only sent when the operator opted in)."""
-    body = (text or "").strip()
+    body = render(diagnostic(text or "").info, lang).strip()
     if len(body) > MAX_BODY_CHARS:
         body = body[: MAX_BODY_CHARS - 1].rstrip() + "…"
-    message = f"{_header(workspace_id, level)}\n{html.escape(body, quote=False)}"
+    message = f"{_header(workspace_id, level, lang)}\n{html.escape(body, quote=False)}"
     if category is not None:
         message += f"\n{html.escape(dashboard_link(category), quote=False)}"
     return message

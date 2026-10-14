@@ -19,7 +19,7 @@
         {% if p.cycle %}<span class="muted">({{ t('library.cycle', cycle=p.cycle) }})</span>{% endif %}
       </span>
       {{ m.badge('post_status', p.status) }}
-      {% if p.error %}{{ m.error_text(p.error, 200) }}{% endif %}
+      {% if p.error %}{{ m.error_text(p.error, 200, p.error_info) }}{% endif %}
       {{ m.post_actions(p, actionable, '/schedule') }}
     </li>
     {% endfor %}
@@ -41,7 +41,7 @@
           <td>{{ fmt_dt(p.published_at or p.updated_at, zone) }}</td>
           <td>{{ m.platform(p.platform) }} <span dir="auto">{{ p.connected_account.display_name }}</span></td>
           <td><a href="/library/{{ p.video_id }}" dir="auto">{{ m.video_title(p.video) }}</a></td>
-          <td>{{ m.badge('post_status', p.status) }}{% if p.error %}<div>{{ m.error_text(p.error, 300) }}</div>{% endif %}
+          <td>{{ m.badge('post_status', p.status) }}{% if p.error %}<div>{{ m.error_text(p.error, 300, p.error_info) }}</div>{% endif %}
             {{ m.post_actions(p, actionable, '/schedule') }}</td>
           <td>{% if p.permalink and p.permalink.startswith('https://') %}<a href="{{ p.permalink }}" rel="noopener noreferrer" target="_blank">{{ t('schedule.open') }}</a>{% else %}—{% endif %}</td>
         </tr>

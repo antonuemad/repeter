@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import os
 import re
 import secrets
 import sys
@@ -261,6 +262,29 @@ def cmd_check(_: argparse.Namespace) -> int:
     return 0 if ok and backup_ok else 1
 
 
+def cmd_check_proxy(args: argparse.Namespace) -> int:
+    from repeater.proxy import untrusted_proxy_addresses
+
+    try:
+        unmatched = untrusted_proxy_addresses(
+            args.addresses, os.environ.get("FORWARDED_ALLOW_IPS", "127.0.0.1")
+        )
+    except ValueError:
+        print(
+            "trusted proxy configuration or address is invalid; use explicit IPs/CIDRs, never *",
+            file=sys.stderr,
+        )
+        return 2
+    if unmatched:
+        print(
+            f"trusted proxy mismatch: {', '.join(unmatched)}; set REPEATER_FORWARDED_ALLOW_IPS to the actual proxy IPs/CIDRs, then recreate web",
+            file=sys.stderr,
+        )
+        return 1
+    print("trusted proxy addresses: ok")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="repeater")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -278,6 +302,9 @@ def main(argv: list[str] | None = None) -> int:
     rk.add_argument("--dry-run", action="store_true", help="only report what would be re-wrapped")
     rk.set_defaults(fn=cmd_rotate_keys)
     sub.add_parser("check", help="validate configuration").set_defaults(fn=cmd_check)
+    proxy = sub.add_parser("check-proxy", help="validate proxy source addresses against FORWARDED_ALLOW_IPS")
+    proxy.add_argument("addresses", nargs="+")
+    proxy.set_defaults(fn=cmd_check_proxy)
     ca = sub.add_parser("create-admin", help="create/update the admin user and workspace")
     ca.add_argument("--email", required=True)
     pw = ca.add_mutually_exclusive_group()

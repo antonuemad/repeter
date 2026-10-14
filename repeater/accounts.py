@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import Text, cast, delete, func, literal, or_, select, update
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from repeater.activity import log_activity
 from repeater.crypto import decrypt_json, encrypt_json
+from repeater.messages import Message, diagnostic
 from repeater.models import (
     AccountStatus,
     ActivityLevel,
@@ -38,9 +39,12 @@ REFRESH_MARGIN = timedelta(minutes=15)
 DISCONNECTED_AT_KEY = "_disconnected_at"  # when the user disconnected; retention deletes the row later
 REFRESHED_AT_KEY = "_refreshed_at"  # when platform API data (YouTube channel title, avatar) was fetched
 GENERIC_CHANNEL_NAME = "YouTube channel"
-DISCONNECTED_WHILE_PUBLISHING = (
-    "The account was disconnected while this post was being published; the video may be live. "
-    "Check the account before publishing again."
+DISCONNECTED_WHILE_PUBLISHING = Message(
+    "account.disconnected_live",
+    (
+        "The account was disconnected while this post was being published; the video may be live. "
+        "Check the account before publishing again."
+    ),
 )
 
 
@@ -73,13 +77,18 @@ def account_context(account: ConnectedAccount) -> AccountContext:
 
 
 def mark_needs_reconnect(session: Session, account: ConnectedAccount, reason: str) -> None:
+    reason = diagnostic(reason, "account.reconnect_reason")
     if account.status != AccountStatus.NEEDS_RECONNECT:
         log_activity(
             session,
             account.workspace_id,
             ActivityLevel.ERROR,
             "account",
-            f"{account.platform} account '{account.display_name}' needs to be reconnected: {reason}",
+            Message(
+                "account.reconnect",
+                f"{account.platform} account '{account.display_name}' needs to be reconnected: {reason}",
+                {"p0": account.platform, "p1": account.display_name, "p2": diagnostic(reason)},
+            ),
             account_id=account.id,
         )
     account.status = AccountStatus.NEEDS_RECONNECT
@@ -157,7 +166,15 @@ def upsert_connected_accounts(
             workspace_id,
             ActivityLevel.INFO,
             "account",
-            f"{'Connected' if created else 'Reconnected'} {item.platform} account '{acc.display_name}'",
+            Message(
+                "account.connected",
+                f"{'Connected' if created else 'Reconnected'} {item.platform} account '{acc.display_name}'",
+                {
+                    "p0": "Connected" if created else "Reconnected",
+                    "p1": item.platform,
+                    "p2": acc.display_name,
+                },
+            ),
             actor=actor,
             account_id=acc.id,
         )
@@ -184,7 +201,11 @@ def disconnect(
                 account.workspace_id,
                 ActivityLevel.WARNING,
                 "account",
-                f"Revocation at {account.platform} failed ({type(exc).__name__}); tokens deleted locally",
+                Message(
+                    "account.revoke_failed",
+                    f"Revocation at {account.platform} failed ({type(exc).__name__}); tokens deleted locally",
+                    {"p0": account.platform, "p1": type(exc).__name__},
+                ),
                 account_id=account.id,
             )
     _stop_posts(session, account)
@@ -206,7 +227,11 @@ def disconnect(
         account.workspace_id,
         ActivityLevel.INFO,
         "account",
-        f"Disconnected {account.platform} account '{account.display_name}'",
+        Message(
+            "account.disconnected",
+            f"Disconnected {account.platform} account '{account.display_name}'",
+            {"p0": account.platform, "p1": account.display_name},
+        ),
         actor=actor,
         account_id=account.id,
     )
@@ -243,7 +268,11 @@ def _stop_posts(session: Session, account: ConnectedAccount) -> None:
                 post.workspace_id,
                 ActivityLevel.WARNING,
                 "publish",
-                f"Post #{post.id}: {DISCONNECTED_WHILE_PUBLISHING}",
+                Message(
+                    "account.post_interrupted",
+                    f"Post #{post.id}: {DISCONNECTED_WHILE_PUBLISHING}",
+                    {"p0": post.id, "p1": diagnostic(DISCONNECTED_WHILE_PUBLISHING)},
+                ),
                 post_id=post.id,
                 video_id=post.video_id,
                 account_id=account.id,
@@ -251,7 +280,7 @@ def _stop_posts(session: Session, account: ConnectedAccount) -> None:
             )
         else:
             post.status = PostStatus.CANCELED
-            post.error = "account disconnected"
+            post.error = Message("account.disabled", "account disconnected", {})
     session.flush()
 
 
@@ -282,8 +311,7 @@ def redact_name_in_activity(
     session: Session, account: ConnectedAccount, name: str, *, before: datetime | None = None
 ) -> int:
     """Replace `name` in the activity entries about the account (those older than `before`, when
-    given) with a generic label, in the stored English sentence and in the parameters the dashboard
-    translates it from (data.msg_params.name): the title of a YouTube channel is API data that may
+    given) with a generic label, in the stored English sentence and nested translation parameters: the title of a YouTube channel is API data that may
     not outlive its refresh. Returns the number of rows changed."""
     if len(name.strip()) < 2:
         return 0
@@ -293,31 +321,27 @@ def redact_name_in_activity(
     ]
     if before is not None:
         about_account.append(ActivityLog.created_at < before)
-    text = (
-        session.execute(
-            update(ActivityLog)
-            .where(*about_account, ActivityLog.message.contains(name, autoescape=True))
-            .values(message=func.replace(ActivityLog.message, name, GENERIC_CHANNEL_NAME))
-            .execution_options(synchronize_session=False)
-        ).rowcount
-        or 0
-    )
-    params = (
-        session.execute(
-            update(ActivityLog)
-            .where(*about_account, ActivityLog.data["msg_params"]["name"].astext == name)
-            .values(
-                data=func.jsonb_set(
-                    ActivityLog.data,
-                    cast(literal("{msg_params,name}"), ARRAY(Text)),
-                    cast(literal(f'"{GENERIC_CHANNEL_NAME}"'), JSONB),
-                )
-            )
-            .execution_options(synchronize_session=False)
-        ).rowcount
-        or 0
-    )
-    return max(text, params)
+
+    def redact(value):
+        if isinstance(value, str):
+            return value.replace(name, GENERIC_CHANNEL_NAME)
+        if isinstance(value, dict):
+            return {key: redact(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [redact(item) for item in value]
+        return value
+
+    count = 0
+    for entry in session.scalars(select(ActivityLog).where(*about_account).with_for_update()):
+        text = entry.message.replace(name, GENERIC_CHANNEL_NAME)
+        data = dict(entry.data or {})
+        if "msg_params" in data:
+            data["msg_params"] = redact(data["msg_params"])
+        if text != entry.message or data != entry.data:
+            entry.message, entry.data = text, data
+            count += 1
+    session.flush()
+    return count
 
 
 def delete_account_records(
@@ -354,12 +378,23 @@ def delete_account_records(
     if source_ids:
         conditions.append(ActivityLog.data["source_id"].astext.in_([str(i) for i in source_ids]))
     name = (account.display_name or "").strip()
-    if len(name) >= 3:
-        conditions.append(
-            (ActivityLog.workspace_id == account.workspace_id)
-            & ActivityLog.message.contains(name, autoescape=True)
-        )
     activity = session.execute(delete(ActivityLog).where(or_(*conditions))).rowcount or 0
+    # Never infer row ownership from a name substring. Older unstructured messages can still
+    # quote the name: redact the complete name there, without deleting another account's history.
+    if len(name) >= 3:
+        pattern = re.compile(rf"(?<![\w-]){re.escape(name)}(?![\w-])")
+        legacy = session.execute(
+            select(ActivityLog).where(
+                ActivityLog.workspace_id == account.workspace_id,
+                ActivityLog.data["account_id"].astext.is_(None),
+                ActivityLog.message.contains(name, autoescape=True),
+            )
+        ).scalars()
+        for entry in legacy:
+            entry.message = pattern.sub("[deleted account]", entry.message)
+            params = (entry.data or {}).get("msg_params") or {}
+            if params.get("name") == name:
+                entry.data = {**entry.data, "msg_params": {**params, "name": "[deleted account]"}}
     posts = session.execute(
         select(ScheduledPost.id).where(ScheduledPost.connected_account_id == account.id)
     ).all()

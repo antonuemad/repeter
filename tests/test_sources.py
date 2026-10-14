@@ -936,7 +936,10 @@ def test_repeated_failures_pause_the_source_and_notify(
     assert src.last_error == "Instagram is having trouble (HTTP 503)"
     assert len(activities(db, ActivityLevel.WARNING)) == 1
     errors = activities(db, ActivityLevel.ERROR)
-    assert len(errors) == 1 and "Magic IG" in errors[0].message and errors[0].data == {"source_id": src.id}
+    assert len(errors) == 1 and "Magic IG" in errors[0].message
+    assert set(errors[0].data) == {"source_id", "msg_key", "msg_params"}
+    assert errors[0].data["source_id"] == src.id and errors[0].data["msg_key"] == "source.paused"
+    assert errors[0].data["msg_params"]["p2"]["$message"]["key"] == "platform.RetryableError"
     assert len(notifications) == 1 and notifications[0][1] == {
         "workspace_id": workspace.id,
         "level": "error",
@@ -1573,7 +1576,11 @@ def test_manual_upload_creates_video_and_queues_processing(db, workspace, sample
     assert src.kind == SourceKind.MANUAL and src.platform is None
     assert [j.payload for j in jobs_of(db, kinds.PROCESS_VIDEO)] == [{"video_id": v.id}]
     log = activities(db)[-1]
-    assert log.actor == "admin@magic-lap.com" and log.data == {"video_id": v.id}
+    assert log.actor == "admin@magic-lap.com" and log.data == {
+        "video_id": v.id,
+        "msg_key": "import.uploaded",
+        "msg_params": {"title": "Magic Trick"},
+    }
 
     second = manual.create_video_from_upload(
         db,
@@ -1952,9 +1959,10 @@ def test_source_disabled_during_a_poll_creates_no_videos(db, workspace, make_acc
 
     class Lister(FakeLister):
         def list_recent(self, account, *, since=None, limit=50, config=None):
-            with get_sessionmaker()() as web:
-                web.get(Source, src.id).enabled = False
-                web.commit()
+            if self.calls:
+                with get_sessionmaker()() as web:
+                    web.get(Source, src.id).enabled = False
+                    web.commit()
             return super().list_recent(account, since=since, limit=limit, config=config)
 
     fake = Lister(Platform.INSTAGRAM, [remote("m1", T0 + timedelta(hours=1))])
@@ -1962,6 +1970,7 @@ def test_source_disabled_during_a_poll_creates_no_videos(db, workspace, make_acc
         importer.poll_source(db, src.id, now=T0)  # first poll: baseline
         out = importer.poll_source(db, src.id, now=T0 + timedelta(hours=2))
     assert out.status == "skipped" and videos(db) == []
+    assert len(fake.calls) == 2, "disable happens inside the second listing, after baseline detection"
 
 
 def test_poll_holds_no_row_lock_while_the_listing_runs(db, workspace, make_account, make_source):

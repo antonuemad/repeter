@@ -1389,3 +1389,31 @@ def test_download_is_not_supported(tmp_path: Path):
         youtube.lister.download(ctx(), RemoteVideo(external_id="v1"), tmp_path / "x.mp4")
     assert "Developer Policies" in ei.value.message
     assert isinstance(ei.value, PlatformError)
+
+
+def test_every_insert_attempt_reserves_quota_including_internal_retries_and_restarts(mock, tmp_path, sleeps):
+    path = binary_file(tmp_path, 3000)
+    start, _ = upload_routes(mock, FakeUploadServer(3000, script={1: 404}))
+    reserved = []
+
+    def reply(request):
+        assert len(reserved) == start.call_count + 1
+        if len(reserved) == 1:
+            return httpx.Response(503)
+        return httpx.Response(200, headers={"Location": SESSION_URI})
+
+    start.mock(side_effect=reply)
+    youtube.publisher.publish(ctx(), make_req(path, on_session_start=lambda: reserved.append(True)))
+    assert start.call_count == len(reserved) == 3
+
+
+def test_quota_reservation_refusal_happens_before_any_insert_request(mock, tmp_path):
+    path = binary_file(tmp_path, 3000)
+    start, _ = upload_routes(mock, FakeUploadServer(3000))
+
+    def refuse():
+        raise RateLimitedError("project exhausted", code="quotaExceeded", retry_after=3600)
+
+    with pytest.raises(RateLimitedError):
+        youtube.publisher.publish(ctx(), make_req(path, on_session_start=refuse))
+    assert not start.called

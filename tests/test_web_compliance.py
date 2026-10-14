@@ -755,6 +755,24 @@ def test_danger_button_uses_the_per_theme_text_colour():
         assert f".platform-{platform} {{ color: var(--pf-{platform}); }}" in css
 
 
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("surface,alpha", [("banner-warning", 0.18), ("flash-warning", 0.12)])
+def test_warning_surface_links_reach_wcag_aa(theme, surface, alpha):
+    css = (STATIC / "app.css").read_text()
+    colors = _themes()[theme]
+
+    def rgb(color):
+        return [int(color[i : i + 2], 16) for i in (1, 3, 5)]
+
+    mixed = "#" + "".join(
+        f"{round(a * alpha + b * (1 - alpha)):02x}"
+        for a, b in zip(rgb(colors["warning"]), rgb(colors["surface"]), strict=True)
+    )
+    override = re.search(r"\." + surface + r" a\s*\{[^}]*color:\s*var\(--([\w-]+)\)", css)
+    token = override.group(1) if override else "primary"
+    assert _ratio(colors[token], mixed) >= 4.5
+
+
 # --------------------------------------------------------------------------- ux-compliance-missed-4: delete a video
 
 
@@ -855,3 +873,54 @@ def test_overview_warns_the_owner_when_the_backup_is_stale(web_owner, web_editor
     marker.write_text(f"{int(time.time() - 50 * 3600)} 2026-10-12T03:17:00Z\n")
     assert "last successful database backup was 50 hours ago" in web_owner.get("/").text
     assert "database backup" not in web_editor.get("/").text  # editors cannot act on it
+
+
+def test_persisted_domain_errors_and_activity_render_in_arabic_and_english(
+    web_owner, db, workspace, make_account, web_make_video
+):
+    from repeater.messages import msg
+    from repeater.models import AccountStatus, Source, SourceKind
+    from repeater.platforms.base import AuthError
+
+    detail = AuthError("Stored connection was refused", code="invalid_token").message
+    account = make_account("youtube", display_name="Preview channel")
+    account.status = AccountStatus.NEEDS_RECONNECT
+    account.last_error = detail
+    video = web_make_video(status=VideoStatus.FAILED, error=detail)
+    _add_post(db, workspace, video, account, status=PostStatus.NEEDS_ATTENTION, error=detail)
+    source = Source(
+        workspace_id=workspace.id,
+        kind=SourceKind.DRIVE,
+        name="Preview source",
+        enabled=False,
+        last_error=detail,
+        consecutive_failures=3,
+    )
+    db.add(source)
+    log_activity(
+        db,
+        workspace.id,
+        ActivityLevel.INFO,
+        "import",
+        msg("import.uploaded", "Uploaded '{title}'; preparing it for publishing.", title="Preview clip"),
+    )
+    db.commit()
+    for path in (
+        "/",
+        "/schedule",
+        "/accounts",
+        "/sources",
+        f"/sources/{source.id}/edit",
+        f"/library/{video.id}",
+    ):
+        set_lang(web_owner, "ar")
+        arabic = web_owner.get(path)
+        assert arabic.status_code == 200, path
+        assert "Stored connection was refused" not in arabic.text, path
+        assert "invalid_token" in arabic.text, path
+        set_lang(web_owner, "en")
+        english = web_owner.get(path)
+        assert "Stored connection was refused" in english.text, path
+    set_lang(web_owner, "ar")
+    overview = web_owner.get("/").text
+    assert "تم رفع" in overview and "preparing it for publishing" not in overview

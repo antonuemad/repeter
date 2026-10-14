@@ -1,10 +1,8 @@
 """Showing errors raised by other modules in the user's language.
 
-Engine actions and importers refuse impossible requests with `ValueError("English sentence")`.
-The dashboard shows those refusals to users who may not read English, so each known sentence is
-mapped to an i18n key (`err.*`). An exception that carries its own i18n `key` and `params` (a
-UserError style exception) is translated through that key when the dashboard has it. Anything
-unknown is shown as the raw text, so a new message is never lost."""
+Engine actions and importers raise UserError with explicit keys and parameters. The pattern
+map below is only a compatibility fallback for legacy callers and third-party ValueErrors.
+Unknown diagnostics remain readable rather than being discarded."""
 
 from __future__ import annotations
 

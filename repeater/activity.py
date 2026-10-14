@@ -6,6 +6,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
+from repeater.messages import Message
 from repeater.models import ActivityLevel, ActivityLog
 
 log = logging.getLogger("repeater.activity")
@@ -22,6 +23,8 @@ def log_activity(
     **data,
 ) -> ActivityLog:
     """Record an event shown in the dashboard log. Never pass tokens or secrets in data."""
+    if isinstance(message, Message):
+        data.update(msg_key=message.key, msg_params=message.info["params"])
     entry = ActivityLog(
         workspace_id=workspace_id,
         level=ActivityLevel(level),

@@ -248,6 +248,29 @@ prune_images() {
     docker image prune -f --filter "label=org.opencontainers.image.title=repeater" >/dev/null || true
 }
 
+# Check the real network addresses before declaring the release healthy. A custom Docker pool
+# outside the default trusted CIDRs otherwise silently turns all visitors into one throttle key.
+check_proxy_trust() {
+    local web caddy bind addr
+    local -a addresses=()
+    web="$(compose ps -q web | head -n 1)"
+    [[ -n "$web" ]] || die "cannot determine the web container for the trusted proxy check"
+    while read -r addr; do
+        [[ -z "$addr" ]] || addresses+=("$addr")
+    done < <(docker inspect --format '{{range .NetworkSettings.Networks}}{{.Gateway}}{{"\n"}}{{.IPv6Gateway}}{{"\n"}}{{end}}' "$web")
+    caddy="$(compose ps --status running -q caddy | head -n 1)"
+    if [[ -n "$caddy" ]]; then
+        while read -r addr; do
+            [[ -z "$addr" ]] || addresses+=("$addr")
+        done < <(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{"\n"}}{{.GlobalIPv6Address}}{{"\n"}}{{end}}' "$caddy")
+    fi
+    bind="$(env_get REPEATER_WEB_BIND "$ENV_FILE")"
+    [[ -z "$bind" ]] || addresses+=("$bind")
+    ((${#addresses[@]})) || die "cannot determine trusted proxy source addresses"
+    compose exec -T web python -m repeater.cli check-proxy "${addresses[@]}" ||
+        die "trusted proxy check failed; fix REPEATER_FORWARDED_ALLOW_IPS before accepting traffic"
+}
+
 main() {
     local pull=0 refresh=0 build=1
     while (($# > 0)); do
@@ -272,6 +295,8 @@ main() {
         export REPEATER_IMAGE_TAG=latest
         build_image "$pull" "$refresh"
     else
+        docker image inspect "$IMAGE_REPO:${REPEATER_IMAGE_TAG:-latest}" >/dev/null 2>&1 ||
+            die "the requested image $IMAGE_REPO:${REPEATER_IMAGE_TAG:-latest} does not exist; --no-build never builds a missing release"
         log "skipping the build; using image $IMAGE_REPO:${REPEATER_IMAGE_TAG:-latest}"
     fi
 
@@ -284,10 +309,14 @@ main() {
     compose up -d --remove-orphans
     refresh_caddy
     wait_healthy || die "deploy finished but the containers are not healthy"
+    check_proxy_trust
     check_http
     prune_images
     compose ps --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
-    log "deploy complete. Roll back with: REPEATER_IMAGE_TAG=previous bash $SCRIPT_DIR/deploy.sh --no-build"
+    log "deploy complete."
+    if docker image inspect "$IMAGE_REPO:previous" >/dev/null 2>&1; then
+        log "Roll back with: REPEATER_IMAGE_TAG=previous bash $SCRIPT_DIR/deploy.sh --no-build"
+    fi
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

@@ -4,8 +4,8 @@ Strings are looked up with t(lang, key, **params); placeholders use str.format s
 The language of a request is, in order: `?lang=ar|en` on a GET (so a page can be linked in a
 language, e.g. the privacy policy for a platform reviewer), the `repeater_lang` cookie (an
 explicit choice on this device), the signed-in user's saved locale, the browser's Accept-Language
-header, then settings.default_locale. Messages produced by other modules (platform errors) are
-shown as they are; activity entries and action errors that carry an i18n key are translated."""
+header, then settings.default_locale. Domain activities and errors carry stable keys and parameters; legacy unkeyed records retain
+their original diagnostic."""
 
 from __future__ import annotations
 
@@ -154,7 +154,15 @@ class Translator:
     def activity(self, entry: Any) -> str:
         """The text of an activity entry: translated when the entry carries an i18n key
         (`msg_key`, `msg_params` in its data), else the stored English sentence."""
+        from repeater.message_catalog import AR
+        from repeater.messages import render
+
         data = getattr(entry, "data", None) or {}
+        if data.get("msg_key") in AR:
+            return render(
+                {"key": data["msg_key"], "params": data.get("msg_params"), "fallback": str(entry.message)},
+                self.lang,
+            )
         key = data.get("msg_key")
         params = dict(data.get("msg_params") or {}) if isinstance(data.get("msg_params"), dict) else {}
         if isinstance(key, str) and self.has(key):
@@ -165,7 +173,11 @@ class Translator:
             return self(key, **params)
         return str(getattr(entry, "message", ""))
 
-    def error(self, err: Any) -> str:
+    def error(self, err: Any, info: dict | None = None) -> str:
+        from repeater.messages import Message, render
+
+        if info is not None or isinstance(err, Message):
+            return render(info if info is not None else err.info, self.lang, str(err))
         return message(self.lang, getattr(err, "key", str(err)), getattr(err, "params", None))
 
 
@@ -683,6 +695,8 @@ EN: dict[str, str] = {
     "err.not_failed": "Only failed videos can be retried.",
     "err.original_gone": "The original file is gone; upload the video again.",
     "err.upload_not_found": "The upload was not found. Please upload the file again.",
+    "err.upload_unsupported": "{filename} is not a video: unsupported format or damaged file. Upload an MP4, MOV or WebM video.",
+    "err.not_duplicate": "Only videos marked as duplicates can be released.",
     "err.upload_empty": "The upload is empty or incomplete. Please upload the file again.",
     "oauth.code.no_publishable_accounts": "Facebook did not return a Page you can publish to. Select at least one Page in the Facebook dialog, make sure you have full control of it, then connect again.",
     "oauth.code.no_channel": "This Google account has no YouTube channel. Create a channel on youtube.com (or choose the Google account that owns it), then connect again.",
@@ -1186,7 +1200,7 @@ AR: dict[str, str] = {
     "err.not_publishable": "لا يمكن النشر على حسابات {platform}.",
     "err.video_not_ready": "لا يمكن نشر إلا الفيديوهات الجاهزة (المستوردة والمشفّرة).",
     "err.same_origin": "هذا الفيديو قادم من هذا الحساب؛ نشره عليه مرة أخرى سيكرره.",
-    "err.platform_limit": "{platform} لا يقبل هذا الفيديو: {problem}.",
+    "err.platform_limit": "الفيديو لا يطابق مواصفات {platform}. راجع المدة والحجم والأبعاد قبل إعادة النشر.",
     "err.in_flight": "هذا الفيديو يُنشر على هذا الحساب الآن.",
     "err.not_archived": "لا يمكن استعادة إلا الفيديوهات المؤرشفة.",
     "err.duplicate_video": "هذا الفيديو نسخة مكررة من فيديو آخر في المكتبة ويبقى خارج الدوران.",
@@ -1194,6 +1208,8 @@ AR: dict[str, str] = {
     "err.not_failed": "لا يمكن إعادة المحاولة إلا للفيديوهات الفاشلة.",
     "err.original_gone": "الملف الأصلي لم يعد موجودًا؛ ارفع الفيديو من جديد.",
     "err.upload_not_found": "لم يُعثر على الملف المرفوع. ارفع الملف مرة أخرى.",
+    "err.upload_unsupported": "الملف «{filename}» ليس فيديو قابلًا للقراءة أو بصيغة مدعومة. ارفع فيديو بصيغة MP4 أو MOV أو WebM.",
+    "err.not_duplicate": "يمكن إلغاء علامة التكرار للفيديوهات المكررة فقط.",
     "err.upload_empty": "الملف المرفوع فارغ أو غير مكتمل. ارفعه مرة أخرى.",
     "oauth.code.no_publishable_accounts": "لم يُرجع فيسبوك أي صفحة يمكنك النشر عليها. اختر صفحة واحدة على الأقل في نافذة فيسبوك وتأكد أن لديك تحكمًا كاملًا بها، ثم اربط من جديد.",
     "oauth.code.no_channel": "لا توجد قناة يوتيوب على حساب Google هذا. أنشئ قناة على youtube.com (أو اختر حساب Google الذي يملكها) ثم اربط من جديد.",

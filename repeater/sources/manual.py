@@ -13,6 +13,7 @@ from repeater.activity import log_activity
 from repeater.jobs import kinds
 from repeater.media import storage
 from repeater.media.probe import ProbeResult, probe
+from repeater.messages import Message, UserError
 from repeater.models import ActivityLevel, Source, SourceKind, Video, VideoStatus
 
 MANUAL_SOURCE_NAME = "Manual uploads"
@@ -51,7 +52,12 @@ def create_video_from_upload(
         info = probe(upload)
     except ValueError as exc:
         upload.unlink(missing_ok=True)
-        raise ValueError(f"'{_display_name(original_filename)}' is {exc}") from None
+        raise UserError(
+            "err.upload_unsupported",
+            "'{filename}' is {detail}",
+            filename=_display_name(original_filename),
+            detail=str(exc),
+        ) from None
 
     source = manual_source(session, workspace_id)
     video = Video(
@@ -83,7 +89,11 @@ def create_video_from_upload(
         workspace_id,
         ActivityLevel.INFO,
         "import",
-        f"Uploaded '{video.title}'; preparing it for publishing.",
+        Message(
+            "import.uploaded",
+            f"Uploaded '{video.title}'; preparing it for publishing.",
+            {"title": video.title},
+        ),
         actor=actor,
         video_id=video.id,
     )
@@ -116,9 +126,11 @@ def _checked_upload(upload_path: Path) -> Path:
     path = Path(upload_path).resolve()
     uploads = storage.uploads_dir().resolve()
     if uploads not in path.parents:
-        raise ValueError("The upload was not found. Please upload the file again.")
+        raise UserError("err.upload_not_found", "The upload was not found. Please upload the file again.")
     if not path.is_file() or path.stat().st_size == 0:
-        raise ValueError("The upload is empty or incomplete. Please upload the file again.")
+        raise UserError(
+            "err.upload_empty", "The upload is empty or incomplete. Please upload the file again."
+        )
     return path
 
 

@@ -64,6 +64,7 @@ from repeater.crypto import signed_media_url
 from repeater.engine import captions, rules
 from repeater.jobs import kinds
 from repeater.media import storage
+from repeater.messages import Message, diagnostic
 from repeater.models import (
     ACTIVE_POST_STATUSES,
     AccountStatus,
@@ -118,10 +119,10 @@ RATE_LIMIT_MIN_DELAY_SECONDS = 5 * 60
 RATE_LIMIT_JITTER_SECONDS = 30 * 60
 RATE_LIMIT_GIVE_UP = timedelta(days=3)
 MIN_GAP_LOOKAHEAD = timedelta(days=7)
-# Platforms whose poll() can make the post go live (Instagram publishes the container once it is
-# FINISHED): a paused workspace or a disabled rule must not poll them. Every other platform is
-# already publishing, so polling is read-only and goes on while publishing is halted.
-PUBLISH_ON_POLL = frozenset({Platform.INSTAGRAM})
+# Platforms whose poll() can make the post go live: Instagram publishes its FINISHED container;
+# Facebook can send a deferred finish. A paused workspace or disabled rule must not poll them.
+# Polling the other platforms only reads status and continues while publishing is halted.
+PUBLISH_ON_POLL = frozenset({Platform.INSTAGRAM, Platform.FACEBOOK})
 # A job that fires a little before scheduled_at (clock skew) still publishes.
 EARLY_TOLERANCE = timedelta(seconds=30)
 # Planner posts that missed their slot by this much (worker down) are re-planned instead of
@@ -203,7 +204,11 @@ def _parse_dt(raw: Any) -> datetime | None:
 
 def _scrub(text: str) -> str:
     """Adapter messages may quote request URLs (upload URLs carry credentials): drop them."""
-    return _URL_RE.sub("<url>", text or "")
+
+    def clean(value):
+        return _URL_RE.sub("<url>", value or "")
+
+    return text.remap(clean) if isinstance(text, Message) else clean(text)
 
 
 def _jitter_seconds(post_id: int, span: int) -> int:
@@ -242,7 +247,11 @@ def publish_post(session: Session, post_id: int, *, now: datetime | None = None)
     except Exception as exc:  # noqa: BLE001 - classified below
         return _publish_error(session, target, exc, now)
     if problems:
-        return _needs_attention(session, target, " ".join(p.strip() for p in problems if p.strip()))
+        return _needs_attention(
+            session,
+            target,
+            diagnostic(" ".join(p.strip() for p in problems if p.strip()), "publish.validation"),
+        )
     post.status = PostStatus.UPLOADING
     post.caption = req.caption
     post.error = None
@@ -261,43 +270,81 @@ def _publish_target(session: Session, post: ScheduledPost, now: datetime) -> _Ta
     workspace = session.get(Workspace, post.workspace_id)
     if workspace is None or workspace.paused:
         return _cancel(
-            session, post, "Publishing is paused for this workspace; it will be re-planned on resume."
+            session,
+            post,
+            Message(
+                "publish.paused",
+                "Publishing is paused for this workspace; it will be re-planned on resume.",
+                {},
+            ),
         )
     account = session.get(ConnectedAccount, post.connected_account_id)
     if account is None or account.status == AccountStatus.DISABLED:
-        return _cancel(session, post, "The account was disconnected.")
+        return _cancel(session, post, Message("publish.disconnected", "The account was disconnected.", {}))
     if account.status != AccountStatus.ACTIVE:
         return _cancel(
-            session, post, "The account must be reconnected; the post will be re-planned after that."
+            session,
+            post,
+            Message(
+                "publish.reconnect_first",
+                "The account must be reconnected; the post will be re-planned after that.",
+                {},
+            ),
         )
     rule = rules.find_rule(session, account)
     if post.created_by != "user" and (rule is None or not rule.enabled):
-        return _cancel(session, post, "Rotation is turned off for this account.")
+        return _cancel(
+            session, post, Message("publish.rotation_off", "Rotation is turned off for this account.", {})
+        )
     video = session.get(Video, post.video_id)
     if video is None:
-        return _cancel(session, post, "The video no longer exists.")
+        return _cancel(session, post, Message("publish.video_gone", "The video no longer exists.", {}))
     if video.status in (VideoStatus.IMPORTING, VideoStatus.PROCESSING):
         run_at = now + timedelta(seconds=WAIT_FOR_VIDEO_SECONDS)
         post.scheduled_at = run_at
         return _follow_up(session, post, kinds.PUBLISH_POST, run_at, now, "video is still processing")
     if video.status != VideoStatus.READY:
-        return _cancel(session, post, f"The video is {video.status} and is no longer in rotation.")
+        return _cancel(
+            session,
+            post,
+            Message(
+                "publish.video_not_ready",
+                f"The video is {video.status} and is no longer in rotation.",
+                {"p0": video.status},
+            ),
+        )
     duplicate_on = _duplicate_origin(session, video, account)
     if duplicate_on is not None:
         return _cancel(
-            session, post, f"The same video already exists on {duplicate_on}; the post was canceled."
+            session,
+            post,
+            Message(
+                "publish.duplicate",
+                f"The same video already exists on {duplicate_on}; the post was canceled.",
+                {"p0": duplicate_on},
+            ),
         )
     if (
         post.status == PostStatus.SCHEDULED
         and post.created_by != "user"
         and now - ensure_aware(post.scheduled_at) > STALE_SLOT
     ):
-        return _cancel(session, post, "The post missed its time slot; it will be re-planned.")
+        return _cancel(
+            session,
+            post,
+            Message("publish.missed_slot", "The post missed its time slot; it will be re-planned.", {}),
+        )
     target = _Target(post, video, account, rule, Path())
     path = _encoded_file(video)
     if path is None:
         return _needs_attention(
-            session, target, "The encoded video file is missing on the server; re-process the video."
+            session,
+            target,
+            Message(
+                "publish.encoded_missing",
+                "The encoded video file is missing on the server; re-process the video.",
+                {},
+            ),
         )
     target.path = path
     return target
@@ -328,6 +375,8 @@ def _encoded_file(video: Video) -> Path | None:
 
 
 def _build_request(target: _Target) -> PublishRequest:
+    from repeater.upload_quota import reserve_start
+
     video, platform = target.video, target.platform
     title, caption = captions.render(target.rule, video, platform)
     settings = dict(target.rule.settings or {}) if target.rule else rules.default_settings(platform)
@@ -349,6 +398,7 @@ def _build_request(target: _Target) -> PublishRequest:
         thumbnail_path=thumbnail if thumbnail is not None and thumbnail.is_file() else None,
         fps=float(video.fps) if video.fps else None,
         state=copy.deepcopy(adapter_state(target.post.publish_state)),
+        on_session_start=((lambda: reserve_start(target.post.id)) if platform == Platform.YOUTUBE else None),
     )
 
 
@@ -377,12 +427,18 @@ def _publish_error(
             return _needs_attention(
                 session,
                 target,
-                f"Unexpected error ({type(exc).__name__}) while uploading to "
-                f"{captions.platform_name(target.platform)}. The video may be live; check the account "
-                "before publishing again.",
+                Message(
+                    "publish.unexpected_upload",
+                    f"Unexpected error ({type(exc).__name__}) while uploading to "
+                    f"{captions.platform_name(target.platform)}. The video may be live; check the account "
+                    "before publishing again.",
+                    {"p0": type(exc).__name__, "p1": captions.platform_name(target.platform)},
+                ),
                 may_be_live=True,
             )
-        message = f"Unexpected error ({type(exc).__name__})."
+        message = Message(
+            "publish.unexpected", f"Unexpected error ({type(exc).__name__}).", {"p0": type(exc).__name__}
+        )
     return _retry_or_give_up(session, target, message, retry_after, now)
 
 
@@ -399,8 +455,12 @@ def _unknown_outcome(
         return _needs_attention(
             session,
             target,
-            f"{name} did not confirm the upload ({message}). The video may be live; check the "
-            "account before publishing again.",
+            Message(
+                "publish.unconfirmed",
+                f"{name} did not confirm the upload ({message}). The video may be live; check the "
+                "account before publishing again.",
+                {"p0": name, "p1": diagnostic(message)},
+            ),
             may_be_live=True,
         )
     post.status = PostStatus.PROCESSING
@@ -411,18 +471,39 @@ def _unknown_outcome(
         post.workspace_id,
         ActivityLevel.WARNING,
         "publish",
-        f"Uploading '{captions.video_label(target.video)}' to {_where(target)}: the answer was lost "
-        f"({message}); checking with {name} whether it went through.",
+        Message(
+            "publish.checking_lost_answer",
+            f"Uploading '{captions.video_label(target.video)}' to {_where(target)}: the answer was lost "
+            f"({message}); checking with {name} whether it went through.",
+            {
+                "p0": captions.video_label(target.video),
+                "p1": _where(target),
+                "p2": diagnostic(message),
+                "p3": name,
+            },
+        ),
         **_ids(target),
     )
     run_at = now + timedelta(seconds=UNKNOWN_OUTCOME_POLL_SECONDS)
     return _follow_up(session, post, kinds.POLL_POST, run_at, now, message)
 
 
+def _record_quota_exhaustion(target: _Target, exc: Exception) -> None:
+    from repeater.upload_quota import EXHAUSTED_CODES, mark_exhausted
+
+    if (
+        target.platform == Platform.YOUTUBE
+        and isinstance(exc, RateLimitedError)
+        and exc.code in EXHAUSTED_CODES
+    ):
+        mark_exhausted()
+
+
 def _rate_limited(session: Session, target: _Target, exc: RateLimitedError, now: datetime) -> StepResult:
     """A rate limit or quota error is not a failed attempt (the platform refused the request
     before doing anything). The post moves to a later, jittered time that keeps the account's min
     gap; attempts and the retry ladder stay untouched."""
+    _record_quota_exhaustion(target, exc)
     post = target.post
     message = _scrub(exc.message)
     engine = engine_state(post.publish_state)
@@ -431,8 +512,16 @@ def _rate_limited(session: Session, target: _Target, exc: RateLimitedError, now:
         return _needs_attention(
             session,
             target,
-            f"{message} ({captions.platform_name(target.platform)} kept limiting uploads for "
-            f"{RATE_LIMIT_GIVE_UP.days} days.)",
+            Message(
+                "publish.rate_giveup",
+                f"{message} ({captions.platform_name(target.platform)} kept limiting uploads for "
+                f"{RATE_LIMIT_GIVE_UP.days} days.)",
+                {
+                    "p0": diagnostic(message),
+                    "p1": captions.platform_name(target.platform),
+                    "p2": RATE_LIMIT_GIVE_UP.days,
+                },
+            ),
         )
     delay = max(
         float(RATE_LIMIT_MIN_DELAY_SECONDS), min(float(exc.retry_after or 0), MAX_RETRY_AFTER_SECONDS)
@@ -444,14 +533,27 @@ def _rate_limited(session: Session, target: _Target, exc: RateLimitedError, now:
     post.status = PostStatus.FAILED if (post.attempts or 0) > 0 else PostStatus.SCHEDULED
     post.scheduled_at = run_at
     wait = (run_at - now).total_seconds()
-    post.error = f"Rate limited: {message} Trying again in {_human(wait)}."[:2000]
+    post.error = Message(
+        "publish.rate_wait",
+        f"Rate limited: {message} Trying again in {_human(wait)}.",
+        {"p0": diagnostic(message), "p1": _human(wait)},
+    )[:2000]
     log_activity(
         session,
         post.workspace_id,
         ActivityLevel.WARNING,
         "publish",
-        f"Publishing '{captions.video_label(target.video)}' to {_where(target)} was rate limited; "
-        f"trying again in {_human(wait)} (this is not counted as a failed attempt): {message}",
+        Message(
+            "publish.rate_activity",
+            f"Publishing '{captions.video_label(target.video)}' to {_where(target)} was rate limited; "
+            f"trying again in {_human(wait)} (this is not counted as a failed attempt): {message}",
+            {
+                "p0": captions.video_label(target.video),
+                "p1": _where(target),
+                "p2": _human(wait),
+                "p3": diagnostic(message),
+            },
+        ),
         **_ids(target),
     )
     return _follow_up(session, post, kinds.PUBLISH_POST, run_at, now, message)
@@ -488,20 +590,43 @@ def _retry_or_give_up(
     post = target.post
     post.attempts = (post.attempts or 0) + 1
     if post.attempts > MAX_RETRIES:
-        return _needs_attention(session, target, f"{message} (gave up after {post.attempts} attempts)")
+        return _needs_attention(
+            session,
+            target,
+            Message(
+                "publish.giveup",
+                f"{message} (gave up after {post.attempts} attempts)",
+                {"p0": diagnostic(message), "p1": post.attempts},
+            ),
+        )
     backoff = RETRY_BACKOFF_MINUTES[post.attempts - 1] * 60
     delay = max(float(backoff), min(float(retry_after or 0), MAX_RETRY_AFTER_SECONDS))
     run_at = now + timedelta(seconds=delay)
     post.status = PostStatus.FAILED
     post.scheduled_at = run_at
-    post.error = f"Attempt {post.attempts} failed: {message} Retrying in {_human(delay)}."[:2000]
+    post.error = Message(
+        "publish.retry_error",
+        f"Attempt {post.attempts} failed: {message} Retrying in {_human(delay)}.",
+        {"p0": post.attempts, "p1": diagnostic(message), "p2": _human(delay)},
+    )[:2000]
     log_activity(
         session,
         post.workspace_id,
         ActivityLevel.WARNING,
         "publish",
-        f"Publishing '{captions.video_label(target.video)}' to {_where(target)} failed; "
-        f"retry {post.attempts} of {MAX_RETRIES} in {_human(delay)}: {message}",
+        Message(
+            "publish.retry_activity",
+            f"Publishing '{captions.video_label(target.video)}' to {_where(target)} failed; "
+            f"retry {post.attempts} of {MAX_RETRIES} in {_human(delay)}: {message}",
+            {
+                "p0": captions.video_label(target.video),
+                "p1": _where(target),
+                "p2": post.attempts,
+                "p3": MAX_RETRIES,
+                "p4": _human(delay),
+                "p5": diagnostic(message),
+            },
+        ),
         **_ids(target),
     )
     return _follow_up(session, post, kinds.PUBLISH_POST, run_at, now, message)
@@ -528,7 +653,9 @@ def poll_post(session: Session, post_id: int, *, now: datetime | None = None) ->
     account = session.get(ConnectedAccount, post.connected_account_id)
     video = session.get(Video, post.video_id)
     if account is None or video is None:
-        return _cancel(session, post, "The account or the video no longer exists.")
+        return _cancel(
+            session, post, Message("publish.target_gone", "The account or the video no longer exists.", {})
+        )
     if account.status == AccountStatus.DISABLED:
         # The upload may be live although nobody can check it any more: never CANCELED, which the
         # planner reads as "never reached the platform".
@@ -577,6 +704,7 @@ def _wait_while_halted(session: Session, target: _Target, now: datetime) -> Step
 
 
 def _poll_error(session: Session, target: _Target, exc: Exception, now: datetime) -> StepResult:
+    _record_quota_exhaustion(target, exc)
     post = target.post
     if isinstance(exc, AuthError):
         mark_needs_reconnect(session, target.account, exc.message)
@@ -596,14 +724,24 @@ def _poll_error(session: Session, target: _Target, exc: Exception, now: datetime
         message = _scrub(exc.message)
     else:
         _log_unexpected(exc, f"polling post {post.id}")
-        message = f"Unexpected error ({type(exc).__name__})."
+        message = Message(
+            "publish.unexpected", f"Unexpected error ({type(exc).__name__}).", {"p0": type(exc).__name__}
+        )
     if now - _processing_since(post, now) > POLL_ERROR_CEILING:
         return _needs_attention(
             session,
             target,
-            f"{captions.platform_name(target.platform)} could not be asked about the post for "
-            f"{_human(POLL_ERROR_CEILING.total_seconds())} ({message}). The video may be live; check "
-            "the account before publishing again.",
+            Message(
+                "publish.poll_giveup",
+                f"{captions.platform_name(target.platform)} could not be asked about the post for "
+                f"{_human(POLL_ERROR_CEILING.total_seconds())} ({message}). The video may be live; check "
+                "the account before publishing again.",
+                {
+                    "p0": captions.platform_name(target.platform),
+                    "p1": _human(POLL_ERROR_CEILING.total_seconds()),
+                    "p2": diagnostic(message),
+                },
+            ),
             may_be_live=True,
         )
     retry_after = exc.retry_after if isinstance(exc, RetryableError) else None
@@ -612,7 +750,11 @@ def _poll_error(session: Session, target: _Target, exc: Exception, now: datetime
         # An uploaded video stays PROCESSING and is checked again after the limit; the 2-hour
         # clock only runs on answers, not on refusals to answer.
         delay += _jitter_seconds(post.id, POLL_JITTER_SECONDS)
-    post.error = f"Checking the upload failed: {message} Checking again in {_human(delay)}."[:2000]
+    post.error = Message(
+        "publish.poll_wait",
+        f"Checking the upload failed: {message} Checking again in {_human(delay)}.",
+        {"p0": diagnostic(message), "p1": _human(delay)},
+    )[:2000]
     run_at = now + timedelta(seconds=delay)
     return _follow_up(session, post, kinds.POLL_POST, run_at, now, message)
 
@@ -652,8 +794,12 @@ def _apply_result(
             post.workspace_id,
             ActivityLevel.INFO,
             "publish",
-            f"Published '{captions.video_label(target.video)}' to {_where(target)}."
-            + (f" {note}" if note else ""),
+            Message(
+                "publish.published",
+                f"Published '{captions.video_label(target.video)}' to {_where(target)}."
+                + (f" {note}" if note else ""),
+                {"p0": captions.video_label(target.video), "p1": _where(target), "p2": note},
+            ),
             permalink=post.permalink,
             **_ids(target),
         )
@@ -674,8 +820,12 @@ def _apply_result(
                 return _needs_attention(
                     session,
                     target,
-                    f"{captions.platform_name(target.platform)} did not confirm the post within 2 hours "
-                    "of the upload. Check the account before publishing again.",
+                    Message(
+                        "publish.poll_timeout",
+                        f"{captions.platform_name(target.platform)} did not confirm the post within 2 hours "
+                        "of the upload. Check the account before publishing again.",
+                        {"p0": captions.platform_name(target.platform)},
+                    ),
                     may_be_live=True,
                 )
         delay = max(int(result.poll_after_seconds or 0), MIN_POLL_DELAY_SECONDS)
@@ -691,8 +841,12 @@ def _apply_result(
     return _needs_attention(
         session,
         target,
-        f"{captions.platform_name(target.platform)} returned an unexpected answer; check the account "
-        "before publishing again.",
+        Message(
+            "publish.bad_answer",
+            f"{captions.platform_name(target.platform)} returned an unexpected answer; check the account "
+            "before publishing again.",
+            {"p0": captions.platform_name(target.platform)},
+        ),
         may_be_live=True,
     )
 
@@ -708,11 +862,16 @@ def _needs_attention(
     """End the post as needs-attention. `may_be_live` records that the video may already be on
     the platform (the planner then counts it and never re-uses its cycle)."""
     post = target.post
+    message = diagnostic(message)
     post.status = PostStatus.NEEDS_ATTENTION
     post.error = message[:2000]
     if may_be_live:
         mark_may_be_live(post)
-    text = f"Could not publish '{captions.video_label(target.video)}' to {_where(target)}: {message}"
+    text = Message(
+        "publish.failed",
+        f"Could not publish '{captions.video_label(target.video)}' to {_where(target)}: {message}",
+        {"p0": captions.video_label(target.video), "p1": _where(target), "p2": diagnostic(message)},
+    )
     log_activity(session, post.workspace_id, ActivityLevel.ERROR, "publish", text, **_ids(target))
     session.commit()
     if notify:
@@ -723,6 +882,7 @@ def _needs_attention(
 
 
 def _cancel(session: Session, post: ScheduledPost, reason: str) -> StepResult:
+    reason = diagnostic(reason)
     post.status = PostStatus.CANCELED
     post.error = reason[:2000]
     log_activity(
@@ -730,7 +890,11 @@ def _cancel(session: Session, post: ScheduledPost, reason: str) -> StepResult:
         post.workspace_id,
         ActivityLevel.INFO,
         "publish",
-        f"Canceled post #{post.id}: {reason}",
+        Message(
+            "publish.canceled",
+            f"Canceled post #{post.id}: {reason}",
+            {"p0": post.id, "p1": diagnostic(reason)},
+        ),
         post_id=post.id,
         video_id=post.video_id,
         account_id=post.connected_account_id,
@@ -798,13 +962,17 @@ def _publish_note(platform: Platform, message: str | None) -> str:
     opener = f"Published on {captions.platform_name(platform)}."
     if note.startswith(opener):
         note = note[len(opener) :].strip()
-    return note
+    return diagnostic(note, "publish.note") if note else ""
 
 
 def _reconnect_message(account: ConnectedAccount) -> str:
-    return (
-        f"Reconnect the {captions.platform_name(account.platform)} account '{account.display_name}', "
-        "then publish again."
+    return Message(
+        "account.reconnect_action",
+        (
+            f"Reconnect the {captions.platform_name(account.platform)} account '{account.display_name}', "
+            "then publish again."
+        ),
+        {"platform": captions.platform_name(account.platform), "name": account.display_name},
     )
 
 
@@ -824,10 +992,11 @@ def _ids(target: _Target) -> dict[str, Any]:
 def _human(seconds: float) -> str:
     minutes = round(seconds / 60)
     if minutes < 1:
-        return f"{int(seconds)} seconds"
+        return Message("duration.seconds", f"{int(seconds)} seconds", {"n": int(seconds)})
     if minutes < 120:
-        return f"{minutes} minute{'s' if minutes != 1 else ''}"
-    return f"{minutes / 60:g} hours" if minutes % 60 == 0 else f"{minutes / 60:.1f} hours"
+        return Message("duration.minutes", f"{minutes} minute{'s' if minutes != 1 else ''}", {"n": minutes})
+    value = f"{minutes / 60:g}" if minutes % 60 == 0 else f"{minutes / 60:.1f}"
+    return Message("duration.hours", f"{value} hours", {"n": value})
 
 
 def _log_unexpected(exc: BaseException, context: str) -> None:

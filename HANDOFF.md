@@ -15,10 +15,10 @@ Written 2026-10-14 from a long Claude Code session. Read this first, then `PLAN.
 | Item | State |
 |---|---|
 | Code | Phase 0 implemented: about 19.5k lines of source and 24k lines of tests |
-| Tests | Follow-up Linux run: **1673 passed, 8 skipped** (Docker CLI checks unavailable inside the disposable test container); `ruff check`, `ruff format --check`, `bash -n` and `shellcheck -x` clean. Alembic upgrade/check, downgrade to base, then upgrade/check again all clean. |
+| Tests | Follow-up Linux run: **1717 passed, 8 skipped** (Docker CLI checks unavailable inside the disposable test container); `ruff check`, `ruff format --check`, `bash -n` and `shellcheck -x` clean. Alembic upgrade/check, downgrade to base, then upgrade/check again all clean. |
 | Docker | Image builds; compose stack smoke-tested (db, migrate, web, worker); `deploy/selftest.sh` passes as a non-root user |
-| CI | GitHub Actions `ci.yml`: both `8423949` (non-root selftest fix) and `d9e961d` passed. The five-medium-issue follow-up below adds regression coverage; check the run on the current commit. |
-| Review | 86 confirmed findings fixed by six owners and re-verified by independent skeptics: **81 fully fixed, 5 partial**, plus 18 new minor issues the re-verification found (section 7). These are the original review counts; the follow-up in section 7 resolves the five medium issues and the two Meta-deletion partial findings. No critical finding remains |
+| CI | GitHub Actions `ci.yml` verifies lint/tests and the Docker image/deploy self-test. The medium follow-up `2d63977` passed; verify the exact final commit of the partial/low follow-up in Actions before deploying. |
+| Review | 86 confirmed findings fixed by six owners and re-verified by independent skeptics: **81 fully fixed, 5 partial** at the original independent review snapshot. The follow-ups in section 7 resolve the remaining original partial findings and the subsequently reported medium/low issues; regression coverage verifies the changes. No independent re-review is claimed |
 | Deployed | **Nothing is deployed.** The sandbox that built this had no SSH key, no server address and no credentials |
 
 ## 3. Blocked on the user (do these first, they cannot be done from the repo)
@@ -78,11 +78,11 @@ Sandbox-only notes (ignore if your environment differs): Docker had to be starte
 - **yt-dlp is isolated.** Sources of kind `ytdlp` never use OAuth tokens or the official listers, need an explicit acknowledgement (`unofficial_ack_at`), and are opt-in. Every platform's terms forbid unofficial downloading even for your own content; this is a business risk the operator accepts. The product is framed and built around "your own original library" (uploads, Drive, official Instagram/Facebook import).
 - **Delivery to platforms by URL:** the encoded MP4 is served at `/m/<video_id>/<expires>/<hmac>.mp4` (HMAC-signed, expiring, no session, GET/HEAD/Range, no redirects, `noindex`). Instagram and Facebook fetch it; TikTok uses `PULL_FROM_URL` and falls back to chunked `FILE_UPLOAD` only on `url_ownership_unverified`. The TikTok app must verify the URL prefix `https://rotator.magic-lap.com/m/`.
 - **Tokens** are envelope-encrypted (per-value data key wrapped by a key ring); never log tokens, upload URLs, session URIs or `publish_state`. `rotate-keys` re-wraps stored values.
-- **Retention contract** (implemented in `jobs/maintenance.py` and `engine/jobs.py`, described in the privacy policy, keep them in sync): tokens deleted on disconnect; account record, post history and log entries for a disconnected account deleted after 5 days (`DISCONNECTED_RETENTION`, inside the 7-day promise in the privacy policy); YouTube-derived identifiers refreshed or scrubbed within 30 days (YouTube Developer Policies III.E.4.c); Meta data-deletion requests delete matching accounts, imported videos/files, posts and log entries; originals purged after `REPEATER_ORIGINAL_RETENTION_DAYS`.
+- **Retention contract** (implemented in `jobs/maintenance.py` and `engine/jobs.py`, described in the privacy policy, keep them in sync): tokens deleted on disconnect; account record, post history and owned log entries for a disconnected account deleted after 5 days (`DISCONNECTED_RETENTION`, inside the 7-day promise in the privacy policy); YouTube-derived identifiers refreshed or scrubbed within 30 days (YouTube Developer Policies III.E.4.c); Meta data-deletion requests delete matching accounts, imported videos/files, posts and log entries; originals purged after `REPEATER_ORIGINAL_RETENTION_DAYS`.
 - **Duplicates:** `(platform, external_id)` unique, then SHA-256, then a display-normalised perceptual hash plus audio check. A DUPLICATE video makes its original skip that origin platform/account and cancels already scheduled posts there.
 - **Encode profile** (`media/encode.py`): 1080x1920, 30 fps, H.264 High, AAC 48 kHz stereo (bitrate from `AUDIO_KBPS`), faststart, no edit lists, HDR tone-mapped to SDR BT.709, silent audio added if missing, timeout scaled by duration (`encode_timeout_*` settings), preset `medium`.
 - **Worker:** 2 threads by default; jobs hold a lease (`job_lease_refresh_seconds`); stale jobs are requeued; due publish/poll jobs are claimed ahead of import backfills; on SIGTERM in-flight jobs get `worker_shutdown_grace_s` (compose grace = that + 60 s).
-- **Internationalisation:** Arabic first (RTL), English second; every UI string goes through `repeater/web/i18n.py`. Rule problems are machine codes with `rules.PROBLEM_MESSAGES` as the English fallback.
+- **Internationalisation:** Arabic first (RTL), English second; UI strings go through `repeater/web/i18n.py`; structured domain messages use `repeater/messages.py` and `message_catalog.py`. Rule problems are machine codes with `rules.PROBLEM_MESSAGES` as the English fallback.
 
 ## 7. Follow-up fixes and known open issues ( full trace in `docs/review/2026-10-14-findings.md`)
 
@@ -97,21 +97,24 @@ Each needs a regression test that fails on the current code. The reviewers' repr
 
 Regression tests are in `tests/test_worker.py`, `tests/test_engine_publish.py`, `tests/test_deploy.py`, and `tests/test_media.py`. See the follow-up section of the review trace for validation.
 
-**Partially fixed:**
-- `api-tiktok-youtube-5`: no exact per-day ledger of YouTube `videos.insert` session starts and no project-wide circuit breaker; attempts-weighting under-counts some cases. The planner uses `youtube_daily_upload_quota` (default 100, budget 90 percent).
-- `ux-compliance-8`: activity entries and error strings written by the engine, publisher, importer, platforms and notify carry no message key and show in English in the Arabic UI (also `sources/manual.py` "not a supported video file"). Needs message keys end to end.
+**Remaining partial and low issues resolved (2026-10-15):**
+- YouTube insert accounting now records a durable reservation before every HTTP session-start request, including adapter retries and expired-session restarts. Pacific-day rows serialize concurrent starts across all workspaces and hold a project-wide exhaustion circuit until reset. Post retry/reset/deletion cannot refund spent quota; the planner combines the ledger with pending reservations. A crash immediately before HTTP can conservatively consume one reservation. There is no production database yet, so the initial migration includes the quota tables and nullable error-message metadata.
+- Domain activities and errors carry stable message keys/parameters. Post, video, source and account error metadata survives database reloads, nested messages translate, and every dashboard error surface uses the viewer's language. Actions/manual uploads raise keyed UserError refusals; the old regex is only a compatibility fallback. Telegram follows the workspace locale while preserving the existing default of withholding private details. Legacy unkeyed records retain their original diagnostic; English diagnostics remain available in English.
+- TikTok pull-init 5xx is an unknown outcome and cannot trigger another init automatically. Facebook polling is held while publishing is halted because it can send a deferred finish request.
+- Account deletion uses structured ownership, preserving unrelated similarly named accounts' logs. Legacy exact-name mentions are redacted; channel refresh also redacts nested translation parameters.
+- Disabled incomplete rules no longer appear as overview attention problems. Warning-banner/flash links meet AA in both themes; optional ads_read is excluded from required-permission errors.
+- Archived unencoded originals expire. Maintenance fails dead/orphaned import pipelines and releases their dependent duplicates. The source-disable regression now actually disables during the second listing call.
+- --no-build refuses missing image tags before migration; first deploys do not advertise an absent rollback image. Deploy validates observed Docker gateway/Caddy/bind addresses against the web container's real FORWARDED_ALLOW_IPS and fails explicitly on mismatch, including custom IPv4/IPv6 ranges.
 
-**Low:**
-- TikTok `PULL_FROM_URL` init answered with HTTP 5xx is retried with a second init and could post twice (`platforms/tiktok.py`).
-- Facebook `poll()` can send the "finish" request while the workspace is paused or the rule disabled (`platforms/facebook.py`, `engine/publisher.py` `PUBLISH_ON_POLL`).
-- `delete_account_records` matches account names by substring and can delete other accounts' activity rows (`accounts.py`).
-- Overview "needs attention" lists every OFF rule with incomplete settings (`web/routes/overview.py`); dark-mode link contrast in warning banners is below AA (`web/static/app.css`); the "no accounts" error mentions `ads_read` as declined (`platforms/meta.py`).
-- Originals of ARCHIVED videos that never got an encode are never purged (`media/retention.py`); a PROCESSING original whose job died absorbs later identical uploads as DUPLICATE with nothing to recover them (`sources/importer.py`); `test_source_disabled_during_a_poll_creates_no_videos` does not exercise the in-poll disable path.
-- `deploy.sh --no-build` silently builds the current source under a missing tag and prints "Roll back with" even when `:previous` does not exist; the trusted-proxy list is never checked against the real proxy address, so a mismatch silently collapses all clients into one login-throttle bucket (`deploy/docker-compose.yml`).
+Regression coverage includes tests/test_followup_regressions.py, tests/test_upload_quota.py,
+tests/test_domain_messages.py and the existing platform, engine, source, deployment and web suites.
+A local-only preview is available at http://localhost:8765 on this Mac, with fictional accounts,
+disabled rules, a paused workspace and no worker. It is not a production deployment. Preview files
+and generated media live outside the repository in /Users/mac/dev/repeter-preview.
 
 ## 8. Backlog, in priority order
 
-1. Close the remaining partial and low items in section 7; the five medium items above are resolved.
+1. The known review partial/low follow-up in section 7 is complete; check the final commit CI before deployment.
 2. Deploy phase 0 once the user supplies section 3; run `deploy/selftest.sh` and `server-inspect` first; verify `https://rotator.magic-lap.com/healthz`; create the admin; connect Magic Lap's accounts (Meta Pages and Instagram in Development mode, Google in Testing, TikTok sandbox/private).
 3. Soak for 30 days: no manual interventions, failure rate under 5 percent (phase 0 exit criterion in `PLAN.md`). Add uptime monitoring (Uptime Kuma or healthchecks.io on `/healthz`) and off-site backups (`RCLONE_REMOTE`).
 4. Phase 1, **not started**: self-service sign-up with email verification and password reset, workspace invites and roles, plan limits enforcement, onboarding, landing page (Arabic/English), billing (Paymob for EGP, Paddle as merchant of record for USD; Stripe does not support Egyptian companies), support email.

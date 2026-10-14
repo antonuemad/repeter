@@ -18,7 +18,7 @@
     <h2>{{ t('library.details') }}</h2>
     <dl class="details">
       <dt>{{ t('library.status') }}</dt><dd>{{ m.badge('video_status', video.status) }}</dd>
-      {% if video.error %}<dt>{{ t('library.error') }}</dt><dd dir="auto">{{ video.error }}</dd>{% endif %}
+      {% if video.error %}<dt>{{ t('library.error') }}</dt><dd dir="auto">{{ t.error(video.error, video.error_info) }}</dd>{% endif %}
       {% if video.duplicate_of_id %}<dt>{{ t('library.duplicate_of') }}</dt><dd><a href="/library/{{ video.duplicate_of_id }}">#{{ video.duplicate_of_id }}</a></dd>{% endif %}
       <dt>{{ t('library.source') }}</dt>
       <dd>{% if video.source_platform %}{{ m.platform(video.source_platform) }}{% else %}{{ t('library.manual') }}{% endif %}
@@ -124,7 +124,7 @@
         <tr>
           <td>{{ fmt_dt(p.published_at or p.scheduled_at, zone) }}{% if p.cycle %} <span class="muted">({{ t('library.cycle', cycle=p.cycle) }})</span>{% endif %}</td>
           <td>{{ m.platform(p.platform) }} <span dir="auto">{{ p.connected_account.display_name }}</span></td>
-          <td>{{ m.badge('post_status', p.status) }}{% if p.error %}<div>{{ m.error_text(p.error, 300) }}</div>{% endif %}</td>
+          <td>{{ m.badge('post_status', p.status) }}{% if p.error %}<div>{{ m.error_text(p.error, 300, p.error_info) }}</div>{% endif %}</td>
           <td>{% if p.permalink and p.permalink.startswith('https://') %}<a href="{{ p.permalink }}" rel="noopener noreferrer" target="_blank">{{ t('schedule.open') }}</a>{% else %}—{% endif %}</td>
         </tr>
         {% endfor %}

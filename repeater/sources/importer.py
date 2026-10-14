@@ -62,6 +62,7 @@ from repeater.media.fingerprint import (
     unpack,
 )
 from repeater.media.probe import MediaToolError, ProbeResult, probe
+from repeater.messages import Message, UserError, diagnostic
 from repeater.models import (
     ActivityLevel,
     ConnectedAccount,
@@ -237,9 +238,11 @@ def enqueue_due_polls(session: Session, now: datetime | None = None) -> int:
 
 
 def _block_unacknowledged(session: Session, source: Source) -> PollOutcome:
-    message = (
+    message = Message(
+        "source.consent_needed",
         "Unofficial import (yt-dlp) is off for this source until you confirm you own the content "
-        "and accept the risk. " + FALLBACK_HINT
+        "and accept the risk. " + FALLBACK_HINT,
+        {},
     )
     if source.last_error != message:
         log_activity(
@@ -247,7 +250,11 @@ def _block_unacknowledged(session: Session, source: Source) -> PollOutcome:
             source.workspace_id,
             ActivityLevel.WARNING,
             "source",
-            f"Source '{_source_label(source)}' was not checked: {message}",
+            Message(
+                "source.blocked",
+                f"Source '{_source_label(source)}' was not checked: {message}",
+                {"p0": _source_label(source), "p1": diagnostic(message)},
+            ),
             source_id=source.id,
         )
     source.last_error = message
@@ -528,6 +535,7 @@ def _failure_text(session: Session, source: Source, exc: Exception) -> str:
 
 
 def _record_failure(session: Session, source: Source, message: str) -> None:
+    message = diagnostic(message, "source.failure")
     source.last_error = message[:2000]
     source.consecutive_failures = (source.consecutive_failures or 0) + 1
     label = _source_label(source)
@@ -536,9 +544,11 @@ def _record_failure(session: Session, source: Source, message: str) -> None:
         hint = (
             f" {FALLBACK_HINT}" if source.kind == SourceKind.YTDLP and "Google Drive" not in message else ""
         )
-        text = (
+        text = Message(
+            "source.paused",
             f"Source '{label}' was paused after {source.consecutive_failures} failed checks in a row. "
-            f"Last error: {message}{hint}"
+            f"Last error: {message}{hint}",
+            {"p0": label, "p1": source.consecutive_failures, "p2": diagnostic(message), "p3": hint},
         )
         log_activity(session, source.workspace_id, ActivityLevel.ERROR, "source", text, source_id=source.id)
         _notify(text, source.workspace_id, "error", "source_failing")
@@ -548,7 +558,11 @@ def _record_failure(session: Session, source: Source, message: str) -> None:
             source.workspace_id,
             ActivityLevel.WARNING,
             "source",
-            f"Checking source '{label}' for new videos failed: {message}",
+            Message(
+                "source.check_failed",
+                f"Checking source '{label}' for new videos failed: {message}",
+                {"p0": label, "p1": diagnostic(message)},
+            ),
             source_id=source.id,
         )
 
@@ -705,7 +719,15 @@ def process_video(session: Session, video_id: int, payload: dict[str, Any] | Non
         return
     original = _original_file(video)
     if original is None:
-        _fail_video(session, video, "The original file is missing. Import or upload the video again.")
+        _fail_video(
+            session,
+            video,
+            Message(
+                "import.original_missing",
+                "The original file is missing. Import or upload the video again.",
+                {},
+            ),
+        )
         session.commit()
         return
     if not _ENCODE_SLOTS.acquire(blocking=False):
@@ -763,7 +785,11 @@ def _process(session: Session, video: Video, original: Path, payload: dict[str, 
         _retry_or_fail(session, video, str(exc).split(":")[0] + ".", kinds.PROCESS_VIDEO, payload)
     except EncodeError as exc:
         # ffmpeg ran and rejected the input; the same file will fail the same way again.
-        _fail_video(session, video, f"Encoding failed: {exc}")
+        _fail_video(
+            session,
+            video,
+            Message("import.encode_failed", f"Encoding failed: {exc}", {"p0": diagnostic(exc)}),
+        )
         session.commit()
     except DiskFullError:
         session.rollback()
@@ -883,12 +909,26 @@ def _encode_and_finish(
     )
     if info.is_hdr or info.is_wide_gamut_sdr:
         note += " The HDR picture was converted to standard colours."
+    note = Message(
+        "message.join",
+        note,
+        {
+            "parts": [
+                *([Message("import.landscape", "")] if info.is_landscape else []),
+                *([Message("import.hdr", "")] if info.is_hdr or info.is_wide_gamut_sdr else []),
+            ]
+        },
+    )
     log_activity(
         session,
         video.workspace_id,
         ActivityLevel.INFO,
         "import",
-        f"Video '{_video_label(video)}' is ready ({_mmss(encoded.duration_s)}).{note}",
+        Message(
+            "import.ready",
+            f"Video '{_video_label(video)}' is ready ({_mmss(encoded.duration_s)}).{note}",
+            {"p0": _video_label(video), "p1": _mmss(encoded.duration_s), "p2": note},
+        ),
         video_id=video.id,
         source_id=video.source_id,
         source_width=info.width,
@@ -907,8 +947,12 @@ def _mark_duplicate(session: Session, video: Video, original: Video) -> None:
         video.workspace_id,
         ActivityLevel.INFO,
         "import",
-        f"Video '{_video_label(video)}' is the same as '{_video_label(original)}' already in the library; "
-        "it will not be published twice.",
+        Message(
+            "import.duplicate",
+            f"Video '{_video_label(video)}' is the same as '{_video_label(original)}' already in the library; "
+            "it will not be published twice.",
+            {"p0": _video_label(video), "p1": _video_label(original)},
+        ),
         video_id=video.id,
         duplicate_of_id=original.id,
         source_id=video.source_id,
@@ -944,16 +988,16 @@ def _duration_problem(duration_s: float) -> str | None:
 def retry_failed_video(session: Session, video: Video, *, actor: str = "user") -> None:
     """Put a FAILED video back in the pipeline (for a dashboard "retry" button)."""
     if video.status != VideoStatus.FAILED:
-        raise ValueError("Only failed videos can be retried.")
+        raise UserError("err.not_failed", "Only failed videos can be retried.")
     if not _requeue(session, video):
-        raise ValueError("The original file is gone; upload the video again.")
+        raise UserError("err.original_gone", "The original file is gone; upload the video again.")
     video.error = None
     log_activity(
         session,
         video.workspace_id,
         ActivityLevel.INFO,
         "import",
-        f"Retrying video '{_video_label(video)}'",
+        Message("import.retry", f"Retrying video '{_video_label(video)}'", {"p0": _video_label(video)}),
         actor=actor,
         video_id=video.id,
     )
@@ -964,18 +1008,22 @@ def release_duplicate(session: Session, video: Video, *, actor: str = "user") ->
     is processed on its own, and the duplicate check is skipped for it from now on. The caller
     commits."""
     if video.status != VideoStatus.DUPLICATE:
-        raise ValueError("Only videos marked as duplicates can be released.")
+        raise UserError("err.not_duplicate", "Only videos marked as duplicates can be released.")
     video.overrides = {**(video.overrides or {}), "skip_duplicate_check": True}
     video.duplicate_of_id = None
     if not _requeue(session, video):
-        raise ValueError("The original file is gone; upload the video again.")
+        raise UserError("err.original_gone", "The original file is gone; upload the video again.")
     video.error = None
     log_activity(
         session,
         video.workspace_id,
         ActivityLevel.INFO,
         "import",
-        f"Video '{_video_label(video)}' was released from its duplicate mark; it is being processed.",
+        Message(
+            "import.released",
+            f"Video '{_video_label(video)}' was released from its duplicate mark; it is being processed.",
+            {"p0": _video_label(video)},
+        ),
         actor=actor,
         video_id=video.id,
     )
@@ -1009,17 +1057,28 @@ def _retry_or_fail(
     if _lock_status(session, video.id) not in _ACTIVE:
         session.commit()  # the video was archived (or finished) meanwhile: nothing to retry
         return
+    message = diagnostic(message, "import.problem")
     job = _current_job(session, kind, video.id)
     tries = _previous_tries(payload, video) + 1
     max_tries = job.max_attempts if job is not None else DEFAULT_MAX_TRIES.get(kind, 3)
     if tries >= max_tries:
-        _fail_video(session, video, f"{message} (gave up after {tries} attempts)")
+        _fail_video(
+            session,
+            video,
+            Message(
+                "import.giveup",
+                f"{message} (gave up after {tries} attempts)",
+                {"p0": diagnostic(message), "p1": tries},
+            ),
+        )
         session.commit()
         return
     delay = max(default_backoff(tries).total_seconds(), float(retry_after or 0))
-    video.error = f"Attempt {tries} of {max_tries} failed: {message} Retrying in about {_human(delay)}."[
-        :2000
-    ]
+    video.error = Message(
+        "import.retry_error",
+        f"Attempt {tries} of {max_tries} failed: {message} Retrying in about {_human(delay)}.",
+        {"p0": tries, "p1": max_tries, "p2": diagnostic(message), "p3": _human(delay)},
+    )[:2000]
     if job is not None:
         job.payload = {**(job.payload or {}), "retries": tries}
     session.commit()
@@ -1050,6 +1109,7 @@ def _fail_video(session: Session, video: Video, message: str) -> bool:
     if _lock_status(session, video.id) not in _ACTIVE:
         log.info("video %s is no longer being imported; not marking it failed", video.id)
         return False
+    message = diagnostic(message, "import.problem")
     video.status = VideoStatus.FAILED
     video.error = message[:2000]
     log_activity(
@@ -1057,7 +1117,11 @@ def _fail_video(session: Session, video: Video, message: str) -> bool:
         video.workspace_id,
         ActivityLevel.ERROR,
         "import",
-        f"Video '{_video_label(video)}' could not be imported: {message}",
+        Message(
+            "import.failed",
+            f"Video '{_video_label(video)}' could not be imported: {message}",
+            {"title": _video_label(video), "detail": diagnostic(message)},
+        ),
         video_id=video.id,
         source_id=video.source_id,
     )
@@ -1084,15 +1148,23 @@ def _release_duplicates_of(session: Session, failed: Video) -> None:
                 dependent.workspace_id,
                 ActivityLevel.INFO,
                 "import",
-                f"Video '{_video_label(dependent)}' was taken for a copy of '{_video_label(failed)}', which "
-                "failed, so it is being processed on its own.",
+                Message(
+                    "import.duplicate_recovered",
+                    f"Video '{_video_label(dependent)}' was taken for a copy of '{_video_label(failed)}', which "
+                    "failed, so it is being processed on its own.",
+                    {"p0": _video_label(dependent), "p1": _video_label(failed)},
+                ),
                 video_id=dependent.id,
                 duplicate_of_id=failed.id,
                 source_id=dependent.source_id,
             )
         else:
             dependent.status = VideoStatus.FAILED
-            dependent.error = "The video it duplicated failed and its own file is gone; upload it again."
+            dependent.error = Message(
+                "import.duplicate_original_lost",
+                "The video it duplicated failed and its own file is gone; upload it again.",
+                {},
+            )
 
 
 def _remove_partial_files(video: Video) -> None:
@@ -1123,10 +1195,18 @@ def _require_free_space(session: Session, video: Video, expected_bytes: int | No
 
 
 def _wait_for_disk(session: Session, video: Video) -> NoReturn:
-    message = "Waiting for free disk space on the server; this video continues automatically."
+    message = Message(
+        "import.disk_wait",
+        "Waiting for free disk space on the server; this video continues automatically.",
+        {},
+    )
     if video.error != message:
         video.error = message
-        text = f"The server's disk is nearly full, so video '{_video_label(video)}' is waiting."
+        text = Message(
+            "import.disk_full",
+            f"The server's disk is nearly full, so video '{_video_label(video)}' is waiting.",
+            {"p0": _video_label(video)},
+        )
         log_activity(
             session,
             video.workspace_id,
@@ -1178,7 +1258,7 @@ def _mmss(seconds: float) -> str:
 
 def _human(seconds: float) -> str:
     if seconds < 90:
-        return f"{int(seconds)} s"
+        return Message("duration.seconds", f"{int(seconds)} s", {"n": int(seconds)})
     if seconds < 5400:
-        return f"{int(round(seconds / 60))} min"
-    return f"{seconds / 3600:.1f} h"
+        return Message("duration.minutes", f"{int(round(seconds / 60))} min", {"n": int(round(seconds / 60))})
+    return Message("duration.hours", f"{seconds / 3600:.1f} h", {"n": f"{seconds / 3600:.1f}"})

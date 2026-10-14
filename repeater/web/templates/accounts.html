@@ -33,7 +33,7 @@
           {% if handle %}<span class="muted" dir="ltr">{{ handle }}</span>{% endif %}
         </div>
         <div>{{ m.badge('account_status', a.status) }}
-          {% if a.last_error and a.status != 'active' %}{{ m.error_text(a.last_error, 300) }}{% endif %}
+          {% if a.last_error and a.status != 'active' %}{{ m.error_text(a.last_error, 300, a.last_error_info) }}{% endif %}
         </div>
       </div>
       <div class="actions">

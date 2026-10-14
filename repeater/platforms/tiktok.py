@@ -34,6 +34,7 @@ from urllib.parse import urlencode
 import httpx
 
 from repeater.config import get_settings
+from repeater.messages import Message
 from repeater.models import Platform
 from repeater.platforms.base import (
     LIMITS,
@@ -742,6 +743,13 @@ def _start_upload(
                 code="init_outcome_unknown",
             ) from exc
         raise
+    except RetryableError as exc:
+        if pull and exc.status is not None and 500 <= exc.status < 600:
+            raise UnknownOutcomeError(
+                f"TikTok did not confirm the pull request while {action}; it may already be posting the video.",
+                code="init_outcome_unknown",
+            ) from exc
+        raise
     publish_id = data.get("publish_id")
     upload_url = data.get("upload_url")
     if pull:
@@ -986,7 +994,10 @@ class TikTokPublisher:
             return PublishResult(
                 outcome=PublishOutcome.PUBLISHED,
                 state=dict(state),
-                message="The draft is waiting in the TikTok inbox: open the TikTok app to finish posting it.",
+                message=Message(
+                    "tiktok.inbox",
+                    "The draft is waiting in the TikTok inbox: open the TikTok app to finish posting it.",
+                ),
             )
         if status == "FAILED":
             raise _failure_error(str(data.get("fail_reason") or ""))

@@ -213,7 +213,11 @@ def _incomplete_rules(db: Session, ws_id: int) -> list[tuple[RotationRule, list[
         select(RotationRule)
         .join(ConnectedAccount, ConnectedAccount.id == RotationRule.connected_account_id)
         .options(selectinload(RotationRule.connected_account))
-        .where(RotationRule.workspace_id == ws_id, ConnectedAccount.status == AccountStatus.ACTIVE)
+        .where(
+            RotationRule.workspace_id == ws_id,
+            RotationRule.enabled.is_(True),
+            ConnectedAccount.status == AccountStatus.ACTIVE,
+        )
         .order_by(RotationRule.id)
     ).scalars()
     return [(r, problems) for r in rules if (problems := rule_problems(r))]

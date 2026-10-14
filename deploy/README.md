@@ -46,6 +46,9 @@ After a restore, use the worker start command printed by `backup.sh`: it carries
 Pre-deploy dumps expire after 30 days; retries never prune them by count or overwrite a dump
 taken in the same second.
 
+`--no-build` requires the selected image tag to exist locally and refuses a missing tag before
+backup or migration. The completion message offers rollback only when `:previous` exists.
+
 ## Reverse proxy
 
 `bootstrap.sh` checks ports 80/443 on the first run and again on every later run (`ss -ltnp`,
@@ -65,6 +68,11 @@ for nginx/apache/caddy/traefik/lsws/openresty/haproxy, `/data/coolify`):
 
 The app believes `X-Forwarded-For`/`-Proto` only from loopback and Docker's private ranges
 (`REPEATER_FORWARDED_ALLOW_IPS`, passed to uvicorn as `FORWARDED_ALLOW_IPS`), never from `*`.
+After web health checks, deploy inspects the actual Docker gateways and Caddy addresses (IPv4
+and IPv6), plus the configured bind address, and runs `python -m repeater.cli check-proxy` in
+the web container. An uncovered source address fails deployment explicitly. Add only the
+observed proxy address or its intended subnet to `REPEATER_FORWARDED_ALLOW_IPS` and redeploy;
+the script never broadens trust automatically.
 
 ## CI/CD (`.github/workflows/`)
 

@@ -939,3 +939,34 @@ def test_possibly_live_sql_matches_reached_platform(db, ws, make_account, rule_f
     start, end = noon - timedelta(days=1), noon + timedelta(days=1)
     days = scheduler._youtube_days(db, start, end)
     assert sum(days.values()) == sum(expected for *_, expected in cases.values())
+
+
+def test_actual_youtube_starts_survive_attempt_reset_and_consume_the_planner_budget(
+    db, ws, make_account, rule_for, video, monkeypatch
+):
+    from repeater import upload_quota
+    from repeater.models import YouTubeUploadStart
+
+    monkeypatch.setattr(get_settings(), "youtube_daily_upload_quota", 2)
+    acc = make_account("youtube")
+    rule_for(acc)
+    v = video()
+    post = add_post(db, ws, v, acc, status=PostStatus.NEEDS_ATTENTION, at=DEC1_0800)
+    db.commit()
+    upload_quota.reserve_start(post.id, now=DEC1_0800)
+    post.attempts = 0
+    post.status = PostStatus.CANCELED
+    db.commit()
+    days = scheduler._youtube_days(db, DEC1_0800 - timedelta(days=1), DEC1_0800 + timedelta(days=1))
+    assert days[DEC1_0800.astimezone(scheduler.YOUTUBE_QUOTA_TZ).date()] == 1
+    # Tenant deletion removes the link, not the fact that the project spent a request.
+    db.delete(post)
+    db.commit()
+    db.expire_all()
+    assert db.scalars(select(YouTubeUploadStart)).one().post_id is None
+    assert (
+        sum(
+            scheduler._youtube_days(db, DEC1_0800 - timedelta(days=1), DEC1_0800 + timedelta(days=1)).values()
+        )
+        == 1
+    )

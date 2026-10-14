@@ -171,3 +171,10 @@ sudo bash /srv/repeater/app/deploy/backup.sh restore /srv/repeater/backups/repea
 - **عنوان العميل خلف البروكسي:** التطبيق يعتمد على `X-Forwarded-For` و`X-Forwarded-Proto` فقط من البروكسي نفسه: الـ loopback ونطاقات Docker الخاصة (`172.16.0.0/12` و`192.168.0.0/16`)، وهو ما يغطي Caddy الخاص بـ Repeater وnginx أو Nginx Proxy Manager أو Traefik/Coolify على نفس السيرفر. القيمة في `REPEATER_FORWARDED_ALLOW_IPS` (غيّرها لو يصل بروكسيك من عنوان آخر). لا تضع `*` أبدًا: عندها يأخذ التطبيق أول عنوان في الترويسة، وهو ما يكتبه العميل نفسه لو كان البروكسي يُلحِق بدل أن يستبدل (`$proxy_add_x_forwarded_for` في nginx)، فيتجاوز المهاجم تحديد معدل الدخول لكل IP ويزوّر عناوين سجل الوصول للوسائط. في nginx/NPM استخدم `proxy_set_header X-Forwarded-For $remote_addr;` (الإعداد الذي يطبعه `bootstrap.sh`)، وفي Apache `ProxyAddHeaders Off` مع `RequestHeader set X-Forwarded-For "%{REMOTE_ADDR}s"`. Caddy وTraefik يتجاهلان افتراضيًا ما يرسله العميل من هذه الترويسات. (حتى لو ألحق البروكسي، القائمة المحددة تجعل التطبيق يأخذ **آخر** عنوان غير موثوق، وهو ما أضافه البروكسي، لا أول عنوان؛ الضبط بـ `$remote_addr` طبقة حماية إضافية.)
 - لو فعّلت جدار حماية Hostinger للـ VPS من hPanel: اسمح بـ TCP 22 و80 و443 (وUDP 443 لـ HTTP/3).
 - الروابط المطلوبة في لوحات المنصات: الخصوصية `https://rotator.magic-lap.com/privacy` والشروط `https://rotator.magic-lap.com/terms`.
+
+
+يفحص `deploy.sh` بعد تشغيل اللوحة عناوين بوابة Docker وCaddy الفعلية (IPv4 وIPv6) وعنوان الربط
+مقابل `FORWARDED_ALLOW_IPS` داخل الحاوية. إذا ظهر `trusted proxy check failed`، أضف عنوان
+البروكسي الظاهر في الرسالة أو نطاقه المقصود إلى `REPEATER_FORWARDED_ALLOW_IPS` ثم أعد النشر.
+السكربت يتوقف عند عدم التطابق ولا يوسّع الثقة تلقائيًا. خيار `--no-build` يشترط وجود وسم الصورة
+المطلوب محليًا؛ ورسالة الرجوع لا تظهر إلا إذا كانت صورة `previous` موجودة.

@@ -35,6 +35,7 @@ from repeater.jobs import kinds
 from repeater.jobs import maintenance as _maintenance  # noqa: F401 - registers the "maintenance" handler
 from repeater.jobs.registry import handler
 from repeater.media import storage
+from repeater.messages import Message
 from repeater.models import (
     AccountStatus,
     ActivityLevel,
@@ -230,8 +231,16 @@ def delete_user_data(session: Session, request_id: int) -> bool:
             workspace_id,
             ActivityLevel.INFO,
             "account",
-            f"Deleted the data of a {captions.platform_name(platform)} account at Meta's request "
-            f"({len(video_ids)} imported video{'s' if len(video_ids) != 1 else ''} removed).",
+            Message(
+                "account.meta_deleted",
+                f"Deleted the data of a {captions.platform_name(platform)} account at Meta's request "
+                f"({len(video_ids)} imported video{'s' if len(video_ids) != 1 else ''} removed).",
+                {
+                    "p0": captions.platform_name(platform),
+                    "p1": len(video_ids),
+                    "p2": "s" if len(video_ids) != 1 else "",
+                },
+            ),
             actor="meta",
             request_id=request.id,
         )

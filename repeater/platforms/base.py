@@ -41,11 +41,13 @@ never put tokens in exception messages.
 from __future__ import annotations
 
 import enum
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from repeater.messages import diagnostic
 from repeater.models import Platform
 from repeater.timeutil import ensure_aware, utcnow
 
@@ -57,9 +59,23 @@ class PlatformError(Exception):
 
     def __init__(self, message: str, *, code: str | None = None, status: int | None = None) -> None:
         super().__init__(message)
-        self.message = message
         self.code = code
         self.status = status
+        self.message = message
+
+    @property
+    def message(self) -> str:
+        return self._message
+
+    @message.setter
+    def message(self, value: str) -> None:
+        from repeater.message_catalog import AR
+
+        key = next(
+            (f"platform.{cls.__name__}" for cls in type(self).__mro__ if f"platform.{cls.__name__}" in AR),
+            "platform.PlatformError",
+        )
+        self._message = diagnostic(value, key, code=getattr(self, "code", None) or "—")
 
 
 class RetryableError(PlatformError):
@@ -301,6 +317,9 @@ class PublishRequest:
     # scheduled_posts.publish_state from earlier attempts (empty on the first). Adapters resume
     # or check what an earlier attempt left behind instead of uploading again.
     state: dict[str, Any] = field(default_factory=dict)
+    # Called before EACH YouTube videos.insert HTTP attempt, including internal retries.
+    # The engine owns durable quota accounting; adapters remain database-independent.
+    on_session_start: Callable[[], None] | None = None
 
 
 class PublishOutcome(enum.StrEnum):

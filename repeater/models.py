@@ -7,11 +7,12 @@ changes instead so the migration stays consistent.
 from __future__ import annotations
 
 import enum
-from datetime import datetime, time
+from datetime import date, datetime, time
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     Enum,
     Float,
@@ -22,6 +23,7 @@ from sqlalchemy import (
     Text,
     Time,
     UniqueConstraint,
+    event,
     func,
     text,
 )
@@ -191,6 +193,7 @@ class ConnectedAccount(TimestampMixin, Base):
         _enum(AccountStatus, "account_status"), default=AccountStatus.ACTIVE
     )
     last_error: Mapped[str | None] = mapped_column(Text)
+    last_error_info: Mapped[dict | None] = mapped_column(JSONB)
 
 
 class Source(TimestampMixin, Base):
@@ -216,6 +219,7 @@ class Source(TimestampMixin, Base):
     last_polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
+    last_error_info: Mapped[dict | None] = mapped_column(JSONB)
     consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
 
     connected_account: Mapped[ConnectedAccount | None] = relationship()
@@ -271,6 +275,7 @@ class Video(TimestampMixin, Base):
     )
     duplicate_of_id: Mapped[int | None] = mapped_column(ForeignKey("videos.id", ondelete="SET NULL"))
     error: Mapped[str | None] = mapped_column(Text)
+    error_info: Mapped[dict | None] = mapped_column(JSONB)
     # Per-video overrides, e.g. {"exclude_platforms": ["facebook"], "title": "..."}.
     overrides: Mapped[dict] = mapped_column(JSONB, default=dict)
 
@@ -332,11 +337,34 @@ class ScheduledPost(TimestampMixin, Base):
     platform_post_id: Mapped[str | None] = mapped_column(String(255))
     permalink: Mapped[str | None] = mapped_column(Text)
     error: Mapped[str | None] = mapped_column(Text)
+    error_info: Mapped[dict | None] = mapped_column(JSONB)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[str] = mapped_column(String(32), default="scheduler")  # scheduler | user
 
     video: Mapped[Video] = relationship()
     connected_account: Mapped[ConnectedAccount] = relationship()
+
+
+class YouTubeQuotaDay(Base):
+    """Project-wide circuit and serialization point for one Pacific quota day."""
+
+    __tablename__ = "youtube_quota_days"
+
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    exhausted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class YouTubeUploadStart(Base):
+    """One reserved videos.insert request. Retry/reset/deletion cannot refund it."""
+
+    __tablename__ = "youtube_upload_starts"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    day: Mapped[date] = mapped_column(ForeignKey("youtube_quota_days.day", ondelete="CASCADE"), index=True)
+    post_id: Mapped[int | None] = mapped_column(
+        ForeignKey("scheduled_posts.id", ondelete="SET NULL"), index=True
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class Job(Base):
@@ -413,3 +441,20 @@ class DataDeletionRequest(Base):
     status: Mapped[str] = mapped_column(String(32), default="received")  # received | completed
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+def _capture_error_message(target, value, oldvalue, initiator):
+    # Keep the English diagnostic and its translation metadata in the same transaction.
+    # Assigning None/plain legacy text also clears any earlier key, avoiding stale translations.
+    from repeater.messages import Message
+
+    setattr(target, initiator.key + "_info", value.info if isinstance(value, Message) else None)
+
+
+for _model, _field in (
+    (ConnectedAccount, "last_error"),
+    (Source, "last_error"),
+    (Video, "error"),
+    (ScheduledPost, "error"),
+):
+    event.listen(getattr(_model, _field), "set", _capture_error_message)

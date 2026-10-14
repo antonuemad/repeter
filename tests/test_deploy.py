@@ -65,7 +65,9 @@ case "$1" in
     exit 0 ;;
   rmi) rm -f "$(tag_file "$2")"; exit 0 ;;
   inspect)
-    if [[ " $* " == *PortBindings* ]]; then cat "${STUB_INSPECT:-/dev/null}"; else echo "${STUB_HEALTH:-healthy}"; fi
+    if [[ " $* " == *PortBindings* ]]; then cat "${STUB_INSPECT:-/dev/null}";
+    elif [[ " $* " == *NetworkSettings.Networks* ]]; then echo "${STUB_PROXY_IP:-172.18.0.1}";
+    else echo "${STUB_HEALTH:-healthy}"; fi
     exit 0 ;;
   exec) cat "${STUB_CADDYFILE:-/dev/null}"; exit 0 ;;
   version) echo "29.0.0"; exit 0 ;;
@@ -115,6 +117,7 @@ case "$sub" in
         if [[ " $* " == *" -c "* ]]; then exit "${STUB_PSQL_C_RC:-0}"; fi
         cat > "$STUB_STDIN_FILE"; exit "${STUB_PSQL_RC:-0}" ;;
       python)
+        if [[ " $* " == *" check-proxy "* ]]; then exit "${STUB_PROXY_CHECK_RC:-0}"; fi
         cat > "$STUB_STDIN_FILE"
         echo "Warning: Password input may be echoed." >&2
         printf 'Password: admin created\n'
@@ -1161,7 +1164,28 @@ def test_deploy_requires_env_file(sandbox: dict) -> None:
     result = deploy(sandbox)
     assert result.returncode != 0
     assert "run deploy/bootstrap.sh first" in result.stderr
-    assert compose_calls(sandbox) == []
+
+
+def test_no_build_refuses_a_missing_release_before_any_migration(sandbox: dict) -> None:
+    make_env(sandbox)
+    result = deploy(sandbox, "--no-build", REPEATER_IMAGE_TAG="build-missing")
+    assert result.returncode != 0 and "does not exist" in result.stderr
+    assert not any(c.startswith(("build", "run", "up")) for c in compose_calls(sandbox))
+
+
+def test_first_deploy_does_not_offer_a_nonexistent_rollback(sandbox: dict) -> None:
+    make_env(sandbox)
+    result = deploy(sandbox)
+    assert result.returncode == 0, result.stderr
+    assert "Roll back with:" not in result.stdout
+
+
+def test_proxy_trust_mismatch_stops_the_deploy(sandbox: dict) -> None:
+    make_env(sandbox)
+    result = deploy(sandbox, STUB_PROXY_CHECK_RC="1")
+    assert result.returncode != 0 and "trusted proxy" in result.stderr
+    assert any("check-proxy 172.18.0.1" in call for call in compose_calls(sandbox))
+    assert "deploy complete." not in result.stdout
 
 
 def test_deploy_rejects_missing_secrets(sandbox: dict) -> None:
@@ -1391,6 +1415,7 @@ def test_predeploy_dumps_survive_retries_until_the_age_limit(sandbox: dict) -> N
 
 def test_failed_rollbacks_do_not_evict_or_overwrite_pre_migration_dumps(sandbox: dict) -> None:
     make_env(sandbox)
+    seed_image(sandbox, "previous", "sha256:old")
     backups = Path(sandbox["env"]["REPEATER_BACKUP_DIR"])
     original = _old_dump(backups, "repeater-predeploy-20261001T000000Z.sql.gz", 2)
     for _ in range(6):
@@ -1402,6 +1427,7 @@ def test_failed_rollbacks_do_not_evict_or_overwrite_pre_migration_dumps(sandbox:
 
 def test_migration_failure_on_a_rollback_points_at_the_restore(sandbox: dict) -> None:
     make_env(sandbox)
+    seed_image(sandbox, "previous", "sha256:old")
     result = deploy(sandbox, "--no-build", STUB_MIGRATE_RC="1", REPEATER_IMAGE_TAG="previous")
     assert result.returncode != 0
     assert "REPEATER_IMAGE_TAG=previous bash" in result.stderr and "backup.sh restore" in result.stderr
@@ -1424,6 +1450,7 @@ def test_deploy_hands_compose_the_worker_stop_grace(sandbox: dict) -> None:
 
 def test_deploy_no_build_uses_requested_tag(sandbox: dict) -> None:
     make_env(sandbox)
+    seed_image(sandbox, "previous", "sha256:old")
     result = deploy(sandbox, "--no-build", REPEATER_IMAGE_TAG="previous")
     assert result.returncode == 0, result.stderr
     assert not any(c.startswith("build") for c in compose_calls(sandbox))

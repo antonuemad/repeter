@@ -789,7 +789,8 @@ def _no_accounts_error(
             "Facebook did not return any Page you can publish to. Select at least one Page in the Facebook "
             "dialog and make sure you have full control or content-creation access to it, then connect again."
         )
-    absent = [p for p in SCOPES if p in declined]
+    required = {permission for platform in platforms for permission in PLATFORM_PERMISSIONS.get(platform, ())}
+    absent = [p for p in SCOPES if p in declined and p in required]
     if absent:
         message += f" These permissions were declined and are needed: {', '.join(absent)}."
     return PermanentError(message, code="no_publishable_accounts")

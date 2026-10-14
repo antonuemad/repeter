@@ -210,6 +210,22 @@ def test_publish_now_keeps_recoverable_upload_state(db, setup, status):
     assert post.publish_state == {"publish_id": "possibly-live"}
 
 
+@pytest.mark.parametrize("halt", ["workspace", "rule"])
+def test_facebook_poll_cannot_publish_while_halted(db, setup, workspace, halt):
+    post, _, _, rule = setup(
+        "facebook", status=PostStatus.PROCESSING, publish_state={"video_id": "fb", "finish_unconfirmed": True}
+    )
+    if halt == "workspace":
+        workspace.paused = True
+    else:
+        rule.enabled = False
+    db.commit()
+    adapter = fake("facebook", poll_script=[PUBLISHED])
+    with override("publisher", "facebook", adapter):
+        step = publisher.poll_post(db, post.id)
+    assert step.status == PostStatus.PROCESSING and not adapter.poll_states
+
+
 def activities(db, level: ActivityLevel | None = None) -> list[ActivityLog]:
     q = select(ActivityLog).order_by(ActivityLog.id)
     if level is not None:
@@ -1525,3 +1541,38 @@ def test_disconnect_during_a_token_refresh_waits_instead_of_deadlocking(db, setu
         PostStatus.PROCESSING,
         PostStatus.NEEDS_ATTENTION,
     )
+
+
+def test_publish_activity_and_failure_are_translated_after_database_reload(db, setup):
+    from repeater.web.i18n import Translator
+
+    post, video, account, rule = setup()
+    adapter = fake("youtube", publish_script=[RetryableError("Temporary upstream failure", code="upstream")])
+    with override("publisher", "youtube", adapter):
+        publisher.publish_post(db, post.id)
+    db.expire_all()
+    row = db.get(ScheduledPost, post.id)
+    translated = Translator("ar").error(row.error, row.error_info)
+    assert "المحاولة" in translated and "upstream" in translated
+    assert "Temporary upstream" not in translated and "minutes" not in translated
+    event = db.scalars(
+        select(ActivityLog).where(ActivityLog.data["msg_key"].astext == "publish.retry_activity")
+    ).one()
+    assert event.data["msg_key"] == "publish.retry_activity"
+    assert "تعذّر نشر" in Translator("ar").activity(event)
+    assert "Temporary upstream failure" in Translator("en").activity(event)
+
+
+def test_youtube_quota_response_opens_the_project_circuit(db, setup):
+    from repeater import upload_quota
+
+    post, *_ = setup()
+    now = utcnow()
+    adapter = fake(
+        "youtube",
+        publish_script=[RateLimitedError("quota exhausted", code="quotaExceeded", retry_after=3600)],
+    )
+    with override("publisher", "youtube", adapter):
+        publisher.publish_post(db, post.id, now=now)
+    with pytest.raises(RateLimitedError):
+        upload_quota.reserve_start(None, now=now)

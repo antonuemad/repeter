@@ -47,15 +47,20 @@ from repeater.engine.publisher import mark_may_be_live
 from repeater.jobs import kinds
 from repeater.jobs.registry import handler
 from repeater.media import retention
+from repeater.messages import Message, diagnostic
 from repeater.models import (
     AccountStatus,
     ActivityLevel,
     ActivityLog,
     ConnectedAccount,
+    Job,
+    JobStatus,
     OAuthState,
     Platform,
     PostStatus,
     ScheduledPost,
+    Video,
+    VideoStatus,
 )
 from repeater.timeutil import utcnow
 
@@ -103,6 +108,7 @@ def run_maintenance(
         ("partial_files", lambda: _purge_partial_files(now)),
         ("stuck_uploads", lambda: _flag_stuck_uploads(session, now, flagged)),
         ("requeued_posts", lambda: _requeue_lost_posts(session, now)),
+        ("abandoned_imports", lambda: _recover_abandoned_imports(session, now)),
         ("youtube_posts", lambda: _expire_youtube_post_data(session, retention_days, now)),
         ("youtube_activity", lambda: _expire_youtube_activity(session, retention_days, now)),
         ("youtube_channels", lambda: _scrub_stale_youtube_channels(session, retention_days, now)),
@@ -132,9 +138,18 @@ def _alert_interrupted_uploads(flagged: list[tuple[int, int]]) -> None:
     for workspace_id, post_ids in by_workspace.items():
         count = len(post_ids)
         notify_mod.notify(
-            f"{count} upload{'s were' if count != 1 else ' was'} interrupted (the worker restarted) and "
-            f"may be live: post{'s' if count != 1 else ''} "
-            f"{', '.join(f'#{i}' for i in post_ids[:20])}. Check the account before publishing again.",
+            Message(
+                "publish.interrupted_alert",
+                f"{count} upload{'s were' if count != 1 else ' was'} interrupted (the worker restarted) and "
+                f"may be live: post{'s' if count != 1 else ''} "
+                f"{', '.join(f'#{i}' for i in post_ids[:20])}. Check the account before publishing again.",
+                {
+                    "p0": count,
+                    "p1": "s were" if count != 1 else " was",
+                    "p2": "s" if count != 1 else "",
+                    "p3": ", ".join(f"#{i}" for i in post_ids[:20]),
+                },
+            ),
             workspace_id=workspace_id,
             level="error",
             category="uploads_interrupted",
@@ -176,9 +191,11 @@ def _flag_stuck_uploads(session: Session, now: datetime, flagged: list[tuple[int
     count = 0
     for post in posts:
         post.status = PostStatus.NEEDS_ATTENTION
-        post.error = (
+        post.error = Message(
+            "publish.interrupted",
             "The upload was interrupted (the worker restarted). Check the account before publishing "
-            "again, so the video is not posted twice."
+            "again, so the video is not posted twice.",
+            {},
         )
         mark_may_be_live(post)
         log_activity(
@@ -186,7 +203,11 @@ def _flag_stuck_uploads(session: Session, now: datetime, flagged: list[tuple[int
             post.workspace_id,
             ActivityLevel.ERROR,
             "publish",
-            f"Post #{post.id} to {post.platform}: {post.error}",
+            Message(
+                "publish.interrupted_post",
+                f"Post #{post.id} to {post.platform}: {post.error}",
+                {"p0": post.id, "p1": post.platform, "p2": diagnostic(post.error)},
+            ),
             post_id=post.id,
             video_id=post.video_id,
             account_id=post.connected_account_id,
@@ -212,6 +233,39 @@ def _requeue_lost_posts(session: Session, now: datetime) -> int:
     ).scalars()
     for post_id in processing:
         count += kinds.enqueue_poll_post(session, post_id) is not None
+    return count
+
+
+def _recover_abandoned_imports(session: Session, now: datetime) -> int:
+    """A dead/orphaned pipeline must not absorb copies forever as a PROCESSING original."""
+    from repeater.sources.importer import _fail_video
+
+    count = 0
+    videos = session.execute(
+        select(Video)
+        .where(
+            Video.status.in_([VideoStatus.IMPORTING, VideoStatus.PROCESSING]),
+        )
+        .with_for_update(skip_locked=True)
+    ).scalars()
+    for video in list(videos):
+        kind = kinds.IMPORT_VIDEO if video.status == VideoStatus.IMPORTING else kinds.PROCESS_VIDEO
+        jobs = select(Job.id).where(Job.kind == kind, Job.payload["video_id"].astext == str(video.id))
+        if session.execute(
+            jobs.where(Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING])).limit(1)
+        ).first():
+            continue
+        dead = session.execute(jobs.where(Job.status == JobStatus.DEAD).limit(1)).first()
+        if dead or video.updated_at < now - STUCK_UPLOAD_AFTER:
+            count += _fail_video(
+                session,
+                video,
+                Message(
+                    "import.abandoned",
+                    "Import processing stopped before completion. Retry this video or upload it again.",
+                    {},
+                ),
+            )
     return count
 
 

@@ -21,7 +21,7 @@ import random
 import re
 import time
 import unicodedata
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from datetime import time as dtime
@@ -31,6 +31,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from repeater.messages import Message
 from repeater.models import Platform
 from repeater.platforms import http
 from repeater.platforms.base import (
@@ -526,6 +527,7 @@ class _ResumableUpload:
     access_token: str
     path: Path
     total: int
+    on_session_start: Callable[[], None] | None = None
     # True once the request carrying the file's last byte has been issued (or the server reports
     # it has every byte): from then on the video may exist.
     final_sent: bool = field(default=False, init=False)
@@ -551,6 +553,8 @@ class _ResumableUpload:
         body = json.dumps(metadata, ensure_ascii=False).encode("utf-8")
         backoff = _Backoff("upload start")
         while True:
+            if self.on_session_start is not None:
+                self.on_session_start()
             try:
                 resp = self.client.post(UPLOAD_URL, params=params, headers=headers, content=body)
             except httpx.TransportError as exc:
@@ -674,9 +678,13 @@ def _poll_delay(processing: dict[str, Any]) -> int:
 def _privacy_note(status: dict[str, Any], state: dict[str, Any]) -> str:
     requested, actual = state.get("requested_privacy"), status.get("privacyStatus")
     if requested and actual and requested != actual:
-        return (
-            f"YouTube set the video to '{actual}' instead of '{requested}' (this can happen for API "
-            "projects that have not passed YouTube's audit). Change it in YouTube Studio if needed."
+        return Message(
+            "youtube.privacy_note",
+            (
+                f"YouTube set the video to '{actual}' instead of '{requested}' (this can happen for API "
+                "projects that have not passed YouTube's audit). Change it in YouTube Studio if needed."
+            ),
+            {"actual": actual, "requested": requested},
         )
     return ""
 
@@ -760,7 +768,9 @@ class YouTubePublisher:
         metadata = _video_metadata(req, settings)
         resume_uri = _resumable_session(earlier, total)
         with http.client() as c:
-            upload = _ResumableUpload(c, account.tokens.access_token, req.video_path, total)
+            upload = _ResumableUpload(
+                c, account.tokens.access_token, req.video_path, total, req.on_session_start
+            )
             try:
                 resource = _upload_with_restart(
                     upload, metadata, bool(settings["notify_subscribers"]), resume_uri=resume_uri

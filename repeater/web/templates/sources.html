@@ -32,7 +32,7 @@
       {% if s.kind == 'ytdlp' %}<dt>{{ t('sources.ack') }}</dt><dd>{{ fmt_dt(s.unofficial_ack_at, zone) if s.unofficial_ack_at else t('sources.not_acknowledged') }}</dd>{% endif %}
     </dl>
     {% if s.last_error %}
-    <div class="flash flash-error small" dir="auto">{{ t('sources.last_error') }}: {{ s.last_error }}{% if s.consecutive_failures %} ({{ t('sources.failures', count=s.consecutive_failures) }}){% endif %}</div>
+    <div class="flash flash-error small" dir="auto">{{ t('sources.last_error') }}: {{ t.error(s.last_error, s.last_error_info) }}{% if s.consecutive_failures %} ({{ t('sources.failures', count=s.consecutive_failures) }}){% endif %}</div>
     {% endif %}
     <div class="actions">
       <a class="button small secondary" href="/sources/{{ s.id }}/edit">{{ t('common.edit') }}</a>

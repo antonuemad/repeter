@@ -75,7 +75,7 @@
   </div>
   <label class="check"><input type="checkbox" name="enabled" value="1"{% if values.enabled %} checked{% endif %}> {{ t('sources.enabled_label') }}</label>
   {% if not is_new and source.last_error %}
-  <div class="flash flash-error small" dir="auto">{{ t('sources.last_error') }}: {{ source.last_error }}</div>
+  <div class="flash flash-error small" dir="auto">{{ t('sources.last_error') }}: {{ t.error(source.last_error, source.last_error_info) }}</div>
   {% endif %}
   <div class="actions">
     <button type="submit" class="button">{{ t('common.save') }}</button>

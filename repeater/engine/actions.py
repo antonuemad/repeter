@@ -20,6 +20,7 @@ from repeater.engine.publisher import queue_publish, reached_platform
 from repeater.engine.scheduler import duplicate_origins, limits_problem, lock_workspace
 from repeater.jobs import kinds
 from repeater.media import storage
+from repeater.messages import Message, UserError
 from repeater.models import (
     ACTIVE_POST_STATUSES,
     PUBLISH_PLATFORMS,
@@ -54,17 +55,34 @@ def skip_post(session: Session, post: ScheduledPost, *, actor: str) -> None:
     for the same cycle."""
     session.refresh(post, with_for_update=True)
     if post.status not in NOT_STARTED:
-        raise ValueError(f"This post is {post.status} and can no longer be skipped.")
+        raise UserError(
+            "err.post_not_skippable",
+            "This post is {unused0} and can no longer be skipped.",
+            unused0=post.status,
+        )
     post.status = PostStatus.SKIPPED
     post.error = None
-    _log(session, post, f"Skipped the post of '{_label(session, post)}' to {_where(session, post)}.", actor)
+    _log(
+        session,
+        post,
+        Message(
+            "publish.skipped",
+            f"Skipped the post of '{_label(session, post)}' to {_where(session, post)}.",
+            {"p0": _label(session, post), "p1": _where(session, post)},
+        ),
+        actor,
+    )
 
 
 def publish_now(session: Session, post: ScheduledPost, *, actor: str) -> None:
     """Move a scheduled/failed/needs_attention post to now and enqueue publish_post."""
     session.refresh(post, with_for_update=True)
     if post.status not in NOT_STARTED:
-        raise ValueError(f"This post is {post.status} and cannot be published again from here.")
+        raise UserError(
+            "err.post_not_publishable",
+            "This post is {unused0} and cannot be published again from here.",
+            unused0=post.status,
+        )
     _check_can_publish(session, post.workspace_id, session.get(ConnectedAccount, post.connected_account_id))
     if post.status == PostStatus.NEEDS_ATTENTION:
         post.attempts = 0
@@ -79,7 +97,16 @@ def publish_now(session: Session, post: ScheduledPost, *, actor: str) -> None:
     post.scheduled_at = now
     post.error = None
     queue_publish(session, post.id, now)
-    _log(session, post, f"Publishing '{_label(session, post)}' to {_where(session, post)} now.", actor)
+    _log(
+        session,
+        post,
+        Message(
+            "publish.now",
+            f"Publishing '{_label(session, post)}' to {_where(session, post)} now.",
+            {"p0": _label(session, post), "p1": _where(session, post)},
+        ),
+        actor,
+    )
 
 
 def schedule_video_now(
@@ -88,20 +115,34 @@ def schedule_video_now(
     """Create (or reuse) the post for video+account in the current cycle, scheduled now,
     bypassing windows/caps but not platform validation. Enqueue publish_post."""
     if video.workspace_id != account.workspace_id:
-        raise ValueError("The video and the account belong to different workspaces.")
+        raise UserError("err.workspace_mismatch", "The video and the account belong to different workspaces.")
     platform = Platform(account.platform)
     if platform not in PUBLISH_PLATFORMS:
-        raise ValueError(f"{captions.platform_name(platform)} accounts cannot be published to.")
+        raise UserError(
+            "err.not_publishable",
+            "{platform} accounts cannot be published to.",
+            platform=captions.platform_name(platform),
+        )
     _check_can_publish(session, video.workspace_id, account)
     if video.status != VideoStatus.READY or not video.encoded_path:
-        raise ValueError("Only videos that are ready (imported and encoded) can be published.")
+        raise UserError(
+            "err.video_not_ready", "Only videos that are ready (imported and encoded) can be published."
+        )
     if video.source_account_id == account.id or account.id in duplicate_origins(
         session, video.workspace_id, [video.id]
     )[1].get(video.id, ()):
-        raise ValueError("This video came from this account; publishing it there again would duplicate it.")
+        raise UserError(
+            "err.same_origin",
+            "This video came from this account; publishing it there again would duplicate it.",
+        )
     problem = limits_problem(video, platform)
     if problem:
-        raise ValueError(f"{captions.platform_name(platform)} cannot take this video: {problem}.")
+        raise UserError(
+            "err.platform_limit",
+            "{platform} cannot take this video: {problem}.",
+            platform=captions.platform_name(platform),
+            problem=problem,
+        )
     lock_workspace(session, video.workspace_id)
     post = _post_for_now(session, video, account)
     now = utcnow()
@@ -121,8 +162,16 @@ def schedule_video_now(
     _log(
         session,
         post,
-        f"Publishing '{captions.video_label(video)}' to {captions.platform_name(platform)} "
-        f"({account.display_name}) now.",
+        Message(
+            "publish.video_now",
+            f"Publishing '{captions.video_label(video)}' to {captions.platform_name(platform)} "
+            f"({account.display_name}) now.",
+            {
+                "p0": captions.video_label(video),
+                "p1": captions.platform_name(platform),
+                "p2": account.display_name,
+            },
+        ),
         actor,
     )
     return post
@@ -149,7 +198,11 @@ def invalidate_plan(
     canceled = (
         session.execute(
             stmt.values(
-                status=PostStatus.CANCELED, error="The posting rules changed; the post is re-planned."
+                status=PostStatus.CANCELED,
+                error="The posting rules changed; the post is re-planned.",
+                error_info=Message(
+                    "publish.replan", "The posting rules changed; the post is re-planned."
+                ).info,
             ).execution_options(synchronize_session="fetch")
         ).rowcount
         or 0
@@ -160,8 +213,12 @@ def invalidate_plan(
             workspace_id,
             ActivityLevel.INFO,
             "publish",
-            f"The posting rules changed: {canceled} planned post{'s' if canceled != 1 else ''} "
-            "will be re-planned.",
+            Message(
+                "publish.rules_changed",
+                f"The posting rules changed: {canceled} planned post{'s' if canceled != 1 else ''} "
+                "will be re-planned.",
+                {"p0": canceled, "p1": "s" if canceled != 1 else ""},
+            ),
             actor=actor,
             account_id=account_id,
             count=canceled,
@@ -202,7 +259,11 @@ def cancel_conflicting_posts(session: Session, video_id: int, *, actor: str = "s
     )
     for post in posts:
         post.status = PostStatus.CANCELED
-        post.error = f"The same video already exists on {captions.platform_name(post.platform)}; the post was canceled."
+        post.error = Message(
+            "publish.duplicate",
+            f"The same video already exists on {captions.platform_name(post.platform)}; the post was canceled.",
+            {"p0": captions.platform_name(post.platform)},
+        )
     if posts:
         names = sorted({captions.platform_name(p.platform) for p in posts})
         log_activity(
@@ -210,8 +271,17 @@ def cancel_conflicting_posts(session: Session, video_id: int, *, actor: str = "s
             video.workspace_id,
             ActivityLevel.INFO,
             "publish",
-            f"'{captions.video_label(video)}' already exists on {', '.join(names)}: canceled "
-            f"{len(posts)} scheduled post{'s' if len(posts) != 1 else ''}.",
+            Message(
+                "publish.duplicates_canceled",
+                f"'{captions.video_label(video)}' already exists on {', '.join(names)}: canceled "
+                f"{len(posts)} scheduled post{'s' if len(posts) != 1 else ''}.",
+                {
+                    "p0": captions.video_label(video),
+                    "p1": ", ".join(names),
+                    "p2": len(posts),
+                    "p3": "s" if len(posts) != 1 else "",
+                },
+            ),
             actor=actor,
             video_id=video.id,
             post_ids=[p.id for p in posts],
@@ -230,7 +300,11 @@ def archive_video(session: Session, video: Video, *, actor: str) -> None:
             ScheduledPost.video_id == video.id,
             ScheduledPost.status.in_([PostStatus.SCHEDULED, PostStatus.FAILED]),
         )
-        .values(status=PostStatus.CANCELED, error="The video was archived.")
+        .values(
+            status=PostStatus.CANCELED,
+            error="The video was archived.",
+            error_info=Message("publish.archive_cancel", "The video was archived.").info,
+        )
         .execution_options(synchronize_session="fetch")
     ).rowcount
     log_activity(
@@ -238,8 +312,14 @@ def archive_video(session: Session, video: Video, *, actor: str) -> None:
         video.workspace_id,
         ActivityLevel.INFO,
         "publish",
-        f"Archived '{captions.video_label(video)}'"
-        + (f" and canceled {canceled} scheduled post{'s' if canceled != 1 else ''}." if canceled else "."),
+        Message(
+            "publish.archived",
+            f"Archived '{captions.video_label(video)}'"
+            + (
+                f" and canceled {canceled} scheduled post{'s' if canceled != 1 else ''}." if canceled else "."
+            ),
+            {"p0": captions.video_label(video), "p1": canceled, "p2": "s" if canceled != 1 else ""},
+        ),
         actor=actor,
         video_id=video.id,
     )
@@ -248,24 +328,33 @@ def archive_video(session: Session, video: Video, *, actor: str) -> None:
 def restore_video(session: Session, video: Video, *, actor: str) -> None:
     """Return an archived video to rotation (status ready) and trigger planning."""
     if video.status != VideoStatus.ARCHIVED:
-        raise ValueError("Only archived videos can be restored.")
+        raise UserError("err.not_archived", "Only archived videos can be restored.")
     if video.duplicate_of_id is not None:
-        raise ValueError(
-            "This video is a duplicate of another video in the library and stays out of rotation."
+        raise UserError(
+            "err.duplicate_video",
+            "This video is a duplicate of another video in the library and stays out of rotation.",
         )
     if _file_exists(video.encoded_path):
         video.status = VideoStatus.READY
         video.error = None
         kinds.enqueue_plan_workspace(session, video.workspace_id)
-        message = f"Restored '{captions.video_label(video)}' to the rotation."
+        message = Message(
+            "publish.restored",
+            f"Restored '{captions.video_label(video)}' to the rotation.",
+            {"p0": captions.video_label(video)},
+        )
     elif _file_exists(video.original_path):
         # Archived before encoding finished: encode it now; the importer plans it when ready.
         video.status = VideoStatus.PROCESSING
         video.error = None
         kinds.enqueue_process_video(session, video.id)
-        message = f"Restored '{captions.video_label(video)}'; it will join the rotation once processed."
+        message = Message(
+            "publish.restored_processing",
+            f"Restored '{captions.video_label(video)}'; it will join the rotation once processed.",
+            {"p0": captions.video_label(video)},
+        )
     else:
-        raise ValueError("The video's files are no longer on the server; upload it again.")
+        raise UserError("err.files_gone", "The video's files are no longer on the server; upload it again.")
     log_activity(
         session, video.workspace_id, ActivityLevel.INFO, "publish", message, actor=actor, video_id=video.id
     )
@@ -284,7 +373,7 @@ def _post_for_now(session: Session, video: Video, account: ConnectedAccount) -> 
         ).scalars()
     )
     if any(p.status in IN_FLIGHT for p in posts):
-        raise ValueError("This video is being published to this account right now.")
+        raise UserError("err.in_flight", "This video is being published to this account right now.")
     pending = [p for p in posts if p.status in ACTIVE_POST_STATUSES]
     if pending:
         return pending[-1]
@@ -312,13 +401,15 @@ def _post_for_now(session: Session, video: Video, account: ConnectedAccount) -> 
 def _check_can_publish(session: Session, workspace_id: int, account: ConnectedAccount | None) -> None:
     workspace = session.get(Workspace, workspace_id)
     if workspace is None or workspace.paused:
-        raise ValueError("Publishing is paused for this workspace; resume it first.")
+        raise UserError("err.paused", "Publishing is paused for this workspace; resume it first.")
     if account is None or account.status == AccountStatus.DISABLED:
-        raise ValueError("The account is disconnected; connect it again first.")
+        raise UserError("err.account_disconnected", "The account is disconnected; connect it again first.")
     if account.status != AccountStatus.ACTIVE:
-        raise ValueError(
-            f"The {captions.platform_name(account.platform)} account '{account.display_name}' must be "
-            "reconnected first."
+        raise UserError(
+            "err.account_reconnect",
+            "The {platform} account '{name}' must be reconnected first.",
+            platform=captions.platform_name(account.platform),
+            name=account.display_name,
         )
 
 

@@ -62,7 +62,10 @@ def purge_expired_originals(
             Video.original_path.isnot(None),
             or_(
                 and_(
-                    or_(Video.encoded_path.isnot(None), Video.status == VideoStatus.DUPLICATE),
+                    or_(
+                        Video.encoded_path.isnot(None),
+                        Video.status.in_([VideoStatus.DUPLICATE, VideoStatus.ARCHIVED]),
+                    ),
                     last_activity < cutoff,
                 ),
                 *(
@@ -117,7 +120,7 @@ def _purge_original(video: Video) -> int:
         return 0
     if original is None:
         return 0
-    if video.status not in (VideoStatus.DUPLICATE, VideoStatus.FAILED) and (
+    if video.status not in (VideoStatus.DUPLICATE, VideoStatus.FAILED, VideoStatus.ARCHIVED) and (
         encoded is None or not encoded.is_file()
     ):
         return 0
