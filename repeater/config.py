@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     worker_poll_seconds: float = 2.0
     worker_threads: int = 2
     job_lock_timeout_minutes: int = 30
+    # Touched by the worker loop; the container healthcheck reads its age.
+    worker_heartbeat_path: Path = Path("/tmp/repeater-worker.heartbeat")  # noqa: S108
 
     # Retention
     original_retention_days: int = 30

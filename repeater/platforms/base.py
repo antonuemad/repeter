@@ -11,6 +11,19 @@ Every platform module implements some of these protocols and exposes module-leve
     repeater.platforms.facebook  -> publisher: Publisher, lister: MediaLister
     repeater.sources.drive       -> lister: MediaLister         (Google Drive folder)
 
+Conventions for ConnectedAccount.extra (non-secret identifiers):
+    tiktok    {"open_id", "username"}
+    youtube   {"channel_id", "uploads_playlist_id", "custom_url"}
+    gdrive    {"email"}
+    facebook  {"page_id", "fb_user_id"}
+    instagram {"ig_user_id", "page_id", "username", "fb_user_id"}
+`fb_user_id` is the app-scoped Facebook user id that authorized the Page; Meta's
+deauthorize/data-deletion callbacks identify users by it.
+
+Other cross-module functions:
+    repeater.platforms.tiktok.creator_info(account: AccountContext) -> TikTokCreatorInfo
+    repeater.platforms.meta.parse_signed_request(signed_request: str) -> dict  (ValueError if invalid)
+
 Adapters never touch the database. They receive an AccountContext and return dataclasses;
 the engine/importer persist results. Adapters raise the PlatformError subclasses below and
 never put tokens in exception messages.
