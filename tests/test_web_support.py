@@ -40,7 +40,12 @@ def accept_consent(client: TestClient) -> None:
         return
     resp = client.post(
         "/consent",
-        data={"csrf_token": csrf_from(page.text), "accept": "1", "next": "/"},
+        data={
+            "csrf_token": csrf_from(page.text),
+            "accept": "1",
+            "next": "/",
+            "legal_version": re.search(r'name="legal_version" value="([^"]+)"', page.text)[1],
+        },
         follow_redirects=False,
     )
     assert resp.status_code == 303, resp.text[:500]

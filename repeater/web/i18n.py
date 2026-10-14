@@ -1508,4 +1508,7 @@ AR.update(
     }
 )
 
+EN["consent.changed"] = "The policy version changed or is missing. Read the current texts and confirm again."
+AR["consent.changed"] = "إصدار النصوص تغيّر أو غير محدد. اقرأ النصوص الحالية ثم أكّد الموافقة مرة أخرى."
+
 MESSAGES: dict[str, dict[str, str]] = {"en": EN, "ar": AR}

@@ -19,6 +19,7 @@
   <form method="post" action="/consent" class="stack">
     {{ m.csrf() }}
     <input type="hidden" name="next" value="{{ next }}">
+    <input type="hidden" name="legal_version" value="{{ version }}">
     <label class="check"><input type="checkbox" name="accept" value="1" required> {{ t('consent.accept_label') }}</label>
     <div class="actions">
       <button type="submit" class="button">{{ t('consent.continue') }}</button>

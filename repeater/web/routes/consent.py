@@ -29,11 +29,16 @@ def consent_page(request: Request, db: DB, user: SignedInUser, next: str = "/") 
 @router.post("/consent")
 def accept(request: Request, db: DB, user: SignedInUser, form: Form) -> Response:
     target = _next(form.get("next"))
+    error = None
     if not form_bool(form, "accept"):
+        error = "consent.required"
+    elif form.get("legal_version") != consent.LEGAL_VERSION:
+        error = "consent.changed"
+    if error:
         return render(
             request,
             "consent.html",
-            {"next": target, "version": consent.LEGAL_VERSION, "error": "consent.required"},
+            {"next": target, "version": consent.LEGAL_VERSION, "error": error},
             status_code=400,
         )
     if not consent.has_consented(request.session, db, user):

@@ -58,7 +58,12 @@ def test_consent_screen_records_acceptance_with_version_and_time(web_client, db,
     assert _consents(db, admin_user.id) == []
     assert web_client.get("/", follow_redirects=False).status_code == 303
     # Accepting continues where the user was going.
-    resp = post(web_client, "/consent", {"accept": "1", "next": "/library"}, page="/consent")
+    resp = post(
+        web_client,
+        "/consent",
+        {"accept": "1", "next": "/library", "legal_version": consent.LEGAL_VERSION},
+        page="/consent",
+    )
     assert resp.status_code == 303 and resp.headers["location"] == "/library"
     assert web_client.get("/").status_code == 200
     (entry,) = _consents(db, admin_user.id)
@@ -70,7 +75,7 @@ def test_consent_screen_records_acceptance_with_version_and_time(web_client, db,
         == "/"
     )
     # Accepting twice records once.
-    post(web_client, "/consent", {"accept": "1"}, page="/library")
+    post(web_client, "/consent", {"accept": "1", "legal_version": consent.LEGAL_VERSION}, page="/library")
     assert len(_consents(db, admin_user.id)) == 1
 
 
@@ -86,7 +91,9 @@ def test_acceptance_is_remembered_across_sessions_until_the_version_changes(
         login(third, accept_terms=False)
         resp = third.get("/", follow_redirects=False)
         assert resp.status_code == 303 and resp.headers["location"].startswith("/consent")
-        accept = post(third, "/consent", {"accept": "1"}, page="/consent")
+        accept = post(
+            third, "/consent", {"accept": "1", "legal_version": consent.LEGAL_VERSION}, page="/consent"
+        )
         assert accept.status_code == 303
         assert third.get("/", follow_redirects=False).status_code == 200
 
@@ -328,3 +335,34 @@ def test_terms_say_that_publishing_starts_off_and_consent_comes_first(web_app, l
     else:
         assert "الحسابات الجديدة والنشر عليها متوقف" in html
         assert "نطلب منك الموافقة على هذه الشروط" in html
+
+
+@pytest.mark.parametrize("submitted", [None, "2020-01-01"])
+def test_stale_or_missing_consent_version_cannot_accept_current_texts(web_client, db, admin_user, submitted):
+    login(web_client, accept_terms=False)
+    data = {"accept": "1"}
+    if submitted is not None:
+        data["legal_version"] = submitted
+    response = post(web_client, "/consent", data, page="/consent")
+    assert response.status_code == 400
+    db.refresh(admin_user)
+    assert admin_user.terms_accepted_at is None and admin_user.terms_version is None
+    assert consent.LEGAL_VERSION in response.text
+
+
+def test_policy_update_between_render_and_submission_requires_new_acceptance(
+    web_client, db, admin_user, monkeypatch
+):
+    from tests.test_web_support import csrf_from
+
+    login(web_client, accept_terms=False)
+    page = web_client.get("/consent")
+    rendered_version = consent.LEGAL_VERSION
+    monkeypatch.setattr(consent, "LEGAL_VERSION", "2099-02-02")
+    response = web_client.post(
+        "/consent",
+        data={"csrf_token": csrf_from(page.text), "accept": "1", "legal_version": rendered_version},
+    )
+    assert response.status_code == 400 and "2099-02-02" in response.text
+    db.refresh(admin_user)
+    assert admin_user.terms_accepted_at is None
