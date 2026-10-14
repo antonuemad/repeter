@@ -3,11 +3,22 @@
 One provider serves two purposes: "youtube" (upload + read-only channel access) and "gdrive"
 (read-only Drive access for the Drive folder source). Endpoints are from Google's OpenID
 discovery document: https://accounts.google.com/.well-known/openid-configuration
+
+Each purpose asks only for its own scopes (no include_granted_scopes), so a YouTube grant never
+carries Drive access and the other way round. Both kinds of account store `extra["google_sub"]`,
+the Google account id. Google revokes everything a project was granted by a user when any one
+token is revoked (https://developers.google.com/identity/protocols/oauth2/web-server#tokenrevoke),
+so the dashboard compares this id, not refresh-token strings, to decide whether disconnecting an
+account may revoke at Google.
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
 import dataclasses
+import json
+import logging
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -25,6 +36,8 @@ from repeater.platforms.base import (
     RetryableError,
 )
 
+log = logging.getLogger(__name__)
+
 AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105 - endpoint URL, not a secret
 REVOKE_URL = "https://oauth2.googleapis.com/revoke"
@@ -34,10 +47,13 @@ YOUTUBE_UPLOAD = "https://www.googleapis.com/auth/youtube.upload"
 YOUTUBE_READONLY = "https://www.googleapis.com/auth/youtube.readonly"
 DRIVE_READONLY = "https://www.googleapis.com/auth/drive.readonly"
 
+# "openid" is non-sensitive; it makes the token response carry an id_token whose `sub` identifies
+# the Google account (see `resolve_google_sub`).
 PURPOSE_SCOPES: dict[str, tuple[str, ...]] = {
-    "youtube": (YOUTUBE_UPLOAD, YOUTUBE_READONLY),
+    "youtube": ("openid", YOUTUBE_UPLOAD, YOUTUBE_READONLY),
     "gdrive": ("openid", "email", DRIVE_READONLY),
 }
+ID_TOKEN_ISSUERS = ("https://accounts.google.com", "accounts.google.com")
 # Google's granular consent lets the user untick individual scopes, so check what was granted.
 # openid/email come back as userinfo.* URLs and are not needed to work, so they are not required.
 REQUIRED_SCOPES: dict[str, tuple[str, ...]] = {
@@ -165,34 +181,74 @@ def _copy_tokens(tokens: OAuthTokens) -> OAuthTokens:
     return dataclasses.replace(tokens, scopes=list(tokens.scopes), extra=dict(tokens.extra))
 
 
-def _channel_account(channel: dict[str, Any], tokens: OAuthTokens) -> ConnectedAccountData:
-    channel_id = str(channel["id"])
-    snippet = channel.get("snippet") or {}
-    related = (channel.get("contentDetails") or {}).get("relatedPlaylists") or {}
-    thumbs = snippet.get("thumbnails") or {}
-    avatar = next(
-        (thumbs[k].get("url") for k in ("medium", "default", "high") if isinstance(thumbs.get(k), dict)), None
-    )
-    custom_url = snippet.get("customUrl")
+def _channel_account(
+    channel: dict[str, Any], tokens: OAuthTokens, google_sub: str | None = None
+) -> ConnectedAccountData:
+    info = youtube.channel_summary(channel)
+    extra = dict(info["extra"])
+    if google_sub:
+        extra["google_sub"] = google_sub
     return ConnectedAccountData(
         platform=Platform.YOUTUBE,
-        external_id=channel_id,
-        display_name=snippet.get("title") or custom_url or channel_id,
+        external_id=str(channel["id"]),
+        display_name=info["display_name"],
         tokens=_copy_tokens(tokens),
-        avatar_url=avatar,
-        extra={
-            "channel_id": channel_id,
-            "uploads_playlist_id": related.get("uploads"),
-            "custom_url": custom_url,
-        },
+        avatar_url=info["avatar_url"],
+        extra=extra,
     )
 
 
-def _youtube_accounts(c: httpx.Client, tokens: OAuthTokens) -> list[ConnectedAccountData]:
+def _youtube_accounts(
+    c: httpx.Client, tokens: OAuthTokens, google_sub: str | None = None
+) -> list[ConnectedAccountData]:
     channels = youtube.list_my_channels(c, tokens.access_token)
     if not channels:
         raise PermanentError(youtube.NO_CHANNEL_MESSAGE, code="no_channel")
-    return [_channel_account(ch, tokens) for ch in channels]
+    return [_channel_account(ch, tokens, google_sub) for ch in channels]
+
+
+def _id_token_sub(id_token: Any, client_id: str) -> str | None:
+    """`sub` of the id_token Google returned from the token endpoint. The token came straight from
+    Google over TLS, so (OpenID Connect Core 3.1.3.7) its signature need not be checked; issuer and
+    audience still are."""
+    if not isinstance(id_token, str):
+        return None
+    parts = id_token.split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        claims = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
+    except (binascii.Error, ValueError):
+        return None
+    if not isinstance(claims, dict) or claims.get("iss") not in ID_TOKEN_ISSUERS:
+        return None
+    audience = claims.get("aud")
+    if audience != client_id and not (isinstance(audience, list) and client_id in audience):
+        return None
+    sub = claims.get("sub")
+    return str(sub) if sub else None
+
+
+def _userinfo_sub(c: httpx.Client, access_token: str) -> str | None:
+    try:
+        resp = c.get(USERINFO_URL, headers={"Authorization": f"Bearer {access_token}"})
+        info = resp.json() if resp.status_code == 200 else None
+    except (httpx.TransportError, ValueError):
+        return None
+    sub = info.get("sub") if isinstance(info, dict) else None
+    return str(sub) if sub else None
+
+
+def resolve_google_sub(
+    c: httpx.Client, payload: dict[str, Any], client_id: str, access_token: str
+) -> str | None:
+    """The Google account id of a fresh authorization: from the id_token, else from userinfo.
+    Best effort: an account without it is still connected (the dashboard then treats it as an
+    older account whose sign-in identity is unknown)."""
+    sub = _id_token_sub(payload.get("id_token"), client_id) or _userinfo_sub(c, access_token)
+    if sub is None:
+        log.info("Google sign-in returned no account id (sub); revoke checks fall back to a cautious rule")
+    return sub
 
 
 def _drive_account(c: httpx.Client, tokens: OAuthTokens) -> ConnectedAccountData:
@@ -219,7 +275,7 @@ def _drive_account(c: httpx.Client, tokens: OAuthTokens) -> ConnectedAccountData
         display_name=email or str(sub),
         tokens=tokens,
         avatar_url=info.get("picture"),
-        extra={"email": email},
+        extra={"email": email, "google_sub": str(sub)},
     )
 
 
@@ -241,7 +297,6 @@ class GoogleOAuth:
             "scope": " ".join(scopes),
             "access_type": "offline",
             "prompt": "consent",
-            "include_granted_scopes": "true",
             "state": state,
             "code_challenge": code_challenge,
             "code_challenge_method": "S256",
@@ -269,7 +324,8 @@ class GoogleOAuth:
             if not tokens.refresh_token:
                 raise PermanentError(NO_OFFLINE_ACCESS, code="no_refresh_token")
             if purpose == "youtube":
-                return _youtube_accounts(c, tokens)
+                sub = resolve_google_sub(c, payload, client_id, tokens.access_token)
+                return _youtube_accounts(c, tokens, sub)
             return [_drive_account(c, tokens)]
 
     def refresh(self, account: AccountContext) -> OAuthTokens:

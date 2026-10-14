@@ -58,7 +58,13 @@
     var musicText = form.querySelector('[data-consent-text="music"]');
     var brandedText = form.querySelector('[data-consent-text="branded"]');
     var labelPreview = form.querySelector("[data-label-preview]");
-    var submit = form.querySelector('button[type="submit"]');
+    var submit = form.querySelector("[data-submit]") || form.querySelector('button[type="submit"]');
+    // A disabled button does not fire hover events in every browser, so the explanation hangs
+    // on a wrapper around it (TikTok Content Sharing Guidelines: hovering the disabled
+    // publish button must show this sentence).
+    var submitWrap = form.querySelector("[data-submit-wrap]");
+    var discloseMessage = form.getAttribute("data-disclose-message") || "";
+    var discloseHelp = form.querySelector("#disclose-help");
     if (!privacy || !disclose || !organic || !branded || !consent) {
       return;
     }
@@ -97,6 +103,19 @@
       consent.required = mode() === "direct" && (!enabled || enabled.checked);
       if (submit) {
         submit.disabled = needsChoice;
+        if (needsChoice) {
+          if (submitWrap && discloseMessage) {
+            submitWrap.setAttribute("title", discloseMessage);
+          }
+          if (discloseHelp) {
+            submit.setAttribute("aria-describedby", "disclose-help");
+          }
+        } else {
+          if (submitWrap) {
+            submitWrap.removeAttribute("title");
+          }
+          submit.removeAttribute("aria-describedby");
+        }
       }
     }
 

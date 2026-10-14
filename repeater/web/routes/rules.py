@@ -25,7 +25,9 @@ from starlette.datastructures import FormData
 from repeater import accounts as account_service
 from repeater.activity import log_activity
 from repeater.crypto import CryptoError
+from repeater.engine import actions
 from repeater.engine import rules as engine_rules
+from repeater.engine.captions import platform_name
 from repeater.jobs import kinds
 from repeater.models import (
     PUBLISH_PLATFORMS,
@@ -198,18 +200,39 @@ def save_workspace(request: Request, db: DB, ctx: CurrentWorkspace, form: Form) 
         return RedirectResponse("/rules#workspace", status_code=303)
     paused = form_bool(form, "paused")
     changed_pause = paused != ws.paused
+    plan_changed = (
+        changed_pause
+        or zone != ws.timezone
+        or gap_hours * 60 != (ws.cross_platform_gap_minutes or 0)
+        or horizon != ws.horizon_hours
+    )
     ws.timezone = zone
     ws.cross_platform_gap_minutes = gap_hours * 60
     ws.horizon_hours = horizon
     ws.paused = paused
-    message = "Updated the workspace settings."
     if changed_pause:
-        message = "Paused all publishing." if paused else "Resumed publishing."
-    log_activity(db, ws.id, ActivityLevel.INFO, "system", message, actor=ctx.actor)
-    kinds.enqueue_plan_workspace(db, ws.id)
+        message, key = (
+            ("Paused all publishing.", "activity.paused")
+            if paused
+            else ("Resumed publishing.", "activity.resumed")
+        )
+    else:
+        message, key = "Updated the workspace settings.", "activity.workspace_updated"
+    log_activity(db, ws.id, ActivityLevel.INFO, "system", message, actor=ctx.actor, msg_key=key)
+    _replan(db, ctx, changed=plan_changed)
     db.commit()
     flash(request, "success", "rules.workspace_saved")
     return RedirectResponse("/rules", status_code=303)
+
+
+def _replan(db: Session, ctx: WorkspaceContext, *, changed: bool, account_id: int | None = None) -> None:
+    """Posts the planner already created keep the window, cap, gaps and timezone they were planned
+    under (it never moves existing posts), so when any of those changed the not-yet-started
+    planner posts are canceled and planned again under the new rules (contract C2)."""
+    if changed:
+        actions.invalidate_plan(db, ctx.workspace.id, account_id=account_id, actor=ctx.actor)
+    else:
+        kinds.enqueue_plan_workspace(db, ctx.workspace.id)
 
 
 # --------------------------------------------------------------------------- rule form
@@ -281,6 +304,21 @@ def _render_rule(
     return render(request, "rule_form.html", context, status_code=status_code)
 
 
+SCHEDULING_FIELDS = (
+    "enabled",
+    "daily_cap",
+    "min_gap_minutes",
+    "window_start",
+    "window_end",
+    "evergreen_days",
+)
+
+
+def _scheduling_signature(rule: RotationRule) -> tuple[Any, ...]:
+    """What the planner bases its slots on; captions and platform settings are read at publish time."""
+    return (*(getattr(rule, name) for name in SCHEDULING_FIELDS), rule.only_after is not None)
+
+
 @router.post("/rules/{account_id}")
 def save_rule(request: Request, db: DB, ctx: CurrentWorkspace, form: Form, account_id: int) -> Response:
     account = _get_account(db, ctx, account_id)
@@ -288,15 +326,25 @@ def save_rule(request: Request, db: DB, ctx: CurrentWorkspace, form: Form, accou
     db.commit()
     platform = Platform(account.platform)
     creator = fetch_creator_info(db, account) if platform == Platform.TIKTOK else CreatorInfoResult()
+    # The TikTok fields are missing from a form that was rendered without creator info. Missing
+    # fields are not answers: the stored TikTok settings and the on/off state must not change.
+    fields_absent = platform == Platform.TIKTOK and _tiktok_fields_absent(form)
     try:
         general = _parse_general(form, platform)
-        settings = _parse_platform_settings(
-            form, platform, merged_settings(rule), creator, enabled=general["enabled"]
+        if fields_absent:
+            general["enabled"] = general["enabled"] and bool(rule.enabled)
+        settings = (
+            None
+            if fields_absent
+            else _parse_platform_settings(
+                form, platform, merged_settings(rule), creator, enabled=general["enabled"]
+            )
         )
     except FormError as exc:
         return _render_rule(
             request, ctx, account, rule, _submitted_values(form, rule), creator, error=exc, status_code=400
         )
+    before = _scheduling_signature(rule)
     _apply_general(rule, general)
     if settings is not None:
         rule.settings = settings
@@ -310,14 +358,22 @@ def save_rule(request: Request, db: DB, ctx: CurrentWorkspace, form: Form, accou
         actor=ctx.actor,
         account_id=account.id,
         rule_id=rule.id,
+        msg_key="activity.rule_updated_on" if rule.enabled else "activity.rule_updated_off",
+        msg_params={"platform": platform_name(platform), "name": account.display_name},
     )
-    kinds.enqueue_plan_workspace(db, ctx.workspace.id)
+    _replan(db, ctx, changed=_scheduling_signature(rule) != before, account_id=account.id)
     db.commit()
     problems = engine_rules.rule_problems(rule)
     flash(request, "success", "rules.saved", name=account.display_name)
+    if fields_absent:
+        flash(request, "warning", "rules.tiktok_unchanged")
     if rule.enabled and problems:
         flash(request, "warning", "rules.saved_incomplete")
     return RedirectResponse(f"/rules/{account.id}", status_code=303)
+
+
+def _tiktok_fields_absent(form: FormData) -> bool:
+    return form.get("tiktok_fields_absent") == "1" or form.get("mode") not in ("direct", "inbox")
 
 
 def _parse_general(form: FormData, platform: Platform) -> dict[str, Any]:

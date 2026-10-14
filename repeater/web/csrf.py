@@ -53,7 +53,12 @@ def is_streamed_upload(request: Request) -> bool:
 
 
 async def csrf_protect(request: Request) -> None:
-    """App-wide dependency. Raises CSRFError for unsafe requests without a valid token."""
+    """App-wide dependency. Raises CSRFError for unsafe requests without a valid token.
+
+    This runs before any route-level authentication, so it must never buffer a request body of
+    unbounded size: on a streamed path the body is only ever read by the route itself (as a
+    stream, after authentication). Any other content type on such a path is refused here without
+    reading a byte; the header token is still accepted."""
     if request.method in SAFE_METHODS or request.url.path in EXEMPT_PATHS:
         return
     if token_matches(request.session, request.headers.get(HEADER)):
@@ -61,6 +66,8 @@ async def csrf_protect(request: Request) -> None:
     if is_streamed_upload(request):
         request.state.csrf_deferred = True
         return
+    if request.url.path in STREAMED_PATHS:
+        raise CSRFError()
     content_type = request.headers.get("content-type", "")
     if content_type.startswith(("application/x-www-form-urlencoded", "multipart/form-data")):
         # Only the streamed upload accepts files; anywhere else a file part is rejected (400).

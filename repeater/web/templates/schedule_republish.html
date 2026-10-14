@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('schedule.republish_title') }}{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>{{ t('schedule.republish_title') }}</h1>
+  <p>{{ m.platform(post.platform) }} <strong dir="auto">{{ account.display_name }}</strong> · <a href="/library/{{ post.video_id }}" dir="auto">{{ m.video_title(post.video) }}</a></p>
+  {% if post.error %}<p>{{ m.error_text(post.error, 300) }}</p>{% endif %}
+  <p>{{ t('schedule.republish_body') }}</p>
+  <p class="muted">
+    {{ t('schedule.republish_check') }}
+    {% if post.permalink and post.permalink.startswith('https://') %}<a href="{{ post.permalink }}" rel="noopener noreferrer" target="_blank">{{ t('schedule.open') }}</a>{% endif %}
+  </p>
+  <div class="actions">
+    <form method="post" action="/schedule/{{ post.id }}/publish-now" class="inline">
+      {{ m.csrf() }}
+      <input type="hidden" name="next" value="{{ next }}">
+      <input type="hidden" name="confirm_duplicate" value="1">
+      <button type="submit" class="button danger">{{ t('schedule.republish_confirm') }}</button>
+    </form>
+    <form method="post" action="/schedule/{{ post.id }}/skip" class="inline" data-confirm="{{ t('schedule.skip_confirm') }}">
+      {{ m.csrf() }}
+      <input type="hidden" name="next" value="{{ next }}">
+      <button type="submit" class="button">{{ t('schedule.republish_skip') }}</button>
+    </form>
+    <a class="button secondary" href="{{ next }}">{{ t('common.cancel') }}</a>
+  </div>
+  <p class="muted small">{{ t('schedule.republish_skip_help') }}</p>
+</section>
+{% endblock %}

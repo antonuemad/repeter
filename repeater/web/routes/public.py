@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
@@ -14,7 +16,7 @@ from repeater.crypto import verify_media_signature
 from repeater.db import get_engine
 from repeater.media import storage
 from repeater.models import Video
-from repeater.web import i18n
+from repeater.web import consent, i18n
 from repeater.web.auth import session_user
 from repeater.web.deps import DB, Form, safe_next
 from repeater.web.templating import STATIC_DIR, render
@@ -36,6 +38,8 @@ Allow: /terms
 Disallow: /
 """
 MEDIA_HEADERS = {"Cache-Control": "private, max-age=3600", "X-Robots-Tag": "noindex, nofollow"}
+# base64url(HMAC-SHA256) without padding is 43 characters; anything else is not a signature.
+_SIGNATURE_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 
 def db_ping() -> None:
@@ -67,7 +71,12 @@ def favicon() -> FileResponse:
 def media(request: Request, db: DB, video_id: str, expires: str, sig: str) -> Response:
     """Signed, expiring link to an encoded video, fetched by the platforms (PLAN.md 5.5, 7.4).
     No session: the HMAC signature over (video id, expiry) is the authorization."""
-    if not (video_id.isdigit() and expires.isdigit()) or len(video_id) > 18 or len(expires) > 12:
+    if (
+        not (video_id.isascii() and video_id.isdigit() and expires.isascii() and expires.isdigit())
+        or len(video_id) > 18
+        or len(expires) > 12
+        or not _SIGNATURE_RE.match(sig)
+    ):
         return PlainTextResponse("Forbidden", status_code=403, headers=MEDIA_HEADERS)
     vid, exp = int(video_id), int(expires)
     verdict = verify_media_signature(vid, exp, sig)
@@ -103,12 +112,12 @@ def _encoded_file(video: Video | None) -> Path | None:
 
 @router.get("/privacy")
 def privacy(request: Request) -> Response:
-    return render(request, "privacy.html", _legal_context())
+    return i18n.remember_requested(request, render(request, "privacy.html", _legal_context()))
 
 
 @router.get("/terms")
 def terms(request: Request) -> Response:
-    return render(request, "terms.html", _legal_context())
+    return i18n.remember_requested(request, render(request, "terms.html", _legal_context()))
 
 
 def _legal_context() -> dict[str, object]:
@@ -119,7 +128,7 @@ def _legal_context() -> dict[str, object]:
         "original_retention_days": settings.original_retention_days,
         "platform_retention_days": settings.platform_data_retention_days,
         "contact_email": "info@magic-lap.com",
-        "effective_date": "2026-10-14",
+        "effective_date": consent.LEGAL_VERSION,
     }
 
 
@@ -127,7 +136,8 @@ def _legal_context() -> dict[str, object]:
 def switch_language(request: Request, db: DB, form: Form) -> Response:
     lang = i18n.normalize(form.get("lang") if isinstance(form.get("lang"), str) else None)
     raw_next = form.get("next")
-    response = RedirectResponse(safe_next(raw_next if isinstance(raw_next, str) else None), status_code=303)
+    target = _without_lang_param(safe_next(raw_next if isinstance(raw_next, str) else None))
+    response = RedirectResponse(target, status_code=303)
     if lang is None:
         return response
     i18n.set_cookie(response, lang)
@@ -136,3 +146,13 @@ def switch_language(request: Request, db: DB, form: Form) -> Response:
         user.locale = lang
         db.commit()
     return response
+
+
+def _without_lang_param(target: str) -> str:
+    """Drop `lang` from the redirect target: a `?lang=en` in the URL would override the choice
+    that was just made."""
+    parts = urlsplit(target)
+    if i18n.QUERY_PARAM not in parts.query:
+        return target
+    query = urlencode([(k, v) for k, v in parse_qsl(parts.query) if k != i18n.QUERY_PARAM])
+    return parts.path + (f"?{query}" if query else "")

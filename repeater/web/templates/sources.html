@@ -23,7 +23,7 @@
     </div>
     {% if s.kind != 'manual' %}
     <dl class="details compact">
-      {% if s.connected_account %}<dt>{{ t('sources.account') }}</dt><dd dir="auto">{{ s.connected_account.display_name }}</dd>{% endif %}
+      {% if s.connected_account and s.kind != 'ytdlp' %}<dt>{{ t('sources.account') }}</dt><dd dir="auto">{{ s.connected_account.display_name }}</dd>{% endif %}
       {% if s.config.get('profile_url') %}<dt>{{ t('field.profile_url') }}</dt><dd dir="ltr">{{ s.config.get('profile_url') }}</dd>{% endif %}
       {% if s.config.get('folder_id') %}<dt>{{ t('field.folder') }}</dt><dd dir="ltr">{{ s.config.get('folder_id') }}</dd>{% endif %}
       <dt>{{ t('field.poll_interval_minutes') }}</dt><dd>{{ t('sources.every_minutes', minutes=s.poll_interval_minutes) }}</dd>

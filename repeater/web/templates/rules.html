@@ -26,7 +26,11 @@
       {% else %}
       <div class="muted small">{{ t('rules.not_set_up') }}</div>
       {% endif %}
-      <a class="button small" href="/rules/{{ a.id }}">{{ t('common.edit') }}</a>
+      {% if row.rule and not row.rule.enabled %}
+      <a class="button small" href="/rules/{{ a.id }}">{{ t('rules.review_turn_on') }}</a>
+      {% else %}
+      <a class="button small secondary" href="/rules/{{ a.id }}">{{ t('common.edit') }}</a>
+      {% endif %}
     </li>
     {% endfor %}
   </ul>

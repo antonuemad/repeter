@@ -29,7 +29,7 @@
           <td class="nowrap">{{ fmt_dt(e.created_at, zone) }}</td>
           <td>{{ m.badge('level', e.level) }}</td>
           <td>{{ t('category.' ~ e.category) if t.has('category.' ~ e.category) else e.category }}</td>
-          <td dir="auto">{{ e.message }}</td>
+          <td dir="auto">{{ t.activity(e) }}</td>
           <td class="muted" dir="ltr">{{ e.actor }}</td>
         </tr>
         {% endfor %}

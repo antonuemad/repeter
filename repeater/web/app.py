@@ -22,6 +22,7 @@ from repeater.web.middleware import SECURITY_HEADERS, BodySizeLimitMiddleware, S
 from repeater.web.routes import (
     accounts,
     activity,
+    consent,
     library,
     meta,
     oauth,
@@ -65,6 +66,7 @@ def create_app() -> FastAPI:
         public.router,
         meta.router,
         auth.router,
+        consent.router,
         oauth.router,
         overview.router,
         library.router,
@@ -96,8 +98,11 @@ def _configure_logging() -> None:
 def _add_middleware(app: FastAPI) -> None:
     """Starlette wraps in reverse order of registration: the last one added runs first."""
     settings = get_settings()
+    # The streamed upload gets its own cap (file limit + two multipart overheads), never "unlimited":
+    # the body limit runs before authentication.
+    upload_cap = library.upload_limit_bytes() + 2 * library.MULTIPART_OVERHEAD
     app.add_middleware(
-        BodySizeLimitMiddleware, max_bytes=FORM_BODY_LIMIT, unlimited_paths=frozenset({library.UPLOAD_PATH})
+        BodySizeLimitMiddleware, max_bytes=FORM_BODY_LIMIT, path_limits={library.UPLOAD_PATH: upload_cap}
     )
     app.add_middleware(
         SessionMiddleware,
@@ -150,6 +155,14 @@ def _add_exception_handlers(app: FastAPI) -> None:
             target += "?" + request.url.query
         next_url = target if request.method == "GET" else "/"
         return RedirectResponse(f"/login?next={quote(next_url, safe='')}", status_code=303)
+
+    @app.exception_handler(auth.ConsentRequired)
+    async def _consent_required(request: Request, exc: auth.ConsentRequired) -> Response:
+        target = request.url.path
+        if request.url.query:
+            target += "?" + request.url.query
+        next_url = target if request.method == "GET" else "/"
+        return RedirectResponse(f"/consent?next={quote(next_url, safe='')}", status_code=303)
 
     @app.exception_handler(csrf.CSRFError)
     async def _csrf_failed(request: Request, exc: csrf.CSRFError) -> Response:

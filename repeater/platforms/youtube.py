@@ -18,7 +18,7 @@ import re
 import time
 import unicodedata
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
@@ -42,7 +42,9 @@ from repeater.platforms.base import (
     PublishResult,
     RateLimitedError,
     RemoteVideo,
+    RestartPublish,
     RetryableError,
+    UnknownOutcomeError,
 )
 from repeater.timeutil import ensure_aware, utcnow
 
@@ -65,7 +67,6 @@ MAX_INLINE_RETRY_AFTER = 60.0
 TITLE_MAX = 100
 DESCRIPTION_MAX_BYTES = 5000
 TAGS_MAX_CHARS = 500
-FALLBACK_TITLE = "Short"
 ELLIPSIS = "\u2026"
 
 SHORTS_MAX_SECONDS = 180.0
@@ -82,6 +83,10 @@ MAX_PLAYLIST_PAGES = 20
 NOT_FOUND_POLL_LIMIT = 3
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
+TITLE_REQUIRED_MESSAGE = (
+    "Set a title for this video before it can be posted to YouTube (the video has no title and no "
+    "caption text to take one from)."
+)
 NO_CHANNEL_MESSAGE = (
     "This Google account has no YouTube channel. Create a channel at youtube.com "
     "(or pick the Google account that owns the channel), then connect again."
@@ -237,6 +242,50 @@ def list_my_channels(c: httpx.Client, access_token: str) -> list[dict[str, Any]]
     return [item for item in data.get("items") or [] if isinstance(item, dict) and item.get("id")]
 
 
+def channel_summary(channel: dict[str, Any]) -> dict[str, Any]:
+    """The account fields Repeater stores for a channels.list item: display_name, avatar_url and
+    extra (channel_id, uploads_playlist_id, custom_url). Shared by the OAuth connect flow and
+    refresh_account_info so both read the channel the same way."""
+    channel_id = str(channel["id"])
+    snippet = channel.get("snippet") or {}
+    related = (channel.get("contentDetails") or {}).get("relatedPlaylists") or {}
+    thumbs = snippet.get("thumbnails") or {}
+    avatar = next(
+        (thumbs[k].get("url") for k in ("medium", "default", "high") if isinstance(thumbs.get(k), dict)), None
+    )
+    custom_url = snippet.get("customUrl")
+    return {
+        "display_name": snippet.get("title") or custom_url or channel_id,
+        "avatar_url": avatar,
+        "extra": {
+            "channel_id": channel_id,
+            "uploads_playlist_id": related.get("uploads"),
+            "custom_url": custom_url,
+        },
+    }
+
+
+def refresh_account_info(account: AccountContext) -> dict[str, Any]:
+    """Re-read the connected channel with channels.list(mine=true) (1 quota unit). The YouTube
+    Developer Policies (III.E.4.c) require stored API data to be refreshed or deleted within 30
+    days; the engine calls this at least every 25 days and stores the result.
+
+    Returns {"display_name", "avatar_url", "extra": {"channel_id", "uploads_playlist_id",
+    "custom_url"}}. PermanentError (channelNotFound) when the signed-in Google identity no longer
+    owns the channel."""
+    wanted = str((account.extra or {}).get("channel_id") or account.external_id)
+    with http.client() as c:
+        channels = list_my_channels(c, account.tokens.access_token)
+    for channel in channels:
+        if str(channel["id"]) == wanted:
+            return channel_summary(channel)
+    raise PermanentError(
+        "The YouTube channel is no longer available to the connected Google account. Reconnect the "
+        "channel if it still exists.",
+        code="channelNotFound",
+    )
+
+
 # --------------------------------------------------------------------------- text limits
 
 
@@ -315,14 +364,16 @@ def truncate_bytes(text: str, limit: int = DESCRIPTION_MAX_BYTES) -> str:
 
 
 def build_title(title: str | None, caption: str | None) -> str:
-    """Title for videos.insert: never empty, no < or >, at most 100 characters. Falls back to
-    the first non-empty caption line, then to "Short"."""
+    """Title for videos.insert: no < or >, at most 100 characters. Falls back to the first
+    non-empty caption line. Returns "" when the video has neither: there is deliberately no
+    constant default title (YouTube API Developer Policies III.C.3), so such a post is not
+    published until the user sets one."""
     candidates = [title or ""] + (caption or "").splitlines()
     for candidate in candidates:
         single_line = " ".join(_clean_text(candidate).split())
         if single_line:
             return truncate_title(single_line)
-    return FALLBACK_TITLE
+    return ""
 
 
 def build_description(caption: str | None) -> str:
@@ -417,6 +468,17 @@ class _SessionExpired(Exception):  # noqa: N818
     """The resumable session URI is gone (HTTP 404); the upload must start over."""
 
 
+class _OutcomeUnknown(Exception):  # noqa: N818
+    """The last byte of the file was (or may have been) delivered and the result is unclear: lost
+    response, failed status queries, or an unreadable 2xx body. The video may exist on YouTube,
+    so the upload must not start over; the session URI is how poll() finds out."""
+
+    def __init__(self, session_uri: str, reason: str) -> None:
+        super().__init__(reason)
+        self.session_uri = session_uri
+        self.reason = reason
+
+
 class _Backoff:
     """Counts consecutive failures inside one publish() call and sleeps between attempts."""
 
@@ -447,15 +509,26 @@ def _next_offset(resp: httpx.Response) -> int:
     return int(m.group(2)) + 1 if m else 0
 
 
+def _status_query(c: httpx.Client, access_token: str, session_uri: str, total: int) -> httpx.Response:
+    """Empty PUT with `Content-Range: bytes */total`: asks the session how far the upload got.
+    A finished session answers with its original response (the video resource, or the error)."""
+    headers = {**_auth(access_token), "Content-Range": f"bytes */{total}"}
+    return c.put(session_uri, content=b"", headers=headers)
+
+
 @dataclass
 class _ResumableUpload:
     client: httpx.Client
     access_token: str
     path: Path
     total: int
+    # True once the request carrying the file's last byte has been issued (or the server reports
+    # it has every byte): from then on a failure no longer proves that no video was created.
+    final_sent: bool = field(default=False, init=False)
 
     def start(self, metadata: dict[str, Any], notify_subscribers: bool) -> str:
-        """Open a resumable session and return its URI (Location header)."""
+        """Open a resumable session and return its URI (Location header). The URI is a
+        credential for the upload: it is never logged or put in a message."""
         params = {
             "uploadType": "resumable",
             "part": "snippet,status",
@@ -485,14 +558,29 @@ class _ResumableUpload:
                 raise RetryableError("YouTube did not return an upload session; will retry.")
             return location
 
-    def run(self, session_uri: str) -> dict[str, Any]:
-        """Send the file in chunks, resuming after interruptions. Returns the video resource."""
+    def run(self, session_uri: str, *, resume: bool = False) -> dict[str, Any]:
+        """Send the file in chunks, resuming after interruptions. Returns the video resource.
+
+        `resume=True` continues a session left by an earlier attempt: the first request is a
+        status query, so finished or partly delivered sessions are never re-sent from byte 0.
+        Raises _SessionExpired on 404 and _OutcomeUnknown when the last byte may have been
+        delivered and the answer was lost."""
+        self.final_sent = resume
+        try:
+            return self._loop(session_uri, resume)
+        except RetryableError as exc:
+            if self.final_sent:
+                raise _OutcomeUnknown(session_uri, exc.message) from exc
+            raise
+
+    def _loop(self, session_uri: str, resume: bool) -> dict[str, Any]:
         backoff = _Backoff("upload")
-        offset, probe = 0, False
+        offset, probe = 0, resume
         with open(self.path, "rb") as fh:
             while True:
                 try:
                     if probe or offset >= self.total:
+                        self.final_sent = self.final_sent or offset >= self.total
                         resp = self._query_status(session_uri)
                     else:
                         resp = self._send_chunk(session_uri, fh, offset)
@@ -502,7 +590,10 @@ class _ResumableUpload:
                     continue
                 status = resp.status_code
                 if status in (200, 201):
-                    return _json_object(resp, "upload")
+                    try:
+                        return _json_object(resp, "upload")
+                    except RetryableError as exc:  # a 2xx means the video exists; we just cannot read it
+                        raise _OutcomeUnknown(session_uri, exc.message) from exc
                 if status == 308:
                     new_offset = _next_offset(resp)
                     if new_offset > offset:
@@ -525,6 +616,8 @@ class _ResumableUpload:
         if not data:
             raise PermanentError("The video file became shorter while uploading.")
         end = offset + len(data) - 1
+        if end >= self.total - 1:
+            self.final_sent = True  # set before the request: the bytes may arrive even if the reply is lost
         headers = {
             **_auth(self.access_token),
             "Content-Type": UPLOAD_CONTENT_TYPE,
@@ -533,8 +626,7 @@ class _ResumableUpload:
         return self.client.put(uri, content=data, headers=headers)
 
     def _query_status(self, uri: str) -> httpx.Response:
-        headers = {**_auth(self.access_token), "Content-Range": f"bytes */{self.total}"}
-        return self.client.put(uri, content=b"", headers=headers)
+        return _status_query(self.client, self.access_token, uri, self.total)
 
 
 # --------------------------------------------------------------------------- publisher
@@ -638,23 +730,49 @@ class YouTubePublisher:
             problems.append(
                 f"Video is landscape ({req.width}x{req.height}); YouTube Shorts must be vertical or square."
             )
+        if not build_title(req.title, req.caption):
+            problems.append(TITLE_REQUIRED_MESSAGE)
         problems.extend(settings_problems(effective_settings(req.settings)))
         return problems
 
     def publish(self, account: AccountContext, req: PublishRequest) -> PublishResult:
         settings = effective_settings(req.settings)
         problems = settings_problems(settings)
+        if not build_title(req.title, req.caption):
+            problems.append(TITLE_REQUIRED_MESSAGE)
         if problems:
             raise PermanentError(" ".join(problems), code="invalid_settings")
+        earlier = req.state or {}
+        if isinstance(earlier.get("video_id"), str) and earlier["video_id"]:
+            return self.poll(account, earlier)  # an earlier attempt already created the video
         total = _file_size(req.video_path)
         metadata = _video_metadata(req, settings)
+        resume_uri = _resumable_session(earlier, total)
         with http.client() as c:
             upload = _ResumableUpload(c, account.tokens.access_token, req.video_path, total)
-            resource = _upload_with_restart(upload, metadata, bool(settings["notify_subscribers"]))
+            try:
+                resource = _upload_with_restart(
+                    upload, metadata, bool(settings["notify_subscribers"]), resume_uri=resume_uri
+                )
+            except _OutcomeUnknown as exc:
+                raise UnknownOutcomeError(
+                    "YouTube did not confirm the upload after the last byte was sent "
+                    f"({exc.reason}); Repeater will ask YouTube whether the video was created.",
+                    state={
+                        "session_uri": exc.session_uri,
+                        "total": total,
+                        "requested_privacy": settings["privacy_status"],
+                    },
+                    code="upload_outcome_unknown",
+                ) from exc
         video_id = resource.get("id")
         if not isinstance(video_id, str) or not video_id:
-            # The bytes were accepted; retrying could post a duplicate, so do not retry.
-            raise PermanentError("YouTube accepted the upload but returned no video id.", code="no_video_id")
+            # The bytes were accepted but the answer names no video: it may be live, never retry.
+            raise UnknownOutcomeError(
+                "YouTube accepted the upload but returned no video id; check the channel before "
+                "publishing again.",
+                code="no_video_id",
+            )
         log.info("YouTube upload complete for post %s: video %s", req.post_id, video_id)
         state = {"video_id": video_id, "requested_privacy": settings["privacy_status"]}
         return _interpret(resource, state)
@@ -662,6 +780,8 @@ class YouTubePublisher:
     def poll(self, account: AccountContext, state: dict[str, Any]) -> PublishResult:
         video_id = state.get("video_id")
         if not isinstance(video_id, str) or not video_id:
+            if state.get("session_uri"):
+                return _poll_session(account, state)
             raise PermanentError("Missing YouTube video id in publish state.", code="no_video_id")
         with http.client() as c:
             data = api_get(
@@ -699,15 +819,94 @@ def _file_size(path: Path) -> int:
     return size
 
 
-def _upload_with_restart(upload: _ResumableUpload, metadata: dict[str, Any], notify: bool) -> dict[str, Any]:
-    """Run the resumable upload; if the session expires (404), start over once."""
-    for attempt in range(2):
-        session_uri = upload.start(metadata, notify)
+def _resumable_session(state: dict[str, Any], total: int) -> str | None:
+    """The session URI an earlier attempt left in `state`, if it belongs to this very file."""
+    uri = state.get("session_uri")
+    if isinstance(uri, str) and uri.startswith("https://") and state.get("total") == total:
+        return uri
+    return None
+
+
+def _upload_with_restart(
+    upload: _ResumableUpload, metadata: dict[str, Any], notify: bool, *, resume_uri: str | None = None
+) -> dict[str, Any]:
+    """Run the resumable upload. A session left by an earlier attempt (`resume_uri`) is resumed
+    first; when a session has expired (404) a new one is started, at most twice."""
+    starts = 0
+    while True:
+        if resume_uri is not None:
+            session_uri, resume, resume_uri = resume_uri, True, None
+        else:
+            if starts >= 2:
+                raise RetryableError("The YouTube upload session expired twice; Repeater will retry later.")
+            session_uri, resume = upload.start(metadata, notify), False
+            starts += 1
         try:
-            return upload.run(session_uri)
+            return upload.run(session_uri, resume=resume)
         except _SessionExpired:
-            log.info("YouTube upload session expired (attempt %d); starting over", attempt + 1)
-    raise RetryableError("The YouTube upload session expired twice; Repeater will retry later.")
+            log.info("YouTube upload session expired (new sessions started: %d); starting over", starts)
+
+
+def _poll_session(account: AccountContext, state: dict[str, Any]) -> PublishResult:
+    """Resolve an unknown outcome: ask the resumable session whether the video was created.
+    A finished session repeats its original answer (the video resource); 308 with every byte
+    present means YouTube is still finishing; any other 308 or a 404 proves that no video
+    exists, so publish() has to run again."""
+    session_uri, total = state.get("session_uri"), state.get("total")
+    if (
+        not isinstance(session_uri, str)
+        or not session_uri.startswith("https://")
+        or not isinstance(total, int)
+    ):
+        raise PermanentError("Missing YouTube video id in publish state.", code="no_video_id")
+    with http.client() as c:
+        try:
+            resp = _status_query(c, account.tokens.access_token, session_uri, total)
+        except httpx.TransportError as exc:
+            raise RetryableError(
+                f"YouTube upload status check: network error ({type(exc).__name__})"
+            ) from exc
+    status = resp.status_code
+    if status in (200, 201):
+        resource = _json_object(resp, "upload status check")  # unreadable: poll again
+        video_id = resource.get("id")
+        if not isinstance(video_id, str) or not video_id:
+            raise PermanentError(
+                "YouTube accepted the upload but returned no video id; check the channel before "
+                "publishing again.",
+                code="no_video_id",
+            )
+        video_state: dict[str, Any] = {"video_id": video_id}
+        if state.get("requested_privacy"):
+            video_state["requested_privacy"] = state["requested_privacy"]
+        log.info("YouTube upload resolved by status query: video %s", video_id)
+        return _interpret(resource, video_state)
+    if status == 308:
+        if _next_offset(resp) >= total:
+            return PublishResult(
+                outcome=PublishOutcome.PROCESSING,
+                state=dict(state),
+                poll_after_seconds=30,
+                message="YouTube has received the whole file and is finishing the upload.",
+            )
+        raise RestartPublish(
+            "YouTube never received the whole video, so nothing was published; the upload will start over.",
+            code="upload_incomplete",
+            status=status,
+        )
+    if status in (404, 410):
+        raise RestartPublish(
+            "The YouTube upload session is gone and no video was created; the upload will start over.",
+            code="session_expired",
+            status=status,
+        )
+    if status in RESUMABLE_STATUSES:
+        raise RetryableError(
+            f"YouTube upload status check failed (HTTP {status}).",
+            status=status,
+            retry_after=http.retry_after_seconds(resp, 60.0),
+        )
+    raise youtube_api_error(resp, "upload status check")
 
 
 # --------------------------------------------------------------------------- lister

@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from sqlalchemy import select
 
+from repeater.config import get_settings
 from repeater.engine import rules, scheduler
 from repeater.models import (
     AccountStatus,
@@ -75,6 +76,15 @@ def video(db, ws):
     return _make
 
 
+def ready_settings(platform) -> dict:
+    """Default post settings with the answers that have no default filled in (YouTube's audience
+    question), so the planner accepts the rule."""
+    settings = rules.default_settings(platform)
+    if Platform(platform) == Platform.YOUTUBE:
+        settings["self_declared_made_for_kids"] = False
+    return settings
+
+
 @pytest.fixture
 def rule_for(db, ws):
     def _make(account, **kw) -> RotationRule:
@@ -87,7 +97,7 @@ def rule_for(db, ws):
             min_gap_minutes=kw.pop("min_gap_minutes", 240),
             window_start=kw.pop("window_start", time(10, 0)),
             window_end=kw.pop("window_end", time(22, 0)),
-            settings=kw.pop("settings", rules.default_settings(account.platform)),
+            settings=kw.pop("settings", ready_settings(account.platform)),
             **kw,
         )
         db.add(r)
@@ -136,8 +146,10 @@ def test_ensure_rule_defaults_per_platform(db, make_account):
     r_tt = rules.ensure_rule(db, tt)
     db.commit()
     assert rules.ensure_rule(db, drive) is None
-    assert r_yt.enabled is True and r_yt.platform == Platform.YOUTUBE
+    # Contract C3: no rule starts enabled, whatever the platform.
+    assert r_yt.enabled is False and r_yt.platform == Platform.YOUTUBE
     assert r_yt.settings["privacy_status"] == "public" and r_yt.daily_cap == 2
+    assert r_yt.settings["self_declared_made_for_kids"] is None
     assert r_yt.min_gap_minutes == 240 and r_yt.window_start == time(10, 0) and r_yt.window_end == time(22, 0)
     assert r_yt.caption_template == "{caption}" and r_yt.evergreen_days is None
     assert r_tt.enabled is False
@@ -148,14 +160,12 @@ def test_ensure_rule_defaults_per_platform(db, make_account):
     # Idempotent.
     assert rules.ensure_rule(db, yt).id == r_yt.id
     assert db.execute(select(RotationRule)).scalars().all().__len__() == 2
-    msgs = [a.message for a in db.execute(select(ActivityLog)).scalars()]
-    assert any("Music Usage Confirmation" in m for m in msgs)
 
 
 def test_rule_problems_and_cap_clamp(db, make_account, rule_for):
     tt = make_account("tiktok")
     r = rule_for(tt, settings=rules.default_settings("tiktok"))
-    assert len(rules.rule_problems(r)) == 2
+    assert set(rules.rule_problems(r)) == {"tiktok_privacy_required", "tiktok_music_consent_required"}
     r.settings = {**r.settings, "mode": "inbox"}
     assert rules.rule_problems(r) == []
     r.settings = {
@@ -343,7 +353,7 @@ def test_canceled_post_is_reused(db, ws, make_account, rule_for, video):
     rule_for(acc)
     v = video()
     old = add_post(db, ws, v, acc, status=PostStatus.CANCELED, at=cairo(1, 1, 0))
-    old.error, old.attempts, old.publish_state = "account disconnected", 2, {"x": 1}
+    old.error, old.attempts = "account disconnected", 2
     db.commit()
     posts = plan(db, ws)
     assert [p.id for p in posts] == [old.id]
@@ -507,7 +517,8 @@ def test_tiktok_rule_without_settings_is_not_planned(db, ws, make_account, rule_
     video()
     assert plan(db, ws) == []
     warns = warnings(db)
-    assert len(warns) == 1 and "Music Usage Confirmation" in warns[0].message
+    expected = rules.PROBLEM_MESSAGES["tiktok_music_consent_required"]
+    assert len(warns) == 1 and expected in warns[0].message and "TikTok" in warns[0].message
     plan(db, ws)
     assert len(warnings(db)) == 1
 
@@ -525,7 +536,7 @@ def test_account_with_repeated_failures_is_suspended(db, ws, make_account, rule_
 
 
 def test_youtube_project_budget_across_workspaces(db, ws, make_account, rule_for, video, monkeypatch):
-    monkeypatch.setattr(scheduler, "YOUTUBE_DAILY_UPLOAD_BUDGET", 1)
+    monkeypatch.setattr(get_settings(), "youtube_daily_upload_quota", 2)  # budget: 90% of 2 = 1
     acc = make_account("youtube")
     rule_for(acc, daily_cap=1)
     other_ws = Workspace(name="Other", timezone="UTC")
@@ -570,3 +581,361 @@ def test_summary_activity_lists_new_posts(db, ws, make_account, rule_for, video)
         .all()
     )
     assert any(a.data.get("post_ids") == [p.id for p in posts] for a in info)
+
+
+# =========================================================================== cost (engine-5)
+
+
+def _bulk_library(db, ws, make_account, n_videos: int, n_history: int) -> list:
+    """A back catalogue of `n_videos` and `n_history` published posts per account (3 a day)."""
+    from sqlalchemy import insert
+
+    accounts = [make_account(p) for p in ("tiktok", "instagram", "facebook", "youtube")]
+    caps = {"tiktok": 10, "instagram": 10, "facebook": 10, "youtube": 5}
+    for acc in accounts:
+        settings = ready_settings(acc.platform)
+        if acc.platform == Platform.TIKTOK:
+            settings.update(privacy_level="PUBLIC_TO_EVERYONE", music_consent_at="2026-01-01T00:00:00+00:00")
+        # A cap that the 4 h gap makes impossible to reach: most segments can never be filled.
+        db.add(
+            RotationRule(
+                workspace_id=ws.id,
+                connected_account_id=acc.id,
+                platform=acc.platform,
+                enabled=True,
+                daily_cap=caps[acc.platform.value],
+                min_gap_minutes=240,
+                window_start=time(10, 0),
+                window_end=time(22, 0),
+                settings=settings,
+            )
+        )
+    db.commit()
+    base = datetime(2025, 1, 1, tzinfo=UTC)
+    db.execute(
+        insert(Video),
+        [
+            {
+                "workspace_id": ws.id,
+                "status": VideoStatus.READY,
+                "title": f"v{i}",
+                "caption": "c",
+                "duration_s": 30.0,
+                "width": 1080,
+                "height": 1920,
+                "encoded_size_bytes": 5_000_000,
+                "encoded_path": f"x/{i}.mp4",
+                "source_platform": Platform.GDRIVE,
+                "created_at": base + timedelta(minutes=i),
+                "overrides": {},
+            }
+            for i in range(n_videos)
+        ],
+    )
+    db.commit()
+    vids = list(db.execute(select(Video.id)).scalars())
+    rows = []
+    for acc in accounts:
+        for k in range(n_history):
+            vid, at = vids[k % len(vids)], DEC1_0800 - timedelta(hours=8 * (k + 1))
+            rows.append(
+                {
+                    "workspace_id": ws.id,
+                    "video_id": vid,
+                    "connected_account_id": acc.id,
+                    "platform": acc.platform,
+                    "cycle": 0,
+                    "idempotency_key": f"{vid}:{acc.id}:0",
+                    "scheduled_at": at,
+                    "published_at": at,
+                    "status": PostStatus.PUBLISHED,
+                    "attempts": 0,
+                    "publish_state": {},
+                    "created_by": "scheduler",
+                }
+            )
+    if rows:
+        db.execute(insert(ScheduledPost), rows)
+    db.commit()
+    return accounts
+
+
+def _count_queries(db, fn):
+    from sqlalchemy import event
+
+    statements: list[str] = []
+
+    def record(conn, cursor, statement, params, context, executemany):
+        statements.append(statement)
+
+    engine = db.get_bind()
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        result = fn()
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    return result, statements
+
+
+def test_plan_cost_does_not_grow_with_the_library(db, ws, make_account):
+    """A 3000-video library with ~1000 posts of history per account plans in well under a second
+    (it took over 30 s), with a number of queries that does not depend on the library size."""
+    import time as clock
+
+    _bulk_library(db, ws, make_account, n_videos=3000, n_history=1000)
+    started = clock.perf_counter()
+    created, big = _count_queries(db, lambda: scheduler.plan_workspace(db, ws.id, now=DEC1_0800))
+    elapsed = clock.perf_counter() - started
+    db.rollback()
+    assert len(created) >= 12  # the cap/gap combination fits about 3 posts a day per account
+    assert elapsed < 3.0, f"planning took {elapsed:.1f} s"
+    # One query per kind of data, plus a handful of statements for each post that is created.
+    selects = [q for q in big if q.lstrip().upper().startswith("SELECT")]
+    assert len(selects) <= 12 + 3 * len(created), f"{len(selects)} selects for {len(created)} posts"
+    assert len(big) <= 40 + 12 * len(created)
+
+
+def test_plan_queries_are_the_same_for_a_small_and_a_big_library(db, ws, make_account):
+    _bulk_library(db, ws, make_account, n_videos=60, n_history=10)
+    small, small_queries = _count_queries(db, lambda: scheduler.plan_workspace(db, ws.id, now=DEC1_0800))
+    db.rollback()
+    db.execute(
+        Video.__table__.insert(),
+        [
+            {
+                "workspace_id": ws.id,
+                "status": VideoStatus.READY,
+                "title": f"extra{i}",
+                "caption": "c",
+                "duration_s": 30.0,
+                "width": 1080,
+                "height": 1920,
+                "encoded_size_bytes": 5_000_000,
+                "encoded_path": f"y/{i}.mp4",
+                "source_platform": Platform.GDRIVE,
+                "overrides": {},
+                "created_at": datetime(2024, 1, 1, tzinfo=UTC),
+            }
+            for i in range(2500)
+        ],
+    )
+    db.commit()
+    big, big_queries = _count_queries(db, lambda: scheduler.plan_workspace(db, ws.id, now=DEC1_0800))
+    db.rollback()
+    assert len(small) == len(big) and len(small_queries) == len(big_queries)
+
+
+def test_bump_and_push_match_a_linear_scan():
+    import random
+
+    rnd = random.Random(7)
+    base = datetime(2026, 12, 1, tzinfo=UTC)
+
+    def brute(t, limit, acc, gap, vid, vgap):
+        while t < limit:
+            bump = None
+            for times, g in ((acc, gap), (vid, vgap)):
+                for p in times:
+                    if abs(t - p) < g and (bump is None or p + g > bump):
+                        bump = p + g
+            if bump is None:
+                return t
+            t = bump
+        return None
+
+    for _ in range(300):
+        acc = sorted(base + timedelta(minutes=rnd.randint(0, 3000)) for _ in range(rnd.randint(0, 40)))
+        vid = sorted(base + timedelta(minutes=rnd.randint(0, 3000)) for _ in range(rnd.randint(0, 4)))
+        gap, vgap = timedelta(minutes=rnd.choice([0, 30, 240])), timedelta(minutes=rnd.choice([0, 600, 1440]))
+        t = base + timedelta(minutes=rnd.randint(0, 3000))
+        limit = t + timedelta(minutes=rnd.choice([60, 720, 3000]))
+        assert scheduler._push(t, limit, acc, gap, vid, vgap) == brute(t, limit, acc, gap, vid, vgap)
+
+
+def test_segments_that_can_never_be_filled_are_dropped(db, ws, make_account, rule_for, video):
+    acc = make_account("facebook")
+    rule_for(acc, daily_cap=10, min_gap_minutes=240)  # 72 min segments, 4 h gap: ~3 per day fit
+    for _ in range(40):
+        video()
+    posts = plan(db, ws)
+    per_day = Counter(local(p.scheduled_at).date() for p in posts)
+    assert posts and max(per_day.values()) <= 3
+    times = [p.scheduled_at for p in posts]
+    assert all(b - a >= timedelta(minutes=240) for a, b in zip(times, times[1:], strict=False))
+
+
+# =========================================================================== possibly live (engine-missed-1)
+
+
+def test_needs_attention_post_that_is_probably_live_counts_for_gaps_caps_and_budget(
+    db, ws, make_account, rule_for, video
+):
+    """A poll timeout leaves the post needs-attention although the Short is live: the planner must
+    not put another one 2 minutes later or the same video on Facebook within the cross gap."""
+    ws.timezone = "UTC"
+    db.commit()
+    yt, fb = make_account("youtube"), make_account("facebook")
+    for acc in (yt, fb):
+        rule_for(acc, daily_cap=1, min_gap_minutes=240, window_start=time(0, 0), window_end=time(0, 0))
+    v, other = video(), video()
+    now = datetime(2026, 12, 1, 12, 0, tzinfo=UTC)
+    flagged = add_post(
+        db, ws, v, yt, status=PostStatus.NEEDS_ATTENTION, at=now - timedelta(hours=2, minutes=30)
+    )
+    flagged.platform_post_id, flagged.publish_state = "ytLIVE", {"video_id": "ytLIVE"}
+    db.commit()
+    created = scheduler.plan_workspace(db, ws.id, now=now)
+    db.commit()
+    rows = [(p.platform.value, p.video_id, p.scheduled_at - now) for p in created]
+    yt_rows = [r for r in rows if r[0] == "youtube"]
+    assert yt_rows
+    assert all(r[2] >= timedelta(hours=1, minutes=30) for r in yt_rows)  # >= 240 min after the upload
+    assert all(local_day(now + r[2]) != now.date() for r in yt_rows)  # daily cap of 1 is used up
+    fb_same_video = [r for r in rows if r[0] == "facebook" and r[1] == v.id]
+    assert fb_same_video
+    assert all(r[2] >= timedelta(hours=21, minutes=30) for r in fb_same_video)  # 24 h cross gap
+    assert any(r[1] == other.id for r in rows if r[0] == "facebook")  # the other video is free to go
+
+
+def local_day(dt: datetime) -> date:
+    return dt.date()
+
+
+def test_needs_attention_without_any_sign_of_an_upload_does_not_count(db, ws, make_account, rule_for, video):
+    ws.timezone = "UTC"
+    db.commit()
+    yt = make_account("youtube")
+    rule_for(yt, daily_cap=1, min_gap_minutes=240, window_start=time(0, 0), window_end=time(0, 0))
+    v = video()
+    now = datetime(2026, 12, 1, 12, 0, tzinfo=UTC)
+    add_post(
+        db, ws, v, yt, status=PostStatus.NEEDS_ATTENTION, at=now - timedelta(minutes=30)
+    )  # a validation failure
+    other = video()
+    created = scheduler.plan_workspace(db, ws.id, now=now)
+    assert [p.video_id for p in created] == [other.id]
+    assert created[0].scheduled_at - now < timedelta(minutes=30)  # nothing blocks the slot
+
+
+def test_engine_marker_and_processing_time_count_as_reached(db, ws, make_account, rule_for, video):
+    ws.timezone = "UTC"
+    db.commit()
+    yt = make_account("youtube")
+    rule_for(yt, daily_cap=1, min_gap_minutes=600, window_start=time(0, 0), window_end=time(0, 0))
+    v = video()
+    now = datetime(2026, 12, 1, 12, 0, tzinfo=UTC)
+    post = add_post(db, ws, v, yt, status=PostStatus.CANCELED, at=now - timedelta(days=3))
+    uploaded = now - timedelta(hours=1)
+    post.publish_state = {"_engine": {"processing_since": uploaded.isoformat(), "may_be_live": True}}
+    db.commit()
+    other = video()
+    created = scheduler.plan_workspace(db, ws.id, now=now)
+    # The disconnected post blocks its own cycle (no reuse) and its upload time (1 h ago) holds
+    # the account's 10 h gap.
+    assert [p.video_id for p in created] == [other.id]
+    assert created[0].scheduled_at >= uploaded + timedelta(minutes=600)
+    db.refresh(post)
+    assert post.status == PostStatus.CANCELED
+
+
+# =========================================================================== YouTube budget (api-tiktok-youtube-5)
+
+
+def test_youtube_budget_counts_failed_attempts_and_ignores_nothing(
+    db, ws, make_account, rule_for, video, monkeypatch
+):
+    """Every failed attempt opened an upload session (a videos.insert call): a post that needed 3
+    tries used up 4 of the project's calls, not 1."""
+    monkeypatch.setattr(get_settings(), "youtube_daily_upload_quota", 10)  # budget 9
+    assert scheduler.youtube_daily_budget() == 9
+    acc = make_account("youtube")
+    rule_for(acc, daily_cap=5, min_gap_minutes=0, window_start=time(0, 0), window_end=time(0, 0))
+    other_ws = Workspace(name="Other", timezone="UTC")
+    db.add(other_ws)
+    db.commit()
+    other_acc = make_account("youtube", workspace_id=other_ws.id)
+    other_video = Video(workspace_id=other_ws.id, status=VideoStatus.READY, encoded_path="x")
+    db.add(other_video)
+    db.commit()
+    noon = datetime(2026, 12, 1, 20, 0, tzinfo=UTC)  # 12:00 Pacific, 1 Dec
+    # Another workspace: 3 posts that were retried 2 times each = 9 calls on the Pacific day.
+    posts = []
+    for cycle in range(3):
+        p = add_post(
+            db,
+            other_ws,
+            other_video,
+            other_acc,
+            status=PostStatus.PUBLISHED,
+            at=noon - timedelta(hours=1),
+            cycle=cycle,
+        )
+        p.attempts = 2
+        posts.append(p)
+    db.commit()
+    for _ in range(3):
+        video()
+    now = noon - timedelta(hours=2)
+    created = scheduler.plan_workspace(db, ws.id, now=now)
+    pacific = [p.scheduled_at.astimezone(scheduler.YOUTUBE_QUOTA_TZ).date() for p in created]
+    assert created and date(2026, 12, 1) not in pacific
+
+
+def test_youtube_budget_uses_the_configured_quota(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "youtube_daily_upload_quota", 100)
+    assert scheduler.youtube_daily_budget() == 90
+    monkeypatch.setattr(settings, "youtube_daily_upload_quota", 10_000)
+    assert scheduler.youtube_daily_budget() == 9000
+    monkeypatch.setattr(settings, "youtube_daily_upload_quota", 0)
+    assert scheduler.youtube_daily_budget() == 0
+
+
+def test_probably_live_youtube_post_uses_budget(db, ws, make_account, rule_for, video, monkeypatch):
+    monkeypatch.setattr(get_settings(), "youtube_daily_upload_quota", 2)  # budget 1
+    acc = make_account("youtube")
+    rule_for(acc, daily_cap=5, min_gap_minutes=0, window_start=time(0, 0), window_end=time(0, 0))
+    v = video()
+    now = datetime(2026, 12, 1, 20, 0, tzinfo=UTC)
+    post = add_post(db, ws, v, acc, status=PostStatus.NEEDS_ATTENTION, at=now - timedelta(hours=1))
+    post.platform_post_id = "ytLIVE"
+    db.commit()
+    video()
+    created = scheduler.plan_workspace(db, ws.id, now=now)
+    pacific = [p.scheduled_at.astimezone(scheduler.YOUTUBE_QUOTA_TZ).date() for p in created]
+    assert date(2026, 12, 1) not in pacific
+
+
+def test_rules_with_problems_are_reported_with_the_problem_messages(db, ws, make_account, rule_for, video):
+    yt = make_account("youtube")
+    rule_for(yt, settings=rules.default_settings("youtube"))  # the audience question is unanswered
+    video()
+    assert plan(db, ws) == []
+    (warn,) = warnings(db)
+    assert rules.PROBLEM_MESSAGES["youtube_audience_required"] in warn.message
+    assert warn.data["account_id"] == yt.id  # retention can find the entry by account
+
+
+def test_possibly_live_sql_matches_reached_platform(db, ws, make_account, rule_for, video, monkeypatch):
+    """Only a post that reached the platform uses YouTube quota after it was canceled or flagged:
+    rate-limit bookkeeping alone, or an empty state, does not."""
+    monkeypatch.setattr(get_settings(), "youtube_daily_upload_quota", 100)
+    acc = make_account("youtube")
+    rule_for(acc)
+    v = video()
+    noon = datetime(2026, 12, 1, 20, 0, tzinfo=UTC)
+    cases = {
+        0: ({}, None, 0),
+        1: ({"_engine": {"rate_limited_since": noon.isoformat()}}, None, 0),
+        2: ({"_engine": {"may_be_live": True}}, None, 1),
+        3: ({"_engine": {"processing_since": noon.isoformat()}}, None, 1),
+        4: ({"upload_uri": "x"}, None, 1),
+        5: ({}, "ytLIVE", 1),
+    }
+    for cycle, (state, platform_post_id, _expected) in cases.items():
+        post = add_post(db, ws, v, acc, status=PostStatus.CANCELED, at=noon, cycle=cycle)
+        post.publish_state, post.platform_post_id = state, platform_post_id
+    db.commit()
+    start, end = noon - timedelta(days=1), noon + timedelta(days=1)
+    days = scheduler._youtube_days(db, start, end)
+    assert sum(days.values()) == sum(expected for *_, expected in cases.values())

@@ -1,9 +1,11 @@
 """Dashboard translations: Arabic (default, right-to-left) and English (left-to-right).
 
 Strings are looked up with t(lang, key, **params); placeholders use str.format syntax.
-The language comes from the `repeater_lang` cookie (an explicit choice on this device), then
-the signed-in user's saved locale, then settings.default_locale. Messages produced by other
-modules (platform errors, activity log entries) are shown as they are."""
+The language of a request is, in order: `?lang=ar|en` on a GET (so a page can be linked in a
+language, e.g. the privacy policy for a platform reviewer), the `repeater_lang` cookie (an
+explicit choice on this device), the signed-in user's saved locale, the browser's Accept-Language
+header, then settings.default_locale. Messages produced by other modules (platform errors) are
+shown as they are; activity entries and action errors that carry an i18n key are translated."""
 
 from __future__ import annotations
 
@@ -31,7 +33,42 @@ def direction(lang: str) -> str:
     return DIRECTIONS.get(lang, "rtl")
 
 
+QUERY_PARAM = "lang"
+MAX_ACCEPT_LANGUAGE_CHARS = 300
+
+
+def requested_lang(request: Request) -> str | None:
+    """The language asked for in the URL (`?lang=en`) of a GET or HEAD request."""
+    if request.method not in ("GET", "HEAD"):
+        return None
+    return normalize(request.query_params.get(QUERY_PARAM))
+
+
+def accept_language(header: str | None) -> str | None:
+    """The best supported language of an Accept-Language header (highest q first)."""
+    ranked: list[tuple[float, int, str]] = []
+    for position, part in enumerate((header or "")[:MAX_ACCEPT_LANGUAGE_CHARS].split(",")[:20]):
+        tag, _, params = part.partition(";")
+        lang = normalize(tag.strip().split("-")[0])
+        if lang is None:
+            continue
+        quality = 1.0
+        for param in params.split(";"):
+            name, _, value = param.partition("=")
+            if name.strip().lower() == "q":
+                try:
+                    quality = float(value)
+                except ValueError:
+                    quality = 0.0
+        if quality > 0:
+            ranked.append((-quality, position, lang))
+    return min(ranked)[2] if ranked else None
+
+
 def request_lang(request: Request) -> str:
+    requested = requested_lang(request)
+    if requested:
+        return requested
     chosen = normalize(request.cookies.get(COOKIE))
     if chosen:
         return chosen
@@ -39,7 +76,18 @@ def request_lang(request: Request) -> str:
     saved = normalize(getattr(user, "locale", None))
     if saved:
         return saved
+    accepted = accept_language(request.headers.get("accept-language"))
+    if accepted:
+        return accepted
     return normalize(get_settings().default_locale) or DEFAULT
+
+
+def remember_requested(request: Request, response: Response) -> Response:
+    """A page opened as `?lang=en` is shown in that language and the choice is remembered."""
+    requested = requested_lang(request)
+    if requested:
+        set_cookie(response, requested)
+    return response
 
 
 def set_cookie(response: Response, lang: str) -> None:
@@ -69,6 +117,10 @@ def t(lang: str, key: str, **params: Any) -> str:
         return text
 
 
+def has_key(key: str) -> bool:
+    return key in MESSAGES["en"]
+
+
 def message(lang: str, key: str, params: Mapping[str, Any] | None = None) -> str:
     """Like t(), but a `field` parameter (a form field name) is replaced by its label."""
     values = dict(params or {})
@@ -89,6 +141,29 @@ class Translator:
 
     def has(self, key: str) -> bool:
         return key in MESSAGES.get(self.lang, {}) or key in MESSAGES["en"]
+
+    def problem(self, code: str) -> str:
+        """A rule readiness problem code (engine.rules.rule_problems) in this language."""
+        key = f"problem.{code}"
+        if self.has(key):
+            return self(key)
+        from repeater.engine.rules import PROBLEM_MESSAGES
+
+        return PROBLEM_MESSAGES.get(code, code)
+
+    def activity(self, entry: Any) -> str:
+        """The text of an activity entry: translated when the entry carries an i18n key
+        (`msg_key`, `msg_params` in its data), else the stored English sentence."""
+        data = getattr(entry, "data", None) or {}
+        key = data.get("msg_key")
+        params = dict(data.get("msg_params") or {}) if isinstance(data.get("msg_params"), dict) else {}
+        if isinstance(key, str) and self.has(key):
+            # Parameters that are themselves codes are translated too.
+            for name, prefix in (("kind", "kind."), ("state", "activity.state_")):
+                if isinstance(params.get(name), str) and self.has(prefix + params[name]):
+                    params[name] = self(prefix + params[name])
+            return self(key, **params)
+        return str(getattr(entry, "message", ""))
 
     def error(self, err: Any) -> str:
         return message(self.lang, getattr(err, "key", str(err)), getattr(err, "params", None))
@@ -368,7 +443,7 @@ EN: dict[str, str] = {
     "accounts.rules": "Publishing rule",
     "accounts.disconnect": "Disconnect",
     "accounts.disconnect_title": "Disconnect this account?",
-    "accounts.disconnect_body": "Repeater will revoke its access where the platform allows it, delete the stored tokens, cancel scheduled posts for this account and turn off its rule and sources. Published posts stay on the platform.",
+    "accounts.disconnect_body": "Repeater deletes the stored tokens right away and revokes its access where the platform allows it, cancels scheduled posts for this account and turns off its rule and sources. Within 7 days the account record, its post history (post IDs and links) and the activity entries that name it are deleted. Videos imported from it stay in your library until you delete them. Published posts stay on the platform.",
     "accounts.disconnect_meta_note": "Facebook keeps the login itself: to remove Repeater completely, also remove it in Facebook Settings → Apps and Websites (or Business Integrations).",
     "accounts.disconnect_google_note": "You can also review Google access at",
     "accounts.disconnect_confirm": "Yes, disconnect",
@@ -387,7 +462,7 @@ EN: dict[str, str] = {
     "oauth.exchange_failed": "Could not connect {platform}:",
     "oauth.unexpected": "Could not connect {platform} because of an unexpected error. Please try again.",
     "oauth.connected": "Connected {count} account(s): {names}.",
-    "oauth.tiktok_setup": "Choose who can see your TikTok posts and accept TikTok's Music Usage Confirmation to start publishing.",
+    "oauth.tiktok_setup": "Publishing to TikTok is off. Choose who can see your TikTok posts, accept TikTok's Music Usage Confirmation, then turn publishing on.",
     # sources
     "sources.title": "Sources",
     "sources.intro": "Sources are where new videos come from. Repeater checks them regularly and adds new videos to the library.",
@@ -396,7 +471,7 @@ EN: dict[str, str] = {
     "sources.add_drive": "Add Google Drive folder",
     "sources.edit_title": "Edit source",
     "sources.kind_help_platform_api": "Imports your own videos from an Instagram professional account or Facebook Page through Meta's official API.",
-    "sources.kind_help_ytdlp": "Imports your public videos from a TikTok or YouTube profile with the open-source tool yt-dlp.",
+    "sources.kind_help_ytdlp": "Imports your public videos from a TikTok or YouTube profile with the open-source tool yt-dlp. Detection and download use yt-dlp only, never a connected account.",
     "sources.kind_help_drive": "Imports every new video file you put in a Google Drive folder.",
     "sources.empty": "No sources yet.",
     "sources.on": "On",
@@ -416,13 +491,10 @@ EN: dict[str, str] = {
     "sources.manual_help": "Videos you upload from the library.",
     "sources.unofficial_title": "Unofficial import: read before turning it on",
     "sources.unofficial_warning_1": "TikTok and YouTube offer no official way to download your videos. This option uses the open-source tool yt-dlp, which TikTok's and YouTube's terms do not allow, regardless of who owns the content.",
-    "sources.unofficial_warning_2": "Use it only for your own profile and content, and at your own risk. It is isolated from Repeater's official TikTok and Google integrations and never uses your connected accounts' tokens. It may stop working at any time; after 3 failed checks in a row the source is paused.",
+    "sources.unofficial_warning_2": "Use it only for your own profile and content, and at your own risk. It is isolated from Repeater's official TikTok and Google integrations: it never uses the tokens or the official API of any connected account. It may stop working at any time; after 3 failed checks in a row the source is paused.",
     "sources.unofficial_warning_3": "Safer alternatives: upload the original files from the library, or use a Google Drive folder.",
     "sources.ack_label": "I confirm this profile and its videos are mine, and I accept the risk of the unofficial import.",
     "sources.acknowledged_on": "Risk accepted on {date}.",
-    "sources.linked_account": "Linked account (optional)",
-    "sources.linked_account_help": "If this profile is one of your connected accounts, choose it: new videos are then detected through the official API and never re-posted to the same account.",
-    "sources.no_account": "None",
     "sources.connect_meta_first": "Connect Instagram or Facebook first:",
     "sources.connect_drive_first": "Connect Google Drive first:",
     "sources.poll_help": "Minimum {min} minutes.",
@@ -435,7 +507,6 @@ EN: dict[str, str] = {
     "sources.poll_already": "“{name}” is already being checked.",
     "sources.poll_disabled": "Turn “{name}” on before checking it.",
     "sources.error_account_required": "Choose a connected account for this source.",
-    "sources.error_account_platform": "The linked account must be on the same platform as the profile.",
     "sources.error_platform": "Choose TikTok or YouTube.",
     "sources.error_profile_url": "Enter a profile link such as https://www.tiktok.com/@name or https://www.youtube.com/@name.",
     "sources.error_folder": "The Google Drive folder link is not valid. Copy it again from Drive.",
@@ -473,7 +544,7 @@ EN: dict[str, str] = {
     "rules.tiktok_title": "TikTok post settings",
     "rules.tiktok_creator_error": "Could not load your TikTok creator settings:",
     "rules.tiktok_reconnect": "The TikTok account needs to be reconnected.",
-    "rules.tiktok_cannot_enable": "TikTok publishing cannot be turned on until your TikTok creator settings can be loaded.",
+    "rules.tiktok_cannot_enable": "Publishing to TikTok stays off until your TikTok creator settings can be loaded. Open this page again later.",
     "rules.tiktok_posting_as": "Posting to:",
     "rules.tiktok_max_duration": "Videos up to {minutes} minutes ({seconds} s) can be posted to this account.",
     "rules.tiktok_mode": "How to post",
@@ -548,8 +619,110 @@ EN: dict[str, str] = {
     "deletion.completed": "Completed",
     "deletion.in_progress": "In progress",
     "deletion.completed_at": "Completed",
-    "deletion.explanation": "Repeater received your request through Facebook to delete the data of the accounts you authorized. We disconnect those accounts, stop all publishing for them and delete the videos and data imported from them.",
+    "deletion.explanation": "Repeater received your request through Facebook. Within 24 hours (the deletion starts immediately) we delete the Facebook Pages and Instagram accounts connected through your Facebook login, the videos imported from them and their files, the posts and publishing history of those accounts, and every activity-log entry that names them.",
     "deletion.contact": "Questions about this request:",
+    # review fixes (security, compliance, UX)
+    "common.back_arrow": "←",
+    "common.flow_arrow": "→",
+    "common.error_label": "Reason:",
+    "login.busy": "The server is busy checking other sign-ins. Please try again in a few seconds.",
+    "login.agree_before": "By signing in you agree to our",
+    "login.agree_and": " and ",
+    "consent.title": "Terms of Service and Privacy Policy",
+    "consent.intro": "Before you use Repeater, please read and accept our terms. You do this once (again only if the texts change in an important way).",
+    "consent.point_publish": "Repeater publishes videos to your connected accounts only after you turn on a rule for each account, using the settings you approved.",
+    "consent.point_data": "We store the accounts, tokens (encrypted), videos and publishing records needed to run the service, and delete them as the privacy policy describes.",
+    "consent.point_youtube": "If you use the YouTube features you also agree to be bound by the",
+    "consent.version": "version {version}",
+    "consent.accept_label": "I have read and agree to the Terms of Service and the Privacy Policy.",
+    "consent.continue": "Continue",
+    "consent.decline": "I do not agree: sign out",
+    "consent.required": "Tick the box to agree before continuing.",
+    "problem.tiktok_privacy_required": "Choose who can view the posts (privacy level).",
+    "problem.tiktok_music_consent_required": "Accept TikTok's Music Usage Confirmation.",
+    "problem.tiktok_branded_private": "Branded content cannot be private: choose a wider audience or turn the disclosure off.",
+    "problem.youtube_audience_required": "Say whether these videos are made for kids.",
+    "problem.youtube_privacy_invalid": "Choose the YouTube privacy setting.",
+    "activity.state_on": "on",
+    "activity.state_off": "off",
+    "activity.signed_in": "Signed in to the dashboard",
+    "activity.terms_accepted": "Accepted the Terms of Service and the Privacy Policy (version {version}).",
+    "activity.paused": "Paused all publishing.",
+    "activity.resumed": "Resumed publishing.",
+    "activity.workspace_updated": "Updated the workspace settings.",
+    "activity.rule_updated_on": "Updated the publishing rule for {platform} account '{name}' (on).",
+    "activity.rule_updated_off": "Updated the publishing rule for {platform} account '{name}' (off).",
+    "activity.rule_created_tiktok": "TikTok publishing for '{name}' is off until you choose who can view the posts and accept TikTok's Music Usage Confirmation in the TikTok posting settings.",
+    "activity.rule_created": "Publishing to {platform} account '{name}' is off until you review its settings and turn it on.",
+    "activity.source_added": "Added source '{name}' ({kind}, {state}).",
+    "activity.source_updated": "Updated source '{name}' ({kind}, {state}).",
+    "activity.source_updated_reset": "Updated source '{name}' ({kind}, {state}). Detection restarts from the current videos.",
+    "activity.source_on": "Turned on source '{name}'.",
+    "activity.source_off": "Turned off source '{name}'.",
+    "activity.video_updated": "Updated the publishing details of '{title}'.",
+    "activity.video_updated_canceled": "Updated the publishing details of '{title}'; canceled {canceled} scheduled post(s) on excluded platforms.",
+    "activity.video_deleted": "Deleted a video from the library.",
+    "err.post_not_skippable": "This post can no longer be skipped.",
+    "err.post_not_publishable": "This post cannot be published again from here.",
+    "err.paused": "Publishing is paused for this workspace; resume it first.",
+    "err.account_disconnected": "The account is disconnected; connect it again first.",
+    "err.account_reconnect": "The {platform} account '{name}' must be reconnected first.",
+    "err.workspace_mismatch": "The video and the account belong to different workspaces.",
+    "err.not_publishable": "{platform} accounts cannot be published to.",
+    "err.video_not_ready": "Only videos that are ready (imported and encoded) can be published.",
+    "err.same_origin": "This video came from this account; publishing it there again would duplicate it.",
+    "err.platform_limit": "{platform} cannot take this video: {problem}.",
+    "err.in_flight": "This video is being published to this account right now.",
+    "err.not_archived": "Only archived videos can be restored.",
+    "err.duplicate_video": "This video is a duplicate of another video in the library and stays out of rotation.",
+    "err.files_gone": "The video's files are no longer on the server; upload it again.",
+    "err.not_failed": "Only failed videos can be retried.",
+    "err.original_gone": "The original file is gone; upload the video again.",
+    "err.upload_not_found": "The upload was not found. Please upload the file again.",
+    "err.upload_empty": "The upload is empty or incomplete. Please upload the file again.",
+    "oauth.code.no_publishable_accounts": "Facebook did not return a Page you can publish to. Select at least one Page in the Facebook dialog, make sure you have full control of it, then connect again.",
+    "oauth.code.no_channel": "This Google account has no YouTube channel. Create a channel on youtube.com (or choose the Google account that owns it), then connect again.",
+    "oauth.code.scope_not_granted": "Not all the permissions Repeater needs were granted. Connect again and allow every permission requested.",
+    "oauth.code.no_refresh_token": "Google did not give Repeater lasting access. Remove Repeater at myaccount.google.com/permissions and connect again.",
+    "oauth.publishing_off": "Publishing is off for {names} until you review the settings and turn it on. Nothing is posted before that.",
+    "rules.off_note": "Publishing to this account is off. Review the settings below, then tick the box and save to start.",
+    "rules.review_turn_on": "Review and turn on",
+    "rules.tiktok_unchanged": "TikTok's settings could not be loaded, so the TikTok options and the on/off state were left as they were.",
+    "rules.tiktok_keep_on_note": "TikTok's settings could not be loaded. You can still turn publishing off; the TikTok options stay as they are.",
+    "rules.youtube_audience_help": "YouTube requires an answer and there is no default: choose one.",
+    "schedule.publish_now_confirm": "Publish this post now?",
+    "schedule.publish_now_attention_confirm": "This post needs attention, so the video may already be on the platform. Publishing again can create a duplicate. Publish again anyway?",
+    "schedule.confirm_required": "This post may already be live. Open its confirmation page and confirm to publish it again.",
+    "schedule.republish_title": "Publish again?",
+    "schedule.republish_body": "The upload of this post did not finish cleanly, so the video may already be live on the platform. Publishing again uploads a second copy.",
+    "schedule.republish_check": "Check the account on the platform first.",
+    "schedule.republish_confirm": "Publish again anyway",
+    "schedule.republish_skip": "It is already live: skip this post",
+    "schedule.republish_skip_help": "Skipping closes this post: it will not be uploaded again for this account.",
+    "library.publish_now_confirm": "Publish this video to the chosen account now?",
+    "library.account_incomplete": "{account} is not ready to publish: finish its publishing settings first (Rules page).",
+    "library.complete_settings": "complete settings first",
+    "library.incomplete_help": "Accounts marked “complete settings first” cannot be used here yet. Open their settings:",
+    "library.republish_title": "Publish this video again?",
+    "library.republish_body_published": "This video is already published to this account. Publishing it again creates a second copy on the platform.",
+    "library.republish_body_uncertain": "The last attempt to publish this video to this account did not finish cleanly, so it may already be live there. Publishing again can create a duplicate.",
+    "library.republish_check": "Check the account on the platform first.",
+    "library.republish_confirm": "Publish again anyway",
+    "library.delete": "Delete",
+    "library.delete_confirm": "Delete this video for good? Its files, post history and activity entries are removed. Posts already on the platforms stay there.",
+    "library.deleted": "The video was deleted.",
+    "library.delete_busy": "This video is being prepared or published right now. Try again when that is finished.",
+    "library.delete_help": "Only the workspace owner can delete a video. Deleting removes it from Repeater for good; posts already on the platforms are not touched.",
+    "overview.setup_title": "Get started",
+    "overview.setup_intro": "Nothing is published until you turn it on yourself. Follow these steps in order.",
+    "overview.step_accounts": "Connect your accounts",
+    "overview.step_accounts_help": "TikTok, YouTube, Instagram or Facebook.",
+    "overview.step_content": "Add videos",
+    "overview.step_content_help": "Upload a video or add a source.",
+    "overview.step_rules": "Review each account's publishing settings and turn publishing on",
+    "overview.step_rules_help": "Choose the posting window, the daily limit and the platform options.",
+    "overview.step_done": "Done",
+    "overview.step_todo": "To do",
 }
 
 AR: dict[str, str] = {
@@ -782,7 +955,7 @@ AR: dict[str, str] = {
     "accounts.rules": "قاعدة النشر",
     "accounts.disconnect": "فصل",
     "accounts.disconnect_title": "فصل هذا الحساب؟",
-    "accounts.disconnect_body": "سيلغي Repeater وصوله حيث تسمح المنصة، ويحذف التوكنات المخزنة، ويلغي المنشورات المجدولة لهذا الحساب، ويوقف قاعدته ومصادره. المنشورات المنشورة تبقى على المنصة.",
+    "accounts.disconnect_body": "يحذف Repeater التوكنات المخزنة فورًا ويلغي وصوله حيث تسمح المنصة، ويلغي المنشورات المجدولة لهذا الحساب ويوقف قاعدته ومصادره. خلال 7 أيام يُحذف سجل الحساب وسجل منشوراته (معرّفات المنشورات وروابطها) وإدخالات النشاط التي تذكره. تبقى الفيديوهات المستوردة منه في مكتبتك حتى تحذفها. المنشورات المنشورة تبقى على المنصة.",
     "accounts.disconnect_meta_note": "يبقى تسجيل الدخول نفسه في فيسبوك: لإزالة Repeater تمامًا أزله أيضًا من إعدادات فيسبوك ← التطبيقات والمواقع (أو عمليات تكامل الأعمال).",
     "accounts.disconnect_google_note": "يمكنك أيضًا مراجعة صلاحيات Google من",
     "accounts.disconnect_confirm": "نعم، افصل الحساب",
@@ -800,7 +973,7 @@ AR: dict[str, str] = {
     "oauth.exchange_failed": "تعذّر ربط {platform}:",
     "oauth.unexpected": "تعذّر ربط {platform} بسبب خطأ غير متوقع. حاول مرة أخرى.",
     "oauth.connected": "تم ربط {count} حساب: {names}.",
-    "oauth.tiktok_setup": "اختر من يمكنه مشاهدة منشوراتك على تيك توك ووافق على تأكيد استخدام الموسيقى من تيك توك لبدء النشر.",
+    "oauth.tiktok_setup": "النشر على تيك توك متوقف. اختر من يمكنه مشاهدة منشوراتك على تيك توك ووافق على تأكيد استخدام الموسيقى من تيك توك، ثم فعّل النشر.",
     "sources.title": "المصادر",
     "sources.intro": "المصادر هي الأماكن التي تأتي منها الفيديوهات الجديدة. يفحصها Repeater بانتظام ويضيف الجديد إلى المكتبة.",
     "sources.add_platform_api": "إضافة مصدر انستجرام / فيسبوك",
@@ -808,7 +981,7 @@ AR: dict[str, str] = {
     "sources.add_drive": "إضافة مجلد Google Drive",
     "sources.edit_title": "تعديل المصدر",
     "sources.kind_help_platform_api": "يستورد فيديوهاتك من حساب انستجرام احترافي أو صفحة فيسبوك عبر واجهة ميتا الرسمية.",
-    "sources.kind_help_ytdlp": "يستورد فيديوهاتك العامة من ملف تيك توك أو يوتيوب باستخدام الأداة مفتوحة المصدر yt-dlp.",
+    "sources.kind_help_ytdlp": "يستورد فيديوهاتك العامة من ملف تيك توك أو يوتيوب باستخدام الأداة مفتوحة المصدر yt-dlp. الاكتشاف والتنزيل بـ yt-dlp فقط، ولا يستخدمان أي حساب مربوط.",
     "sources.kind_help_drive": "يستورد كل ملف فيديو جديد تضعه في مجلد على Google Drive.",
     "sources.empty": "لا توجد مصادر بعد.",
     "sources.on": "يعمل",
@@ -828,13 +1001,10 @@ AR: dict[str, str] = {
     "sources.manual_help": "الفيديوهات التي ترفعها من المكتبة.",
     "sources.unofficial_title": "استيراد غير رسمي: اقرأ قبل التفعيل",
     "sources.unofficial_warning_1": "لا يوفر تيك توك ولا يوتيوب طريقة رسمية لتنزيل فيديوهاتك. يستخدم هذا الخيار الأداة مفتوحة المصدر yt-dlp، وهو ما لا تسمح به شروط تيك توك ويوتيوب بغض النظر عن ملكية المحتوى.",
-    "sources.unofficial_warning_2": "استخدمه لملفك ومحتواك فقط وعلى مسؤوليتك. هذا المسار معزول عن تكامل Repeater الرسمي مع تيك توك وGoogle ولا يستخدم توكنات حساباتك المربوطة أبدًا. قد يتوقف عن العمل في أي وقت، ويُوقف المصدر تلقائيًا بعد 3 محاولات فحص فاشلة متتالية.",
+    "sources.unofficial_warning_2": "استخدمه لملفك ومحتواك فقط وعلى مسؤوليتك. هذا المسار معزول عن تكامل Repeater الرسمي مع تيك توك وGoogle: لا يستخدم أبدًا توكنات أي حساب مربوط ولا واجهته الرسمية. قد يتوقف عن العمل في أي وقت، ويُوقف المصدر تلقائيًا بعد 3 محاولات فحص فاشلة متتالية.",
     "sources.unofficial_warning_3": "بدائل أكثر أمانًا: ارفع الملفات الأصلية من المكتبة، أو استخدم مجلدًا على Google Drive.",
     "sources.ack_label": "أؤكد أن هذا الملف وفيديوهاته ملكي، وأقبل مخاطر الاستيراد غير الرسمي.",
     "sources.acknowledged_on": "تم قبول المخاطرة في {date}.",
-    "sources.linked_account": "الحساب المرتبط (اختياري)",
-    "sources.linked_account_help": "إذا كان هذا الملف أحد حساباتك المربوطة فاختره: عندها تُكتشف الفيديوهات الجديدة عبر الواجهة الرسمية ولا يُعاد نشرها على الحساب نفسه أبدًا.",
-    "sources.no_account": "بدون",
     "sources.connect_meta_first": "اربط انستجرام أو فيسبوك أولًا:",
     "sources.connect_drive_first": "اربط Google Drive أولًا:",
     "sources.poll_help": "الحد الأدنى {min} دقيقة.",
@@ -847,7 +1017,6 @@ AR: dict[str, str] = {
     "sources.poll_already": "«{name}» قيد الفحص بالفعل.",
     "sources.poll_disabled": "شغّل «{name}» أولًا قبل فحصه.",
     "sources.error_account_required": "اختر حسابًا مربوطًا لهذا المصدر.",
-    "sources.error_account_platform": "يجب أن يكون الحساب المرتبط على منصة الملف نفسها.",
     "sources.error_platform": "اختر تيك توك أو يوتيوب.",
     "sources.error_profile_url": "أدخل رابط ملف مثل https://www.tiktok.com/@name أو https://www.youtube.com/@name.",
     "sources.error_folder": "رابط مجلد Google Drive غير صالح. انسخه مرة أخرى من Drive.",
@@ -884,7 +1053,7 @@ AR: dict[str, str] = {
     "rules.tiktok_title": "إعدادات النشر على تيك توك",
     "rules.tiktok_creator_error": "تعذّر تحميل إعدادات صانع المحتوى من تيك توك:",
     "rules.tiktok_reconnect": "حساب تيك توك يحتاج إعادة ربط.",
-    "rules.tiktok_cannot_enable": "لا يمكن تفعيل النشر على تيك توك حتى يمكن تحميل إعدادات صانع المحتوى.",
+    "rules.tiktok_cannot_enable": "يبقى النشر على تيك توك متوقفًا حتى يمكن تحميل إعدادات صانع المحتوى. افتح هذه الصفحة مرة أخرى لاحقًا.",
     "rules.tiktok_posting_as": "النشر على:",
     "rules.tiktok_max_duration": "يمكن نشر فيديوهات حتى {minutes} دقائق ({seconds} ثانية) على هذا الحساب.",
     "rules.tiktok_mode": "طريقة النشر",
@@ -957,8 +1126,110 @@ AR: dict[str, str] = {
     "deletion.completed": "اكتمل",
     "deletion.in_progress": "قيد التنفيذ",
     "deletion.completed_at": "تاريخ الاكتمال",
-    "deletion.explanation": "تلقى Repeater طلبك عبر فيسبوك لحذف بيانات الحسابات التي منحتها الصلاحية. نقوم بفصل هذه الحسابات وإيقاف كل النشر عليها وحذف الفيديوهات والبيانات المستوردة منها.",
+    "deletion.explanation": "تلقى Repeater طلبك عبر فيسبوك. خلال 24 ساعة (يبدأ الحذف فورًا) نحذف صفحات فيسبوك وحسابات انستجرام المربوطة عبر تسجيل دخولك في فيسبوك، والفيديوهات المستوردة منها وملفاتها، ومنشورات هذه الحسابات وسجل نشرها، وكل إدخال في سجل النشاط يذكرها.",
     "deletion.contact": "للاستفسار عن هذا الطلب:",
+    # review fixes (security, compliance, UX)
+    "common.back_arrow": "→",
+    "common.flow_arrow": "←",
+    "common.error_label": "السبب:",
+    "login.busy": "الخادم مشغول بالتحقق من عمليات دخول أخرى. حاول مرة أخرى بعد ثوانٍ.",
+    "login.agree_before": "بتسجيل الدخول فإنك توافق على",
+    "login.agree_and": " و",
+    "consent.title": "شروط الخدمة وسياسة الخصوصية",
+    "consent.intro": "قبل استخدام Repeater يرجى قراءة شروطنا والموافقة عليها. تفعل ذلك مرة واحدة (وتُطلب منك مجددًا فقط إذا تغيّر النص تغييرًا جوهريًا).",
+    "consent.point_publish": "ينشر Repeater الفيديوهات على حساباتك المربوطة فقط بعد أن تفعّل قاعدة لكل حساب، وبالإعدادات التي وافقت عليها.",
+    "consent.point_data": "نخزن الحسابات والتوكنات (مشفّرة) والفيديوهات وسجلات النشر اللازمة لتشغيل الخدمة، ونحذفها كما توضح سياسة الخصوصية.",
+    "consent.point_youtube": "إذا استخدمت ميزات يوتيوب فإنك توافق أيضًا على الالتزام بـ",
+    "consent.version": "الإصدار {version}",
+    "consent.accept_label": "قرأت شروط الخدمة وسياسة الخصوصية وأوافق عليهما.",
+    "consent.continue": "متابعة",
+    "consent.decline": "لا أوافق: تسجيل الخروج",
+    "consent.required": "ضع علامة في المربع للموافقة قبل المتابعة.",
+    "problem.tiktok_privacy_required": "اختر من يمكنه مشاهدة المنشورات (مستوى الخصوصية).",
+    "problem.tiktok_music_consent_required": "وافق على تأكيد استخدام الموسيقى من تيك توك.",
+    "problem.tiktok_branded_private": "المحتوى التجاري (Branded content) لا يمكن أن يكون خاصًا: اختر جمهورًا أوسع أو أوقف الإفصاح.",
+    "problem.youtube_audience_required": "حدّد هل هذه الفيديوهات موجهة للأطفال.",
+    "problem.youtube_privacy_invalid": "اختر إعداد الخصوصية على يوتيوب.",
+    "activity.state_on": "مفعّل",
+    "activity.state_off": "متوقف",
+    "activity.signed_in": "تسجيل الدخول إلى اللوحة",
+    "activity.terms_accepted": "الموافقة على شروط الخدمة وسياسة الخصوصية (الإصدار {version}).",
+    "activity.paused": "إيقاف كل النشر مؤقتًا.",
+    "activity.resumed": "استئناف النشر.",
+    "activity.workspace_updated": "تحديث إعدادات مساحة العمل.",
+    "activity.rule_updated_on": "تحديث قاعدة النشر لحساب {platform} «{name}» (مفعّلة).",
+    "activity.rule_updated_off": "تحديث قاعدة النشر لحساب {platform} «{name}» (متوقفة).",
+    "activity.rule_created_tiktok": "النشر على تيك توك لحساب «{name}» متوقف حتى تختار من يمكنه مشاهدة المنشورات وتوافق على تأكيد استخدام الموسيقى من تيك توك في إعدادات النشر.",
+    "activity.rule_created": "النشر على حساب {platform} «{name}» متوقف حتى تراجع إعداداته وتفعّله.",
+    "activity.source_added": "إضافة المصدر «{name}» ({kind}، {state}).",
+    "activity.source_updated": "تحديث المصدر «{name}» ({kind}، {state}).",
+    "activity.source_updated_reset": "تحديث المصدر «{name}» ({kind}، {state}). سيبدأ الاكتشاف من الفيديوهات الحالية.",
+    "activity.source_on": "تشغيل المصدر «{name}».",
+    "activity.source_off": "إيقاف المصدر «{name}».",
+    "activity.video_updated": "تحديث تفاصيل نشر «{title}».",
+    "activity.video_updated_canceled": "تحديث تفاصيل نشر «{title}»؛ وإلغاء {canceled} منشور(ات) مجدولة على منصات مستبعدة.",
+    "activity.video_deleted": "حذف فيديو من المكتبة.",
+    "err.post_not_skippable": "لا يمكن تخطي هذا المنشور بعد الآن.",
+    "err.post_not_publishable": "لا يمكن نشر هذا المنشور مرة أخرى من هنا.",
+    "err.paused": "النشر متوقف مؤقتًا في مساحة العمل هذه؛ استأنفه أولًا.",
+    "err.account_disconnected": "الحساب مفصول؛ اربطه من جديد أولًا.",
+    "err.account_reconnect": "يجب إعادة ربط حساب {platform} «{name}» أولًا.",
+    "err.workspace_mismatch": "الفيديو والحساب ينتميان إلى مساحتي عمل مختلفتين.",
+    "err.not_publishable": "لا يمكن النشر على حسابات {platform}.",
+    "err.video_not_ready": "لا يمكن نشر إلا الفيديوهات الجاهزة (المستوردة والمشفّرة).",
+    "err.same_origin": "هذا الفيديو قادم من هذا الحساب؛ نشره عليه مرة أخرى سيكرره.",
+    "err.platform_limit": "{platform} لا يقبل هذا الفيديو: {problem}.",
+    "err.in_flight": "هذا الفيديو يُنشر على هذا الحساب الآن.",
+    "err.not_archived": "لا يمكن استعادة إلا الفيديوهات المؤرشفة.",
+    "err.duplicate_video": "هذا الفيديو نسخة مكررة من فيديو آخر في المكتبة ويبقى خارج الدوران.",
+    "err.files_gone": "ملفات الفيديو لم تعد على الخادم؛ ارفعه من جديد.",
+    "err.not_failed": "لا يمكن إعادة المحاولة إلا للفيديوهات الفاشلة.",
+    "err.original_gone": "الملف الأصلي لم يعد موجودًا؛ ارفع الفيديو من جديد.",
+    "err.upload_not_found": "لم يُعثر على الملف المرفوع. ارفع الملف مرة أخرى.",
+    "err.upload_empty": "الملف المرفوع فارغ أو غير مكتمل. ارفعه مرة أخرى.",
+    "oauth.code.no_publishable_accounts": "لم يُرجع فيسبوك أي صفحة يمكنك النشر عليها. اختر صفحة واحدة على الأقل في نافذة فيسبوك وتأكد أن لديك تحكمًا كاملًا بها، ثم اربط من جديد.",
+    "oauth.code.no_channel": "لا توجد قناة يوتيوب على حساب Google هذا. أنشئ قناة على youtube.com (أو اختر حساب Google الذي يملكها) ثم اربط من جديد.",
+    "oauth.code.scope_not_granted": "لم تُمنح كل الصلاحيات التي يحتاجها Repeater. اربط من جديد ووافق على كل الصلاحيات المطلوبة.",
+    "oauth.code.no_refresh_token": "لم تمنح Google لـ Repeater وصولًا دائمًا. أزل Repeater من myaccount.google.com/permissions ثم اربط من جديد.",
+    "oauth.publishing_off": "النشر متوقف على {names} حتى تراجع الإعدادات وتفعّله. لن يُنشر شيء قبل ذلك.",
+    "rules.off_note": "النشر على هذا الحساب متوقف. راجع الإعدادات أدناه ثم ضع علامة في المربع واحفظ لتبدأ.",
+    "rules.review_turn_on": "مراجعة وتفعيل",
+    "rules.tiktok_unchanged": "تعذّر تحميل إعدادات تيك توك، فبقيت خيارات تيك توك وحالة التفعيل كما كانت.",
+    "rules.tiktok_keep_on_note": "تعذّر تحميل إعدادات تيك توك. ما زال بإمكانك إيقاف النشر؛ وتبقى خيارات تيك توك كما هي.",
+    "rules.youtube_audience_help": "يتطلب يوتيوب إجابة ولا توجد إجابة افتراضية: اختر واحدة.",
+    "schedule.publish_now_confirm": "نشر هذا المنشور الآن؟",
+    "schedule.publish_now_attention_confirm": "هذا المنشور يحتاج إلى انتباه، وقد يكون الفيديو منشورًا بالفعل على المنصة. النشر مرة أخرى قد ينتج نسخة مكررة. هل تريد النشر مرة أخرى رغم ذلك؟",
+    "schedule.confirm_required": "قد يكون هذا المنشور منشورًا بالفعل. افتح صفحة التأكيد ووافق لنشره مرة أخرى.",
+    "schedule.republish_title": "النشر مرة أخرى؟",
+    "schedule.republish_body": "لم يكتمل رفع هذا المنشور بشكل سليم، وقد يكون الفيديو منشورًا بالفعل على المنصة. النشر مرة أخرى يرفع نسخة ثانية.",
+    "schedule.republish_check": "تحقق من الحساب على المنصة أولًا.",
+    "schedule.republish_confirm": "انشر مرة أخرى رغم ذلك",
+    "schedule.republish_skip": "منشور بالفعل: تخطَّ هذا المنشور",
+    "schedule.republish_skip_help": "التخطي ينهي هذا المنشور: لن يُرفع مرة أخرى لهذا الحساب.",
+    "library.publish_now_confirm": "نشر هذا الفيديو على الحساب المختار الآن؟",
+    "library.account_incomplete": "حساب {account} غير جاهز للنشر: أكمل إعدادات النشر الخاصة به أولًا (صفحة القواعد).",
+    "library.complete_settings": "أكمل الإعدادات أولًا",
+    "library.incomplete_help": "الحسابات المعلّمة «أكمل الإعدادات أولًا» لا يمكن استخدامها هنا بعد. افتح إعداداتها:",
+    "library.republish_title": "نشر هذا الفيديو مرة أخرى؟",
+    "library.republish_body_published": "هذا الفيديو منشور بالفعل على هذا الحساب. نشره مرة أخرى ينشئ نسخة ثانية على المنصة.",
+    "library.republish_body_uncertain": "لم تكتمل آخر محاولة لنشر هذا الفيديو على هذا الحساب بشكل سليم، وقد يكون منشورًا هناك بالفعل. النشر مرة أخرى قد ينتج نسخة مكررة.",
+    "library.republish_check": "تحقق من الحساب على المنصة أولًا.",
+    "library.republish_confirm": "انشر مرة أخرى رغم ذلك",
+    "library.delete": "حذف",
+    "library.delete_confirm": "حذف هذا الفيديو نهائيًا؟ ستُحذف ملفاته وسجل منشوراته وإدخالات النشاط الخاصة به. المنشورات الموجودة على المنصات تبقى فيها.",
+    "library.deleted": "تم حذف الفيديو.",
+    "library.delete_busy": "هذا الفيديو قيد التجهيز أو النشر الآن. حاول مرة أخرى بعد انتهاء ذلك.",
+    "library.delete_help": "يستطيع مالك مساحة العمل فقط حذف الفيديو. الحذف يزيله من Repeater نهائيًا ولا يمسّ المنشورات الموجودة على المنصات.",
+    "overview.setup_title": "ابدأ من هنا",
+    "overview.setup_intro": "لا يُنشر شيء قبل أن تفعّله بنفسك. اتبع هذه الخطوات بالترتيب.",
+    "overview.step_accounts": "اربط حساباتك",
+    "overview.step_accounts_help": "تيك توك أو يوتيوب أو انستجرام أو فيسبوك.",
+    "overview.step_content": "أضف فيديوهات",
+    "overview.step_content_help": "ارفع فيديو أو أضف مصدرًا.",
+    "overview.step_rules": "راجع إعدادات النشر لكل حساب وفعّل النشر",
+    "overview.step_rules_help": "اختر نافذة النشر والحد اليومي وخيارات المنصة.",
+    "overview.step_done": "تم",
+    "overview.step_todo": "قيد الانتظار",
 }
 
 MESSAGES: dict[str, dict[str, str]] = {"en": EN, "ar": AR}

@@ -2,24 +2,35 @@
 {% import "macros.html" as m with context %}
 {% block title %}{{ t('rules.edit_title') }}{% endblock %}
 {% block content %}
-<p><a href="/rules">← {{ t('nav.rules') }}</a></p>
+<p><a href="/rules">{{ t('common.back_arrow') }} {{ t('nav.rules') }}</a></p>
 <h1>{{ m.platform(account.platform) }} <span dir="auto">{{ account.display_name }}</span></h1>
 {{ m.form_error(error) }}
 {% if problems %}
 <div class="flash flash-warning" role="status">
   {{ t('rules.problems_intro') }}
-  <ul>{% for p in problems %}<li dir="auto">{{ p }}</li>{% endfor %}</ul>
+  <ul>{% for p in problems %}<li dir="auto">{{ t.problem(p) }}</li>{% endfor %}</ul>
 </div>
 {% endif %}
 
-<form method="post" action="/rules/{{ account.id }}" class="stack"{% if platform == 'tiktok' %} data-tiktok-form{% endif %}>
+<form method="post" action="/rules/{{ account.id }}" class="stack"{% if platform == 'tiktok' %} data-tiktok-form data-disclose-message="{{ t('rules.tiktok_disclose_help') }}"{% endif %}>
   {{ m.csrf() }}
 
   <section class="card">
     <h2>{{ t('rules.general') }}</h2>
     {% set cannot_enable = platform == 'tiktok' and creator_error %}
-    <label class="check"><input type="checkbox" name="enabled" value="1" data-rule-enabled{% if values.enabled and not cannot_enable %} checked{% endif %}{% if cannot_enable %} disabled{% endif %}> {{ t('rules.enabled_label') }}</label>
-    {% if cannot_enable %}<p class="muted small">{{ t('rules.tiktok_cannot_enable') }}</p>{% endif %}
+    {% if cannot_enable %}
+    {# TikTok settings could not be loaded: they are not in this form, so saving must leave them (and the on/off state) alone. #}
+    <input type="hidden" name="tiktok_fields_absent" value="1">
+    {% if values.enabled %}
+    <label class="check"><input type="checkbox" name="enabled" value="1" data-rule-enabled checked> {{ t('rules.enabled_label') }}</label>
+    <p class="muted small">{{ t('rules.tiktok_keep_on_note') }}</p>
+    {% else %}
+    <p><span class="badge badge-disabled">{{ t('rules.off') }}</span> {{ t('rules.tiktok_cannot_enable') }}</p>
+    {% endif %}
+    {% else %}
+    <label class="check"><input type="checkbox" name="enabled" value="1" data-rule-enabled{% if values.enabled %} checked{% endif %}> {{ t('rules.enabled_label') }}</label>
+    {% if not values.enabled %}<p class="muted small">{{ t('rules.off_note') }}</p>{% endif %}
+    {% endif %}
     <div class="grid-2">
       <label>{{ t('field.daily_cap') }}
         <input type="number" name="daily_cap" min="1" max="{{ engine_cap }}" required value="{{ values.daily_cap }}">
@@ -92,7 +103,7 @@
     <fieldset data-disclosure>
       <legend>{{ t('rules.tiktok_disclosure') }}</legend>
       <label class="check"><input type="checkbox" name="disclose" value="1" data-disclose{% if values.disclose %} checked{% endif %}> {{ t('rules.tiktok_disclose_label') }}</label>
-      <p class="muted small">{{ t('rules.tiktok_disclose_help') }}</p>
+      <p class="muted small" id="disclose-help">{{ t('rules.tiktok_disclose_help') }}</p>
       <div class="indent" data-disclose-options>
         <label class="check"><input type="checkbox" name="brand_organic" value="1" data-brand-organic{% if values.disclose and values.settings.brand_organic_toggle %} checked{% endif %}> {{ t('rules.tiktok_your_brand') }}</label>
         <p class="muted small">{{ t('rules.tiktok_your_brand_help') }}</p>
@@ -133,8 +144,9 @@
     </label>
     <fieldset>
       <legend>{{ t('rules.youtube_made_for_kids') }}</legend>
-      <label class="check"><input type="radio" name="made_for_kids" value="yes" required{% if values.settings.self_declared_made_for_kids %} checked{% endif %}> {{ t('rules.youtube_kids_yes') }}</label>
-      <label class="check"><input type="radio" name="made_for_kids" value="no" required{% if not values.settings.self_declared_made_for_kids %} checked{% endif %}> {{ t('rules.youtube_kids_no') }}</label>
+      <label class="check"><input type="radio" name="made_for_kids" value="yes" required{% if values.settings.self_declared_made_for_kids is sameas true %} checked{% endif %}> {{ t('rules.youtube_kids_yes') }}</label>
+      <label class="check"><input type="radio" name="made_for_kids" value="no" required{% if values.settings.self_declared_made_for_kids is sameas false %} checked{% endif %}> {{ t('rules.youtube_kids_no') }}</label>
+      <p class="muted small">{{ t('rules.youtube_audience_help') }}</p>
     </fieldset>
     <label>{{ t('field.category_id') }}
       <select name="category_id" required>
@@ -168,7 +180,7 @@
   {% endif %}
 
   <div class="actions">
-    <button type="submit" class="button">{{ t('common.save') }}</button>
+    <span class="submit-wrap" data-submit-wrap><button type="submit" class="button" data-submit>{{ t('common.save') }}</button></span>
     <a class="button secondary" href="/rules">{{ t('common.cancel') }}</a>
   </div>
 </form>

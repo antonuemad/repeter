@@ -2,7 +2,7 @@
 {% import "macros.html" as m with context %}
 {% block title %}{{ t('sources.add_' ~ kind) if is_new else t('sources.edit_title') }}{% endblock %}
 {% block content %}
-<p><a href="/sources">← {{ t('nav.sources') }}</a></p>
+<p><a href="/sources">{{ t('common.back_arrow') }} {{ t('nav.sources') }}</a></p>
 <h1>{{ t('sources.add_' ~ kind) if is_new else t('sources.edit_title') }}</h1>
 <p class="muted">{{ t('sources.kind_help_' ~ kind) }}</p>
 {{ m.form_error(error) }}
@@ -30,15 +30,6 @@
   </fieldset>
   <label>{{ t('field.profile_url') }}
     <input type="url" name="profile_url" required maxlength="500" value="{{ values.profile_url or '' }}" placeholder="https://www.tiktok.com/@name" dir="ltr">
-  </label>
-  <label>{{ t('sources.linked_account') }}
-    <select name="account_id">
-      <option value="">{{ t('sources.no_account') }}</option>
-      {% for a in accounts %}
-      <option value="{{ a.id }}"{% if values.account_id == a.id %} selected{% endif %}>{{ platform_name(a.platform) }} · {{ a.display_name }}</option>
-      {% endfor %}
-    </select>
-    <span class="muted small">{{ t('sources.linked_account_help') }}</span>
   </label>
   {% if source.unofficial_ack_at %}
   <p class="muted">{{ t('sources.acknowledged_on', date=fmt_dt(source.unofficial_ack_at, zone)) }}</p>

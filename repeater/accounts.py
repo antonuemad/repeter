@@ -2,22 +2,25 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import Text, cast, delete, func, literal, or_, select, update
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Session
 
 from repeater.activity import log_activity
 from repeater.crypto import decrypt_json, encrypt_json
 from repeater.models import (
-    ACTIVE_POST_STATUSES,
     AccountStatus,
     ActivityLevel,
+    ActivityLog,
     ConnectedAccount,
+    Platform,
     PostStatus,
     RotationRule,
     ScheduledPost,
     Source,
+    SourceKind,
 )
 from repeater.platforms import get_provider_for_platform
 from repeater.platforms.base import (
@@ -27,9 +30,17 @@ from repeater.platforms.base import (
     OAuthTokens,
     PlatformError,
 )
-from repeater.timeutil import utcnow
+from repeater.timeutil import ensure_aware, utcnow
 
 REFRESH_MARGIN = timedelta(minutes=15)
+# Engine-owned keys in ConnectedAccount.extra (never overwritten by an OAuth exchange).
+DISCONNECTED_AT_KEY = "_disconnected_at"  # when the user disconnected; retention deletes the row later
+REFRESHED_AT_KEY = "_refreshed_at"  # when platform API data (YouTube channel title, avatar) was fetched
+GENERIC_CHANNEL_NAME = "YouTube channel"
+DISCONNECTED_WHILE_PUBLISHING = (
+    "The account was disconnected while this post was being published; the video may be live. "
+    "Check the account before publishing again."
+)
 
 
 class AccountUnavailable(Exception):  # noqa: N818
@@ -78,12 +89,24 @@ def fresh_context(
     session: Session, account: ConnectedAccount, *, now: datetime | None = None
 ) -> AccountContext:
     """Return a usable context, refreshing the access token when it is about to expire.
-    Raises AccountUnavailable when the account is disabled or the grant is gone."""
+    Raises AccountUnavailable when the account is disabled or the grant is gone.
+
+    A refresh runs under a row lock on the account, re-reading it first: a concurrent refresh
+    (providers may rotate refresh tokens, so a second refresh with the old token would fail) or
+    disconnect is seen instead of overwritten. Lock order: post rows first, account row second
+    (disconnect takes them in the same order)."""
     if account.status == AccountStatus.DISABLED:
         raise AccountUnavailable(f"account {account.id} is disconnected")
     ctx = account_context(account)
     if not ctx.tokens.expires_within(REFRESH_MARGIN, now):
         return ctx
+    locked = session.get(ConnectedAccount, account.id, with_for_update=True, populate_existing=True)
+    if locked is None or locked.status == AccountStatus.DISABLED:
+        raise AccountUnavailable(f"account {account.id} is disconnected")
+    account = locked
+    ctx = account_context(account)
+    if not ctx.tokens.expires_within(REFRESH_MARGIN, now):
+        return ctx  # someone else refreshed it while we waited for the lock
     provider = get_provider_for_platform(account.platform)
     try:
         tokens = provider.refresh(ctx)
@@ -119,7 +142,11 @@ def upsert_connected_accounts(
             session.add(acc)
         acc.display_name = item.display_name[:255]
         acc.avatar_url = item.avatar_url
-        acc.extra = {**(acc.extra or {}), **item.extra}
+        extra = {**(acc.extra or {}), **item.extra}
+        extra.pop(DISCONNECTED_AT_KEY, None)  # reconnected: retention no longer applies
+        if Platform(item.platform) == Platform.YOUTUBE:
+            extra[REFRESHED_AT_KEY] = utcnow().isoformat()  # the channel data was just fetched
+        acc.extra = extra
         acc.status = AccountStatus.ACTIVE
         acc.last_error = None
         save_tokens(acc, item.tokens)
@@ -140,7 +167,13 @@ def upsert_connected_accounts(
 def disconnect(
     session: Session, account: ConnectedAccount, *, actor: str = "user", revoke: bool = True
 ) -> None:
-    """Revoke at the provider (best effort), wipe tokens, stop all work that uses the account."""
+    """Revoke at the provider (best effort), wipe tokens, stop all work that uses the account.
+
+    Posts that have not reached the platform (scheduled, failed and waiting for a retry) are
+    canceled. Posts that are uploading or processing may already be live, so they become
+    needs-attention ("may be live") and keep their platform id and state: they must block their
+    cycle, or a reconnect would post the same video again. The account row itself is deleted by
+    maintenance a few days later (see repeater.jobs.maintenance)."""
     if revoke and account.token_enc:
         try:
             get_provider_for_platform(account.platform).revoke(account_context(account))
@@ -153,20 +186,20 @@ def disconnect(
                 f"Revocation at {account.platform} failed ({type(exc).__name__}); tokens deleted locally",
                 account_id=account.id,
             )
+    _stop_posts(session, account)
     account.token_enc = None
     account.token_expires_at = None
     account.status = AccountStatus.DISABLED
-    session.execute(
-        update(ScheduledPost)
-        .where(
-            ScheduledPost.connected_account_id == account.id, ScheduledPost.status.in_(ACTIVE_POST_STATUSES)
-        )
-        .values(status=PostStatus.CANCELED, error="account disconnected")
-    )
+    account.extra = {**(account.extra or {}), DISCONNECTED_AT_KEY: utcnow().isoformat()}
     session.execute(
         update(RotationRule).where(RotationRule.connected_account_id == account.id).values(enabled=False)
     )
-    session.execute(update(Source).where(Source.connected_account_id == account.id).values(enabled=False))
+    # yt-dlp sources never use an account (contract C6): disconnecting does not stop them.
+    session.execute(
+        update(Source)
+        .where(Source.connected_account_id == account.id, Source.kind != SourceKind.YTDLP)
+        .values(enabled=False)
+    )
     log_activity(
         session,
         account.workspace_id,
@@ -176,6 +209,153 @@ def disconnect(
         actor=actor,
         account_id=account.id,
     )
+
+
+def _stop_posts(session: Session, account: ConnectedAccount) -> None:
+    """Cancel the account's unstarted posts and flag the in-flight ones. Runs before the account
+    row is changed so the lock order matches publish_post (post rows first, account second)."""
+    from repeater.engine.publisher import mark_may_be_live
+
+    posts = session.execute(
+        select(ScheduledPost)
+        .where(
+            ScheduledPost.connected_account_id == account.id,
+            ScheduledPost.status.in_(
+                [
+                    PostStatus.SCHEDULED,
+                    PostStatus.FAILED,
+                    PostStatus.UPLOADING,
+                    PostStatus.PROCESSING,
+                ]
+            ),
+        )
+        .order_by(ScheduledPost.id)
+        .with_for_update()
+    ).scalars()
+    for post in posts:
+        if post.status in (PostStatus.UPLOADING, PostStatus.PROCESSING):
+            post.status = PostStatus.NEEDS_ATTENTION
+            post.error = DISCONNECTED_WHILE_PUBLISHING
+            mark_may_be_live(post)
+            log_activity(
+                session,
+                post.workspace_id,
+                ActivityLevel.WARNING,
+                "publish",
+                f"Post #{post.id}: {DISCONNECTED_WHILE_PUBLISHING}",
+                post_id=post.id,
+                video_id=post.video_id,
+                account_id=account.id,
+                platform=str(post.platform),
+            )
+        else:
+            post.status = PostStatus.CANCELED
+            post.error = "account disconnected"
+    session.flush()
+
+
+def disconnected_at(account: ConnectedAccount) -> datetime | None:
+    """When the user disconnected the account (recorded by disconnect(); older rows fall back
+    to the last change of the row)."""
+    raw = (account.extra or {}).get(DISCONNECTED_AT_KEY)
+    try:
+        return ensure_aware(datetime.fromisoformat(raw)) if raw else ensure_aware(account.updated_at)
+    except (TypeError, ValueError):
+        return ensure_aware(account.updated_at)
+
+
+def channel_data_refreshed_at(extra: dict | None, created_at: datetime | None) -> datetime:
+    """When the YouTube channel data (title, avatar) of an account was last fetched from the API:
+    stamped at connect and at each refresh; older rows count from their creation."""
+    raw = (extra or {}).get(REFRESHED_AT_KEY)
+    try:
+        if raw:
+            stamped = datetime.fromisoformat(raw)
+            return stamped if stamped.tzinfo else stamped.replace(tzinfo=UTC)
+    except (TypeError, ValueError):
+        pass
+    return ensure_aware(created_at) or datetime.min.replace(tzinfo=UTC)
+
+
+def redact_name_in_activity(
+    session: Session, account: ConnectedAccount, name: str, *, before: datetime | None = None
+) -> int:
+    """Replace `name` in the activity entries about the account (those older than `before`, when
+    given) with a generic label, in the stored English sentence and in the parameters the dashboard
+    translates it from (data.msg_params.name): the title of a YouTube channel is API data that may
+    not outlive its refresh. Returns the number of rows changed."""
+    if len(name.strip()) < 2:
+        return 0
+    about_account = [
+        ActivityLog.workspace_id == account.workspace_id,
+        ActivityLog.data["account_id"].astext == str(account.id),
+    ]
+    if before is not None:
+        about_account.append(ActivityLog.created_at < before)
+    text = (
+        session.execute(
+            update(ActivityLog)
+            .where(*about_account, ActivityLog.message.contains(name, autoescape=True))
+            .values(message=func.replace(ActivityLog.message, name, GENERIC_CHANNEL_NAME))
+            .execution_options(synchronize_session=False)
+        ).rowcount
+        or 0
+    )
+    params = (
+        session.execute(
+            update(ActivityLog)
+            .where(*about_account, ActivityLog.data["msg_params"]["name"].astext == name)
+            .values(
+                data=func.jsonb_set(
+                    ActivityLog.data,
+                    cast(literal("{msg_params,name}"), ARRAY(Text)),
+                    cast(literal(f'"{GENERIC_CHANNEL_NAME}"'), JSONB),
+                )
+            )
+            .execution_options(synchronize_session=False)
+        ).rowcount
+        or 0
+    )
+    return max(text, params)
+
+
+def delete_account_records(
+    session: Session, account: ConnectedAccount, *, video_ids: list[int] | None = None
+) -> dict[str, int]:
+    """Erase what the account row and its history hold about the user: its activity-log entries
+    (those carrying its id, those about the listed `video_ids`, and those whose text quotes its
+    display name), its sources that need it, and the account row itself, which takes the account's
+    posts (platform post ids, permalinks, adapter state) and rotation rule with it (foreign key
+    cascade). Imported library videos are not touched (the caller passes `video_ids` when they are
+    deleted too). Used by the retention job a few days after a disconnect and by Meta data
+    deletion. Returns what was removed."""
+    conditions = [ActivityLog.data["account_id"].astext == str(account.id)]
+    source_ids = list(
+        session.execute(
+            select(Source.id).where(
+                Source.connected_account_id == account.id, Source.kind != SourceKind.YTDLP
+            )
+        ).scalars()
+    )
+    if video_ids:
+        conditions.append(ActivityLog.data["video_id"].astext.in_([str(v) for v in video_ids]))
+    if source_ids:
+        conditions.append(ActivityLog.data["source_id"].astext.in_([str(i) for i in source_ids]))
+    name = (account.display_name or "").strip()
+    if len(name) >= 3:
+        conditions.append(
+            (ActivityLog.workspace_id == account.workspace_id)
+            & ActivityLog.message.contains(name, autoescape=True)
+        )
+    activity = session.execute(delete(ActivityLog).where(or_(*conditions))).rowcount or 0
+    posts = session.execute(
+        select(ScheduledPost.id).where(ScheduledPost.connected_account_id == account.id)
+    ).all()
+    if source_ids:
+        session.execute(delete(Source).where(Source.id.in_(source_ids)))
+    session.execute(delete(ConnectedAccount).where(ConnectedAccount.id == account.id))
+    session.expunge(account)
+    return {"activity": int(activity), "posts": len(posts), "sources": len(source_ids)}
 
 
 def accounts_due_for_refresh(

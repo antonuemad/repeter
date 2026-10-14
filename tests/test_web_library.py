@@ -140,7 +140,13 @@ def test_upload_without_file(web_owner, fake_create):
 
 def test_upload_rejects_non_multipart(web_owner, fake_create):
     token = csrf_token(web_owner, "/library")
+    # A url-encoded body is never parsed on the streaming path (security-1): refused outright,
+    # even with a valid token in the form; with the header token the route itself flashes an error.
     resp = web_owner.post("/library/upload", data={"csrf_token": token}, follow_redirects=False)
+    assert resp.status_code == 403 and fake_create == {}
+    resp = web_owner.post(
+        "/library/upload", data={"title": "x"}, headers={"X-CSRF-Token": token}, follow_redirects=False
+    )
     assert resp.status_code == 303 and fake_create == {}
 
 
@@ -225,10 +231,11 @@ def test_action_error_is_flashed(web_owner, web_make_video, monkeypatch):
     assert "cannot archive right now" in web_owner.get(f"/library/{video.id}").text
 
 
-def test_publish_now_to_account(web_owner, web_make_video, make_account, monkeypatch):
+def test_publish_now_to_account(web_owner, web_make_video, make_account, web_make_rule, monkeypatch):
     recorder = Recorder()
     monkeypatch.setattr(actions, "schedule_video_now", recorder)
     account = make_account("youtube", display_name="Channel")
+    web_make_rule(account)
     video = web_make_video()
     resp = post(web_owner, f"/library/{video.id}/publish-now", {"account_id": str(account.id)})
     assert resp.status_code == 303
@@ -253,16 +260,18 @@ def test_publish_now_rejects_foreign_or_missing_account(
     assert recorder.calls == []
 
 
-def test_publish_now_engine_error(web_owner, web_make_video, make_account, monkeypatch):
+def test_publish_now_engine_error(web_owner, web_make_video, make_account, web_make_rule, monkeypatch):
     monkeypatch.setattr(
         actions,
         "schedule_video_now",
-        Recorder(error=ValueError("Only videos that are ready can be published.")),
+        Recorder(error=ValueError("Something the dashboard has never heard of.")),
     )
     account = make_account("tiktok")
+    web_make_rule(account)
     video = web_make_video()
     post(web_owner, f"/library/{video.id}/publish-now", {"account_id": str(account.id)})
-    assert "Only videos that are ready can be published." in web_owner.get(f"/library/{video.id}").text
+    # An unknown refusal is still shown, as received.
+    assert "Something the dashboard has never heard of." in web_owner.get(f"/library/{video.id}").text
 
 
 def test_edit_overrides_and_platforms(web_owner, db, workspace, web_make_video, make_account):

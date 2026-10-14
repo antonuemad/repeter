@@ -212,17 +212,18 @@ def test_callback_success_with_real_rules_and_pkce(web_owner, db):
         _, state = _start(web_owner, "youtube")
         verifier = db.get(OAuthState, state).code_verifier
         resp = web_owner.get(f"/oauth/google/callback?code=c&state={state}", follow_redirects=False)
-    assert resp.headers["location"] == "/accounts"
-    assert fake.exchange_calls[0]["code_verifier"] == verifier
     account = db.execute(select(ConnectedAccount)).scalar_one()
+    # A new account goes straight to its settings, with publishing off (ux-compliance-1).
+    assert resp.headers["location"] == f"/rules/{account.id}"
+    assert fake.exchange_calls[0]["code_verifier"] == verifier
     rule = db.execute(select(RotationRule)).scalar_one()
     assert rule.connected_account_id == account.id and rule.platform == Platform.YOUTUBE
+    assert rule.enabled is False
+    set_lang(web_owner, "en")
+    assert "Publishing is off for Magic Channel" in web_owner.get(f"/rules/{account.id}").text
 
 
-def test_new_tiktok_account_goes_to_rule_settings(web_owner, db, monkeypatch):
-    from repeater.engine import rules as engine_rules
-
-    monkeypatch.setattr(engine_rules, "ensure_rule", Recorder(result=None))
+def test_new_tiktok_account_goes_to_rule_settings(web_owner, db):
     fake = FakeProvider("tiktok", uses_pkce=False, accounts=[_tiktok_account()])
     with override("oauth", "tiktok", fake):
         _, state = _start(web_owner, "tiktok")
@@ -340,6 +341,17 @@ def test_callback_platform_error_is_flashed(web_owner, db):
     assert db.execute(select(ConnectedAccount)).first() is None
     set_lang(web_owner, "en")
     assert "Facebook did not return any Page you can publish to." in web_owner.get("/accounts").text
+
+
+def test_callback_known_platform_failure_is_translated_with_the_platform_text_as_detail(web_owner, db):
+    raw = "Facebook did not return any Page you can publish to. Select at least one Page."
+    fake = FakeProvider("meta", uses_pkce=False)
+    fake.error = PermanentError(raw, code="no_publishable_accounts")
+    with override("oauth", "meta", fake):
+        _, state = _start(web_owner, "meta")
+        web_owner.get(f"/oauth/meta/callback?code=c&state={state}", follow_redirects=False)
+    html = web_owner.get("/accounts").text  # Arabic by default
+    assert "لم يُرجع فيسبوك أي صفحة يمكنك النشر عليها" in html and raw in html
 
 
 def test_callback_unexpected_error_hides_details(web_owner, db):

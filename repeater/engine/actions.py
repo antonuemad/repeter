@@ -1,18 +1,22 @@
 """User actions on the schedule. OWNER: engine module (implemented by the engine work).
 
-These are called by the web dashboard. Each function commits nothing; the caller commits.
-They raise ValueError with a message that can be shown to the user when the action is not
-possible in the current state.
+These are called by the web dashboard and the importer. Each function commits nothing; the caller
+commits. They raise ValueError with a message that can be shown to the user when the action is
+not possible in the current state.
+
+Also here: invalidate_plan (a rule or workspace edit cancels the planner's not-yet-started posts
+so they are re-planned under the new rules) and cancel_conflicting_posts (a video found to have
+a duplicate on a platform or account no longer goes there).
 """
 
 from __future__ import annotations
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from repeater.activity import log_activity
 from repeater.engine import captions
-from repeater.engine.publisher import queue_publish
+from repeater.engine.publisher import queue_publish, reached_platform
 from repeater.engine.scheduler import duplicate_origins, limits_problem, lock_workspace
 from repeater.jobs import kinds
 from repeater.media import storage
@@ -34,6 +38,15 @@ from repeater.timeutil import utcnow
 # Posts that have not reached the platform yet.
 NOT_STARTED = (PostStatus.SCHEDULED, PostStatus.FAILED, PostStatus.NEEDS_ATTENTION)
 IN_FLIGHT = (PostStatus.UPLOADING, PostStatus.PROCESSING)
+
+
+def may_be_live(post: ScheduledPost) -> bool:
+    """True when the post ended without a confirmed publish but got as far as the platform (an
+    interrupted upload, a poll that timed out, a disconnect while publishing): the video may be
+    live, so the dashboard should ask the user to check the account before 'Publish now'."""
+    return post.status in (PostStatus.NEEDS_ATTENTION, PostStatus.CANCELED) and reached_platform(
+        post.platform_post_id, post.publish_state
+    )
 
 
 def skip_post(session: Session, post: ScheduledPost, *, actor: str) -> None:
@@ -109,6 +122,97 @@ def schedule_video_now(
     return post
 
 
+def invalidate_plan(
+    session: Session, workspace_id: int, *, account_id: int | None = None, actor: str = "system"
+) -> int:
+    """Cancel the planner's posts that have not started (status SCHEDULED, created_by scheduler)
+    for one account, or for the whole workspace, and ask for a new plan at once, so that edits of
+    a rule (window, cap, gaps, evergreen ...) or of the workspace (timezone, horizon, cross-platform
+    gap) apply to the posts already on the calendar and not only to posts planned later. The
+    planner re-uses canceled rows, so each (video, account, cycle) keeps its row and its job.
+    Posts the user scheduled, failed posts waiting for a retry and everything that already started
+    uploading are left alone. Returns the number of posts canceled. The caller commits."""
+    lock_workspace(session, workspace_id)
+    stmt = update(ScheduledPost).where(
+        ScheduledPost.workspace_id == workspace_id,
+        ScheduledPost.status == PostStatus.SCHEDULED,
+        ScheduledPost.created_by == "scheduler",
+    )
+    if account_id is not None:
+        stmt = stmt.where(ScheduledPost.connected_account_id == account_id)
+    canceled = (
+        session.execute(
+            stmt.values(
+                status=PostStatus.CANCELED, error="The posting rules changed; the post is re-planned."
+            ).execution_options(synchronize_session="fetch")
+        ).rowcount
+        or 0
+    )
+    if canceled:
+        log_activity(
+            session,
+            workspace_id,
+            ActivityLevel.INFO,
+            "publish",
+            f"The posting rules changed: {canceled} planned post{'s' if canceled != 1 else ''} "
+            "will be re-planned.",
+            actor=actor,
+            account_id=account_id,
+            count=canceled,
+        )
+    kinds.request_plan_workspace(session, workspace_id)
+    return int(canceled)
+
+
+def cancel_conflicting_posts(session: Session, video_id: int, *, actor: str = "system") -> int:
+    """A video was found to have duplicate copies: cancel its scheduled (and failed, retry-queued)
+    posts to the platforms and accounts where those copies come from, because the content is
+    already there (see scheduler.duplicate_origins). Returns the number canceled; the caller
+    commits."""
+    video = session.get(Video, video_id)
+    if video is None:
+        return 0
+    platforms, accounts = duplicate_origins(session, video.workspace_id, [video.id])
+    origin_platforms, origin_accounts = platforms.get(video.id, set()), accounts.get(video.id, set())
+    conditions = []
+    if origin_platforms:
+        conditions.append(ScheduledPost.platform.in_(sorted(origin_platforms)))
+    if origin_accounts:
+        conditions.append(ScheduledPost.connected_account_id.in_(sorted(origin_accounts)))
+    if not conditions:
+        return 0
+    lock_workspace(session, video.workspace_id)
+    posts = list(
+        session.execute(
+            select(ScheduledPost)
+            .where(
+                ScheduledPost.video_id == video.id,
+                ScheduledPost.status.in_([PostStatus.SCHEDULED, PostStatus.FAILED]),
+                or_(*conditions),
+            )
+            .order_by(ScheduledPost.id)
+            .with_for_update()
+        ).scalars()
+    )
+    for post in posts:
+        post.status = PostStatus.CANCELED
+        post.error = f"The same video already exists on {captions.platform_name(post.platform)}; the post was canceled."
+    if posts:
+        names = sorted({captions.platform_name(p.platform) for p in posts})
+        log_activity(
+            session,
+            video.workspace_id,
+            ActivityLevel.INFO,
+            "publish",
+            f"'{captions.video_label(video)}' already exists on {', '.join(names)}: canceled "
+            f"{len(posts)} scheduled post{'s' if len(posts) != 1 else ''}.",
+            actor=actor,
+            video_id=video.id,
+            post_ids=[p.id for p in posts],
+        )
+    return len(posts)
+
+
 def archive_video(session: Session, video: Video, *, actor: str) -> None:
     """Remove a video from rotation and cancel its future posts."""
     if video.status == VideoStatus.ARCHIVED:
@@ -180,7 +284,11 @@ def _post_for_now(session: Session, video: Video, account: ConnectedAccount) -> 
         return pending[-1]
     if not posts:
         cycle = 0
-    elif posts[-1].status == PostStatus.PUBLISHED:
+    elif posts[-1].status == PostStatus.PUBLISHED or reached_platform(
+        posts[-1].platform_post_id, posts[-1].publish_state
+    ):
+        # A post that got as far as the platform keeps its row (platform id, state) as the record
+        # of what is there; publishing again starts the next cycle instead of wiping it.
         cycle = posts[-1].cycle + 1
     else:
         return posts[-1]

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.exceptions import HTTPException
 from starlette.responses import PlainTextResponse
@@ -65,22 +67,22 @@ class RequestTooLarge(HTTPException):
 
 class BodySizeLimitMiddleware:
     """Rejects request bodies above a limit, by Content-Length up front and by counting the
-    streamed bytes otherwise (chunked uploads). `unlimited_paths` are routes that enforce their
-    own, larger limit while streaming (the dashboard video upload)."""
+    streamed bytes otherwise (chunked uploads). `path_limits` give routes that stream a larger
+    body themselves (the dashboard video upload) their own, still finite, cap: no path is ever
+    unlimited, because this runs before authentication."""
 
-    def __init__(
-        self, app: ASGIApp, *, max_bytes: int, unlimited_paths: frozenset[str] = frozenset()
-    ) -> None:
+    def __init__(self, app: ASGIApp, *, max_bytes: int, path_limits: Mapping[str, int] | None = None) -> None:
         self.app = app
         self.max_bytes = max_bytes
-        self.unlimited_paths = unlimited_paths
+        self.path_limits = dict(path_limits or {})
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or scope.get("path") in self.unlimited_paths:
+        if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
+        limit = self.path_limits.get(scope.get("path", ""), self.max_bytes)
         declared = Headers(scope=scope).get("content-length")
-        if declared is not None and declared.isdigit() and int(declared) > self.max_bytes:
+        if declared is not None and declared.isdigit() and int(declared) > limit:
             response = PlainTextResponse("Request body too large.", status_code=413)
             await response(scope, receive, send)
             return
@@ -91,7 +93,7 @@ class BodySizeLimitMiddleware:
             message = await receive()
             if message["type"] == "http.request":
                 received += len(message.get("body", b""))
-                if received > self.max_bytes:
+                if received > limit:
                     raise RequestTooLarge()
             return message
 

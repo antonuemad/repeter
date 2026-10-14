@@ -35,7 +35,7 @@
   {% for v in videos %}
   {% set vposts = posts.get(v.id, {}) %}
   <article class="video-card">
-    <a href="/library/{{ v.id }}" class="thumb">
+    <a href="/library/{{ v.id }}" class="thumb" aria-hidden="true" tabindex="-1">
       {% if v.thumbnail_path %}
       <img src="/library/{{ v.id }}/thumb.jpg" alt="" loading="lazy">
       {% else %}
@@ -63,14 +63,14 @@
       {% endif %}
       <div class="actions">
         {% if v.status == 'ready' and accounts %}
-        <form method="post" action="/library/{{ v.id }}/publish-now" class="inline publish-now">
+        <form method="post" action="/library/{{ v.id }}/publish-now" class="inline publish-now" data-confirm="{{ t('library.publish_now_confirm') }}">
           {{ m.csrf() }}
           <input type="hidden" name="next" value="/library?status={{ status_filter }}&page={{ pager.number }}">
           <label class="visually-hidden" for="acc-{{ v.id }}">{{ t('library.publish_to') }}</label>
           <select name="account_id" id="acc-{{ v.id }}" required>
             <option value="">{{ t('library.publish_to') }}</option>
             {% for a in accounts if a.id != v.source_account_id %}
-            <option value="{{ a.id }}">{{ platform_name(a.platform) }} · {{ a.display_name }}</option>
+            <option value="{{ a.id }}"{% if a.id in incomplete %} disabled{% endif %}>{{ platform_name(a.platform) }} · {{ a.display_name }}{% if a.id in incomplete %} ({{ t('library.complete_settings') }}){% endif %}</option>
             {% endfor %}
           </select>
           <button type="submit" class="button small">{{ t('library.publish_now') }}</button>

@@ -7,7 +7,8 @@ import hmac
 import threading
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -21,8 +22,8 @@ from repeater.config import get_settings
 from repeater.models import ActivityLevel, User, Workspace, WorkspaceMember
 from repeater.security import hash_password, needs_rehash, verify_password
 from repeater.timeutil import utcnow
-from repeater.web import csrf, i18n
-from repeater.web.deps import DB, Form, form_str, safe_next
+from repeater.web import consent, csrf, i18n
+from repeater.web.deps import DB, Form, FormError, form_str, safe_next
 from repeater.web.templating import render
 
 USER_KEY = "uid"
@@ -30,12 +31,39 @@ FINGERPRINT_KEY = "pwv"
 ROLES = ("owner", "editor")
 MAX_LOGIN_FAILURES = 10
 LOGIN_WINDOW_SECONDS = 15 * 60
+MAX_PASSWORD_CHARS = 1024
+# argon2id with the library defaults needs 64 MiB per verification. The dashboard container has
+# 1 GiB and half a CPU, so at most this many hashes run at the same time (anything beyond waits at
+# most HASH_WAIT_SECONDS and is then answered with 503). Without this bound a burst of logins
+# allocates one 64 MiB hash per worker thread and the container is OOM-killed.
+HASH_CONCURRENCY = 3
+HASH_WAIT_SECONDS = 1.0
+_hash_slots = threading.BoundedSemaphore(HASH_CONCURRENCY)
 # Verified when the email is unknown so both paths cost one argon2 verification.
 _DUMMY_HASH = hash_password("repeater-timing-equaliser")
 
 
 class LoginRequired(Exception):  # noqa: N818 - control flow, handled by a redirect to /login
     pass
+
+
+class ConsentRequired(Exception):  # noqa: N818 - control flow, handled by a redirect to /consent
+    """The signed-in user has not accepted the current terms and privacy policy yet."""
+
+
+class HashingBusy(Exception):  # noqa: N818 - control flow, answered with 503
+    """All password-hashing slots stayed busy for HASH_WAIT_SECONDS."""
+
+
+@contextmanager
+def hash_slot() -> Iterator[None]:
+    """Bounds concurrent argon2 work in this process (see HASH_CONCURRENCY)."""
+    if not _hash_slots.acquire(timeout=HASH_WAIT_SECONDS):
+        raise HashingBusy()
+    try:
+        yield
+    finally:
+        _hash_slots.release()
 
 
 # --------------------------------------------------------------------------- rate limiting
@@ -82,6 +110,32 @@ class LoginRateLimiter:
             for key in keys:
                 self._recent(key, now)
                 self._failures.setdefault(key, deque()).append(now)
+
+    def try_begin(self, *keys: str) -> bool:
+        """Atomically check every key against the limit and, when none is at it, count one
+        attempt on each of them right away. Counting before the (slow) password check is what
+        stops a burst of concurrent requests from all passing the gate. Returns False, and counts
+        nothing, when any key is at the limit."""
+        now = self.clock()
+        with self._lock:
+            if any(len(self._recent(k, now)) >= self.max_failures for k in keys):
+                return False
+            if len(self._failures) >= self.max_keys:
+                self._prune(now)
+            for key in keys:
+                self._failures.setdefault(key, deque()).append(now)
+            return True
+
+    def refund(self, *keys: str) -> None:
+        """Take back one attempt counted by try_begin (a successful sign-in, or a request that
+        never reached the password check)."""
+        with self._lock:
+            for key in keys:
+                entries = self._failures.get(key)
+                if entries:
+                    entries.pop()
+                if entries is not None and not entries:
+                    self._failures.pop(key, None)
 
     def reset(self, key: str) -> None:
         with self._lock:
@@ -156,7 +210,9 @@ class WorkspaceView:
     paused: bool
 
 
-def current_user(request: Request, db: DB) -> User:
+def signed_in_user(request: Request, db: DB) -> User:
+    """The signed-in user, whether or not the legal texts were accepted (the consent screen and
+    sign-out work before that)."""
     user = session_user(request, db)
     if user is None:
         if USER_KEY in request.session:
@@ -166,6 +222,17 @@ def current_user(request: Request, db: DB) -> User:
     return user
 
 
+def current_user(request: Request, db: DB) -> User:
+    """The signed-in user who accepted the current terms and privacy policy. Everything but the
+    consent screen itself needs this: nobody uses the client before agreeing (YouTube Developer
+    Policies III.A.2)."""
+    user = signed_in_user(request, db)
+    if not consent.has_consented(request.session, db, user):
+        raise ConsentRequired()
+    return user
+
+
+SignedInUser = Annotated[User, Depends(signed_in_user)]
 CurrentUser = Annotated[User, Depends(current_user)]
 
 
@@ -227,23 +294,36 @@ def login_page(request: Request, db: DB, next: str = "/") -> Response:  # noqa: 
 @router.post("/login")
 def login_submit(request: Request, db: DB, form: Form) -> Response:
     next_url = safe_next(form.get("next") if isinstance(form.get("next"), str) else None)
-    email = form_str(form, "email", max_len=320).lower()
-    password = form.get("password") if isinstance(form.get("password"), str) else ""
-    ip_key, email_key = f"ip:{client_ip(request)}", f"email:{email}"
-    limiter = _limiter(request)
+    try:
+        email = form_str(form, "email", max_len=320).lower()
+    except FormError:
+        email = ""
+    raw_password = form.get("password")
+    password = raw_password if isinstance(raw_password, str) else ""
 
     def fail(error: str, status: int) -> Response:
         return render(
             request, "login.html", {"next": next_url, "email": email, "error": error}, status_code=status
         )
 
-    if limiter.blocked(ip_key, email_key):
+    # Nothing secret is compared for an empty or absurd input, so it never reaches the hasher.
+    if not email or not password or len(password) > MAX_PASSWORD_CHARS:
+        return fail("login.invalid", 400)
+    ip_key, email_key = f"ip:{client_ip(request)}", f"email:{email}"
+    limiter = _limiter(request)
+    # Count the attempt before the slow password check, atomically with the limit check.
+    if not limiter.try_begin(ip_key, email_key):
         return fail("login.rate_limited", 429)
-    user = _authenticate(db, email, password[:1024])
-    if user is None:
-        limiter.record_failure(ip_key, email_key)
+    try:
+        user_id = _authenticate(db, email, password)
+    except HashingBusy:
+        limiter.refund(ip_key, email_key)
+        return fail("login.busy", 503)
+    user = db.get(User, user_id) if user_id is not None else None
+    if user is None or not user.is_active:
         return fail("login.invalid", 400)
     limiter.reset(email_key)
+    limiter.refund(ip_key)
     _record_login(db, user, password)
     start_session(request, user)
     response = RedirectResponse(next_url, status_code=303)
@@ -258,20 +338,29 @@ def logout(request: Request) -> Response:
     return RedirectResponse("/login", status_code=303)
 
 
-def _authenticate(db: Session, email: str, password: str) -> User | None:
-    user = None
-    if email and password:
-        user = db.execute(select(User).where(func.lower(User.email) == email)).scalar_one_or_none()
-    if user is None or not user.is_active:
-        verify_password(_DUMMY_HASH, password or "-")
-        return None
-    return user if verify_password(user.password_hash, password) else None
+def _authenticate(db: Session, email: str, password: str) -> int | None:
+    """The user's id when the credentials are right. The database connection is returned to the
+    pool before the (slow, 64 MiB) hash runs, and unknown or inactive users cost one verification
+    as well so the answer does not depend on whether the email exists."""
+    row = db.execute(
+        select(User.id, User.password_hash, User.is_active).where(func.lower(User.email) == email)
+    ).one_or_none()
+    db.rollback()
+    with hash_slot():
+        if row is None or not row.is_active:
+            verify_password(_DUMMY_HASH, password)
+            return None
+        return int(row.id) if verify_password(row.password_hash, password) else None
 
 
 def _record_login(db: Session, user: User, password: str) -> None:
     user.last_login_at = utcnow()
     if needs_rehash(user.password_hash):
-        user.password_hash = hash_password(password)
+        try:
+            with hash_slot():
+                user.password_hash = hash_password(password)
+        except HashingBusy:
+            pass  # upgraded at the next sign-in
     workspace_id = db.execute(
         select(WorkspaceMember.workspace_id)
         .where(WorkspaceMember.user_id == user.id)
@@ -279,6 +368,12 @@ def _record_login(db: Session, user: User, password: str) -> None:
         .limit(1)
     ).scalar_one_or_none()
     log_activity(
-        db, workspace_id, ActivityLevel.INFO, "auth", "Signed in to the dashboard", actor=user.email[:64]
+        db,
+        workspace_id,
+        ActivityLevel.INFO,
+        "auth",
+        "Signed in to the dashboard",
+        actor=user.email[:64],
+        msg_key="activity.signed_in",
     )
     db.commit()

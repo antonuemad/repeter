@@ -1,5 +1,9 @@
 """TikTok adapter: Login Kit for Web (OAuth v2), Content Posting API (Direct Post and Upload to
-inbox, FILE_UPLOAD transfer) and Display API (video.list).
+inbox; PULL_FROM_URL transfer with FILE_UPLOAD as the fallback) and Display API (video.list).
+
+The encoded file is already on Repeater's server, so TikTok pulls it from the signed media URL
+(PublishRequest.public_url). That needs the URL prefix https://<host>/m/ to be verified in the
+TikTok app; until it is, init answers url_ownership_unverified and the file is uploaded instead.
 
 Official references (checked 2026-10-14):
     https://developers.tiktok.com/doc/login-kit-web
@@ -50,6 +54,7 @@ from repeater.platforms.base import (
     RestartPublish,
     RetryableError,
     TikTokCreatorInfo,
+    UnknownOutcomeError,
 )
 from repeater.platforms.http import classify_http_error, client, retry_after_seconds
 from repeater.timeutil import ensure_aware, utcnow
@@ -84,6 +89,22 @@ MAX_LIST_PAGE_SIZE = 20
 MAX_LIST_PAGES = 50
 POLL_SECONDS = 30  # status/fetch allows 30 requests per minute per token
 
+SOURCE_PULL = "PULL_FROM_URL"
+SOURCE_FILE = "FILE_UPLOAD"
+# TikTok answers url_ownership_unverified until the URL prefix is verified in the app. The answer
+# is remembered per process, but only for an hour so that verifying the prefix needs no restart.
+PULL_UNVERIFIED_RETRY_SECONDS = 3600.0
+# An upload_url lives one hour (media transfer guide); a FILE_UPLOAD still waiting for bytes after
+# that can never finish.
+UPLOAD_URL_LIFETIME = timedelta(hours=1)
+# TikTok shares publicaly_available_post_id only after moderation, "usually within one minute, in
+# some cases a few hours" (get-video-status). poll() waits this long after PUBLISH_COMPLETE for it,
+# but never past POST_ID_MAX_AFTER_INIT after init, so the engine's 2 h poll limit cannot turn a
+# live post into needs-attention.
+POST_ID_WAIT = timedelta(minutes=30)
+POST_ID_MAX_AFTER_INIT = timedelta(minutes=100)
+POST_ID_POLL_SECONDS = 300
+
 # Daily caps (per creator, per app, pending inbox drafts) reset over a 24-hour window that
 # TikTok does not disclose, so retrying sooner only burns more requests.
 DAILY_CAP_RETRY_AFTER = 12 * 3600
@@ -104,6 +125,16 @@ CHUNK_ATTEMPTS = 3
 CHUNK_RETRY_BACKOFF = 2.0
 
 _sleep = time.sleep  # replaced in tests
+_monotonic = time.monotonic  # replaced in tests
+
+
+class _PullCache:
+    """When PULL_FROM_URL was last refused with url_ownership_unverified (monotonic seconds)."""
+
+    unverified_until: float = 0.0
+
+
+_pull_cache = _PullCache()
 
 
 @dataclass(frozen=True)
@@ -201,8 +232,45 @@ def _check_purpose(purpose: str) -> None:
         raise ValueError(f"unsupported TikTok OAuth purpose: {purpose!r}")
 
 
-def _network_error(action: str, exc: Exception) -> RetryableError:
-    return RetryableError(f"Could not reach TikTok while {action} ({type(exc).__name__}).")
+class _NetworkError(RetryableError):
+    """A request to TikTok failed without an HTTP answer. `may_have_arrived` is False when the
+    request provably never reached TikTok (no connection, incomplete send), True when TikTok may
+    have acted on it and only the reply was lost."""
+
+    def __init__(self, message: str, *, may_have_arrived: bool) -> None:
+        super().__init__(message)
+        self.may_have_arrived = may_have_arrived
+
+
+_NEVER_ARRIVED = (
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.PoolTimeout,
+    httpx.ProxyError,
+    httpx.UnsupportedProtocol,
+    httpx.WriteError,
+    httpx.WriteTimeout,
+)
+
+
+def _may_have_arrived(exc: Exception) -> bool:
+    return not isinstance(exc, _NEVER_ARRIVED)
+
+
+def _network_error(action: str, exc: Exception) -> _NetworkError:
+    return _NetworkError(
+        f"Could not reach TikTok while {action} ({type(exc).__name__}).",
+        may_have_arrived=_may_have_arrived(exc),
+    )
+
+
+def _parse_time(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return ensure_aware(datetime.fromisoformat(value))
+    except ValueError:
+        return None
 
 
 # --------------------------------------------------------------------------- API error mapping
@@ -231,9 +299,9 @@ _CODE_EXPLANATIONS = {
         "finish or delete them in the TikTok app."
     ),
     "unaudited_client_can_only_post_to_private_accounts": (
-        "TikTok only accepts private posts from apps that have not passed TikTok's audit yet: set the "
-        "TikTok privacy level to 'Only me' (SELF_ONLY), or make the TikTok account private, until the "
-        "audit is approved."
+        "TikTok only accepts posts from apps that have not passed TikTok's audit yet when both "
+        "conditions hold: the TikTok account is set to private in the TikTok app, and the privacy "
+        "level of the post is 'Only me' (SELF_ONLY). Fix both until the audit is approved."
     ),
     "privacy_level_option_mismatch": (
         "The chosen TikTok privacy level is not allowed for this account (apps that have not passed "
@@ -563,6 +631,12 @@ def _rule_settings(raw: dict[str, Any] | None) -> dict[str, Any]:
     return {**RULE_SETTINGS_DEFAULTS["tiktok"], **(raw or {})}
 
 
+def _client_audited() -> bool:
+    """Whether TikTok has audited this app (setting REPEATER_TIKTOK_AUDITED). An unaudited app can
+    only post 'Only me' (SELF_ONLY) to private accounts. True while the setting does not exist."""
+    return bool(getattr(get_settings(), "tiktok_audited", True))
+
+
 def _direct_settings_problems(settings: dict[str, Any]) -> list[str]:
     problems: list[str] = []
     privacy = settings.get("privacy_level")
@@ -570,6 +644,11 @@ def _direct_settings_problems(settings: dict[str, Any]) -> list[str]:
         problems.append("Choose who can view the TikTok posts (privacy level); TikTok allows no default.")
     elif privacy not in PRIVACY_LEVELS:
         problems.append(f"Unknown TikTok privacy level {privacy!r}.")
+    elif privacy != "SELF_ONLY" and not _client_audited():
+        problems.append(
+            "TikTok has not audited this app yet, so it only accepts 'Only me' (SELF_ONLY) posts, and "
+            "only for a TikTok account that is set to private. Choose 'Only me' until the audit is approved."
+        )
     if not settings.get("music_consent_at"):
         problems.append(
             "Accept TikTok's Music Usage Confirmation in the TikTok posting settings before publishing."
@@ -642,15 +721,47 @@ def _file_size(path: Path) -> int:
         ) from exc
 
 
-def _init_upload(url: str, account: AccountContext, body: dict[str, Any], action: str) -> tuple[str, str]:
-    data = _api_request("POST", url, account.tokens.access_token, action=action, body=body)
+def _start_upload(
+    url: str,
+    account: AccountContext,
+    body: dict[str, Any],
+    action: str,
+    *,
+    pull: bool,
+) -> tuple[str, str | None]:
+    """POST the init request; returns (publish_id, upload_url). With PULL_FROM_URL there is no
+    upload_url and the init request is also the "publish" request: TikTok starts downloading and
+    posting at once, so a lost answer means the video may be live (UnknownOutcomeError with no
+    state: nothing is known that poll() could ask about)."""
+    try:
+        data = _api_request("POST", url, account.tokens.access_token, action=action, body=body)
+    except _NetworkError as exc:
+        if pull and exc.may_have_arrived:
+            raise UnknownOutcomeError(
+                f"TikTok did not answer while {action}; it may already be posting the video.",
+                code="init_outcome_unknown",
+            ) from exc
+        raise
     publish_id = data.get("publish_id")
     upload_url = data.get("upload_url")
+    if pull:
+        if not publish_id:
+            raise UnknownOutcomeError(
+                f"TikTok accepted the request but returned no publish id while {action}; it may already "
+                "be posting the video.",
+                code="missing_publish_id",
+            )
+        return str(publish_id), None
     if not publish_id or not upload_url:
         raise RetryableError(
             f"TikTok did not return an upload link while {action}.", code="missing_upload_url"
         )
     return str(publish_id), str(upload_url)
+
+
+def _pull_possible(public_url: str) -> bool:
+    """PULL_FROM_URL needs an HTTPS URL, and is skipped for a while after TikTok refused it."""
+    return public_url.startswith("https://") and _monotonic() >= _pull_cache.unverified_until
 
 
 _RANGE_RE = re.compile(r"bytes\s+0-(\d+)/\d+")
@@ -682,6 +793,15 @@ def _chunk_status_error(resp: httpx.Response) -> PlatformError:
     return PermanentError(f"TikTok rejected the uploaded video data (HTTP {status}).", status=status)
 
 
+class _FinalChunkUnknown(Exception):  # noqa: N818
+    """The last chunk may have reached TikTok (a try ended with a lost reply or a server error)
+    and a later try failed: TikTok may hold the whole file and be publishing it."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
 def _put_chunk(
     http: httpx.Client, url: str, data: bytes, first: int, last: int, total: int, final: bool
 ) -> None:
@@ -691,17 +811,26 @@ def _put_chunk(
         "Content-Range": f"bytes {first}-{last}/{total}",
     }
     error: PlatformError = RetryableError("The TikTok upload did not complete.")
+    delivered = False  # a try of the FINAL chunk may have reached TikTok although it failed
+
+    def failure(exc: PlatformError) -> Exception:
+        # Before the last byte may have arrived nothing can be live, so the upload simply starts
+        # over. Afterwards any failure is ambiguous: let poll() ask TikTok.
+        return _FinalChunkUnknown(exc.message) if final and delivered else exc
+
     for attempt in range(CHUNK_ATTEMPTS):
         if attempt:
             _sleep(CHUNK_RETRY_BACKOFF * attempt)
         try:
             resp = http.put(url, content=data, headers=headers)
         except httpx.HTTPError as exc:
+            delivered = delivered or _may_have_arrived(exc)
             error = RetryableError(
                 f"Network error while uploading the video to TikTok ({type(exc).__name__})."
             )
             continue
         if resp.status_code >= 500:
+            delivered = True
             error = RetryableError(
                 f"TikTok's upload server failed (HTTP {resp.status_code}).",
                 status=resp.status_code,
@@ -711,17 +840,20 @@ def _put_chunk(
         if resp.status_code == 416 and attempt and _already_received(resp, last):
             return  # an earlier attempt reached TikTok even though its response was lost
         if resp.status_code >= 400:
-            raise _chunk_status_error(resp)
+            raise failure(_chunk_status_error(resp))
         if final and resp.status_code not in (200, 201):
-            raise RetryableError(
-                "TikTok did not confirm that the whole video arrived.", status=resp.status_code
+            raise failure(
+                RetryableError(
+                    "TikTok did not confirm that the whole video arrived.", status=resp.status_code
+                )
             )
         return
-    raise error
+    raise failure(error)
 
 
 def _upload_file(upload_url: str, path: Path, plan: ChunkPlan) -> None:
-    """PUT each chunk in order to the upload_url (valid for one hour)."""
+    """PUT each chunk in order to the upload_url (valid for one hour). Raises _FinalChunkUnknown
+    when the outcome of the last chunk is unclear."""
     with client(timeout=UPLOAD_TIMEOUT) as http, path.open("rb") as fh:
         for index, (first, last) in enumerate(plan.ranges()):
             fh.seek(first)
@@ -756,31 +888,81 @@ class TikTokPublisher:
         problems = self.validate(account, req)
         if problems:
             raise PermanentError(" ".join(problems), code="invalid_settings")
+        if req.state.get("publish_id"):
+            # An earlier attempt got as far as TikTok: ask about that upload instead of starting
+            # another post. Only a dropped upload (RestartPublish) clears the way for a new init.
+            try:
+                return self.poll(account, req.state)
+            except RestartPublish:
+                log.info("TikTok dropped the earlier upload of post %s; starting a new one", req.post_id)
         settings = _rule_settings(req.settings)
         plan = plan_chunks(_file_size(req.video_path), self.chunk_bytes)
         mode = settings["mode"]
         if mode == "inbox":
             username = account.extra.get("username")
-            body: dict[str, Any] = {"source_info": plan.source_info()}
+            post_info: dict[str, Any] | None = None
             action, url = "sending the video to the TikTok inbox", INBOX_INIT_URL
         else:
             info = creator_info(account)
             _check_against_creator_info(settings, req, info)
             username = info.username or account.extra.get("username")
-            body = {"post_info": _post_info(settings, req, info), "source_info": plan.source_info()}
+            post_info = _post_info(settings, req, info)
             action, url = "starting the TikTok post", DIRECT_INIT_URL
-        publish_id, upload_url = _init_upload(url, account, body, action)
+        source = SOURCE_PULL if _pull_possible(req.public_url) else SOURCE_FILE
+        try:
+            publish_id, upload_url = _start_upload(
+                url, account, _init_body(post_info, source, req, plan), action, pull=source == SOURCE_PULL
+            )
+        except PermanentError as exc:
+            if source != SOURCE_PULL or exc.code != "url_ownership_unverified":
+                raise
+            _pull_cache.unverified_until = _monotonic() + PULL_UNVERIFIED_RETRY_SECONDS
+            log.warning(
+                "TikTok has not verified the media URL prefix of this app; uploading the file instead "
+                "(verify https://<host>/m/ in the TikTok app to let TikTok pull videos)"
+            )
+            source = SOURCE_FILE
+            publish_id, upload_url = _start_upload(
+                url, account, _init_body(post_info, source, req, plan), action, pull=False
+            )
+        state: dict[str, Any] = {
+            "publish_id": publish_id,
+            "mode": mode,
+            "username": username,
+            "source": source,
+            "init_at": utcnow().isoformat(),
+        }
+        if mode == "direct":
+            state["privacy_level"] = settings["privacy_level"]
         log.info(
-            "TikTok %s upload started: post=%s publish_id=%s chunks=%s",
+            "TikTok %s post started: post=%s publish_id=%s source=%s chunks=%s",
             mode,
             req.post_id,
             publish_id,
-            plan.total_chunk_count,
+            source,
+            plan.total_chunk_count if source == SOURCE_FILE else 0,
         )
-        _upload_file(upload_url, req.video_path, plan)
+        if source == SOURCE_PULL:
+            return PublishResult(
+                outcome=PublishOutcome.PROCESSING,
+                state=state,
+                poll_after_seconds=POLL_SECONDS,
+                message="TikTok is downloading the video; this can take a few minutes.",
+            )
+        if upload_url is None:  # _start_upload always returns the link for FILE_UPLOAD
+            raise RetryableError("TikTok did not return an upload link.", code="missing_upload_url")
+        state["video_size"] = plan.video_size
+        try:
+            _upload_file(upload_url, req.video_path, plan)
+        except _FinalChunkUnknown as exc:
+            raise UnknownOutcomeError(
+                f"{exc.message} TikTok may hold the whole video; Repeater will ask TikTok.",
+                state=state,
+                code="upload_outcome_unknown",
+            ) from exc
         return PublishResult(
             outcome=PublishOutcome.PROCESSING,
-            state={"publish_id": publish_id, "mode": mode, "username": username},
+            state=state,
             poll_after_seconds=POLL_SECONDS,
             message="Uploaded to TikTok; TikTok is processing the video, which can take a few minutes.",
         )
@@ -797,8 +979,9 @@ class TikTokPublisher:
             body={"publish_id": publish_id},
         )
         status = data.get("status")
+        now = utcnow()
         if status == "PUBLISH_COMPLETE":
-            return _completed(state, data)
+            return _completed(state, data, now)
         if status == "SEND_TO_USER_INBOX":
             return PublishResult(
                 outcome=PublishOutcome.PUBLISHED,
@@ -807,6 +990,8 @@ class TikTokPublisher:
             )
         if status == "FAILED":
             raise _failure_error(str(data.get("fail_reason") or ""))
+        if status == "PROCESSING_UPLOAD":
+            _check_upload_alive(state, data, now)
         note = "" if status in ("PROCESSING_UPLOAD", "PROCESSING_DOWNLOAD") else f" (status {status})"
         return PublishResult(
             outcome=PublishOutcome.PROCESSING,
@@ -814,6 +999,36 @@ class TikTokPublisher:
             poll_after_seconds=POLL_SECONDS,
             message=f"TikTok is still processing the video{note}.",
         )
+
+
+def _init_body(
+    post_info: dict[str, Any] | None, source: str, req: PublishRequest, plan: ChunkPlan
+) -> dict[str, Any]:
+    source_info = (
+        {"source": SOURCE_PULL, "video_url": req.public_url} if source == SOURCE_PULL else plan.source_info()
+    )
+    return (
+        {"post_info": post_info, "source_info": source_info}
+        if post_info is not None
+        else {"source_info": source_info}
+    )
+
+
+def _check_upload_alive(state: dict[str, Any], data: dict[str, Any], now: datetime) -> None:
+    """A FILE_UPLOAD that still waits for bytes after the upload_url's hour is over can never
+    finish, and nothing was published: the upload has to start over."""
+    init_at = _parse_time(state.get("init_at"))
+    if state.get("source") != SOURCE_FILE or init_at is None or now - init_at <= UPLOAD_URL_LIFETIME:
+        return
+    uploaded, size = data.get("uploaded_bytes"), state.get("video_size")
+    if isinstance(uploaded, int) and isinstance(size, int) and uploaded >= size:
+        return  # TikTok has every byte and is still moving on
+    raise RestartPublish(
+        "TikTok never received the whole video before the upload link expired, so nothing was "
+        "published; the upload will start over.",
+        code="upload_incomplete",
+        retry_after=FAILED_RETRY_AFTER,
+    )
 
 
 def _first_post_id(data: dict[str, Any]) -> str | None:
@@ -826,22 +1041,44 @@ def _first_post_id(data: dict[str, Any]) -> str | None:
     return str(ids) if ids not in (None, "") else None
 
 
-def _completed(state: dict[str, Any], data: dict[str, Any]) -> PublishResult:
+def _expects_post_id(state: dict[str, Any]) -> bool:
+    """Only a public Direct Post gets a publicaly_available_post_id, once it passed moderation."""
+    return state.get("mode") == "direct" and state.get("privacy_level") == "PUBLIC_TO_EVERYONE"
+
+
+def _completed(state: dict[str, Any], data: dict[str, Any], now: datetime) -> PublishResult:
     post_id = _first_post_id(data)
     username = state.get("username")
     permalink = f"https://www.tiktok.com/@{username}/video/{post_id}" if post_id and username else None
     if post_id:
-        message = "Published on TikTok."
-    else:
-        message = (
-            "Published on TikTok. TikTok shares the post link only for public posts that passed moderation."
+        return PublishResult(
+            outcome=PublishOutcome.PUBLISHED,
+            platform_post_id=post_id,
+            permalink=permalink,
+            state=dict(state),
+            message="Published on TikTok.",
         )
+    if _expects_post_id(state):
+        # The post is live, but TikTok hands out its id only after moderation. Keep asking for a
+        # bounded time (never publishing again) so the dashboard gets the id and the link.
+        seen = _parse_time(state.get("complete_seen_at")) or now
+        deadline = seen + POST_ID_WAIT
+        init_at = _parse_time(state.get("init_at"))
+        if init_at is not None:
+            deadline = min(deadline, init_at + POST_ID_MAX_AFTER_INIT)
+        if now < deadline:
+            return PublishResult(
+                outcome=PublishOutcome.PROCESSING,
+                state={**state, "complete_seen_at": seen.isoformat()},
+                poll_after_seconds=POST_ID_POLL_SECONDS,
+                message="Published on TikTok; waiting for TikTok's moderation to share the post link.",
+            )
     return PublishResult(
         outcome=PublishOutcome.PUBLISHED,
-        platform_post_id=post_id,
-        permalink=permalink,
         state=dict(state),
-        message=message,
+        message=(
+            "Published on TikTok. TikTok shares the post link only for public posts that passed moderation."
+        ),
     )
 
 
@@ -870,7 +1107,9 @@ def _failure_error(reason: str) -> PlatformError:
     if reason == "auth_removed":
         return AuthError(message, code=code)
     if reason == "spam_risk_too_many_posts":
-        return RateLimitedError(message, code=code, retry_after=DAILY_CAP_RETRY_AFTER)
+        # FAILED is final for this publish_id: nothing was posted. Start over once the daily cap
+        # (a 24 h window TikTok does not disclose) has had time to reset.
+        return RestartPublish(message, code=code, retry_after=DAILY_CAP_RETRY_AFTER)
     if reason in _FAIL_RETRYABLE:
         # This publish_id is finished for good; a new upload is needed.
         return RestartPublish(message, code=code, retry_after=FAILED_RETRY_AFTER)

@@ -2,7 +2,7 @@
 {% import "macros.html" as m with context %}
 {% block title %}{{ m.video_title(video) }}{% endblock %}
 {% block content %}
-<p><a href="/library">← {{ t('library.back') }}</a></p>
+<p><a href="/library">{{ t('common.back_arrow') }} {{ t('library.back') }}</a></p>
 <h1 dir="auto">{{ m.video_title(video) }}</h1>
 
 <div class="grid-2">
@@ -47,20 +47,32 @@
         <button type="submit" class="button secondary">{{ t('library.archive') }}</button>
       </form>
       {% endif %}
+      {% if can_delete and video.status not in ['importing', 'processing'] %}
+      <form method="post" action="/library/{{ video.id }}/delete" class="inline" data-confirm="{{ t('library.delete_confirm') }}">
+        {{ m.csrf() }}
+        <button type="submit" class="button danger">{{ t('library.delete') }}</button>
+      </form>
+      {% endif %}
     </div>
+    {% if can_delete %}<p class="muted small">{{ t('library.delete_help') }}</p>{% endif %}
     {% if video.status == 'ready' and accounts %}
-    <form method="post" action="/library/{{ video.id }}/publish-now" class="stack">
+    <form method="post" action="/library/{{ video.id }}/publish-now" class="stack" data-confirm="{{ t('library.publish_now_confirm') }}">
       {{ m.csrf() }}
       <label>{{ t('library.publish_to') }}
         <select name="account_id" required>
           <option value="">—</option>
           {% for a in accounts %}
-          <option value="{{ a.id }}">{{ platform_name(a.platform) }} · {{ a.display_name }}</option>
+          <option value="{{ a.id }}"{% if a.id in incomplete %} disabled{% endif %}>{{ platform_name(a.platform) }} · {{ a.display_name }}{% if a.id in incomplete %} ({{ t('library.complete_settings') }}){% endif %}</option>
           {% endfor %}
         </select>
       </label>
       <button type="submit" class="button">{{ t('library.publish_now') }}</button>
       <p class="muted small">{{ t('library.publish_now_help') }}</p>
+      {% if incomplete %}
+      <p class="muted small">{{ t('library.incomplete_help') }}
+        {% for a in accounts if a.id in incomplete %}<a href="/rules/{{ a.id }}" dir="auto">{{ a.display_name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+      </p>
+      {% endif %}
     </form>
     {% endif %}
   </section>
@@ -112,7 +124,7 @@
         <tr>
           <td>{{ fmt_dt(p.published_at or p.scheduled_at, zone) }}{% if p.cycle %} <span class="muted">({{ t('library.cycle', cycle=p.cycle) }})</span>{% endif %}</td>
           <td>{{ m.platform(p.platform) }} <span dir="auto">{{ p.connected_account.display_name }}</span></td>
-          <td>{{ m.badge('post_status', p.status) }}{% if p.error %}<div class="muted small" dir="auto">{{ p.error[:300] }}</div>{% endif %}</td>
+          <td>{{ m.badge('post_status', p.status) }}{% if p.error %}<div>{{ m.error_text(p.error, 300) }}</div>{% endif %}</td>
           <td>{% if p.permalink and p.permalink.startswith('https://') %}<a href="{{ p.permalink }}" rel="noopener noreferrer" target="_blank">{{ t('schedule.open') }}</a>{% else %}—{% endif %}</td>
         </tr>
         {% endfor %}

@@ -62,6 +62,7 @@ def tiktok_account(make_account):
 
 def _base_form(**extra) -> dict:
     form = {
+        "mode": "direct",  # a TikTok form rendered with creator info always submits its mode
         "daily_cap": "2",
         "min_gap_minutes": "240",
         "window_start": "10:00",
@@ -151,11 +152,18 @@ def test_tiktok_creator_info_failure_blocks_enabling(web_owner, tiktok_account, 
     html = web_owner.get(f"/rules/{tiktok_account.id}").text
     assert "Could not load your TikTok creator settings" in html
     assert "TikTok is temporarily unavailable." in html
-    assert re.search(r'name="enabled" value="1" data-rule-enabled disabled', html)
+    # No "enabled" box while the rule is off: it cannot be turned on without creator settings, and
+    # the form says that its TikTok fields are missing so saving cannot read them as answers.
+    assert 'name="enabled"' not in html and 'name="tiktok_fields_absent" value="1"' in html
     assert 'name="privacy_level"' not in html
     resp = _save(web_owner, tiktok_account, _base_form(enabled="1"))
     assert resp.status_code == 400
     assert "cannot be turned on" in resp.text
+    assert _rule(db, tiktok_account).enabled is False
+    # A crafted "enabled" without the TikTok fields cannot switch it on either.
+    crafted = _base_form(enabled="1", tiktok_fields_absent="1")
+    crafted.pop("mode")
+    assert _save(web_owner, tiktok_account, crafted).status_code == 303
     assert _rule(db, tiktok_account).enabled is False
 
 
@@ -166,11 +174,47 @@ def test_tiktok_creator_info_failure_still_allows_turning_off(web_owner, tiktok_
     rule.settings = {**rule.settings, "privacy_level": "SELF_ONLY"}
     db.commit()
     creator.error = RetryableError("down")
-    resp = _save(web_owner, tiktok_account, _base_form(daily_cap="3"))
+    form = _base_form(daily_cap="3", tiktok_fields_absent="1")
+    form.pop("mode")
+    resp = _save(web_owner, tiktok_account, form)  # the "enabled" box was unchecked
     assert resp.status_code == 303
     rule = _rule(db, tiktok_account)
     assert rule.enabled is False and rule.daily_cap == 3
     assert rule.settings["privacy_level"] == "SELF_ONLY"  # untouched
+
+
+@pytest.mark.parametrize("creator_ok_on_save", [False, True])
+def test_tiktok_save_without_creator_fields_keeps_publishing_and_settings(
+    web_owner, tiktok_account, creator, db, creator_ok_on_save
+):
+    """ux-compliance-7: saving the hashtags while TikTok's creator settings failed to load must not
+    switch a running rule off or erase the approved privacy, interactions and music consent."""
+    web_owner.get(f"/rules/{tiktok_account.id}")
+    rule = _rule(db, tiktok_account)
+    approved = {
+        **rule.settings,
+        "privacy_level": "MUTUAL_FOLLOW_FRIENDS",
+        "allow_comment": True,
+        "music_consent_at": "2026-10-01T10:00:00",
+    }
+    rule.enabled, rule.settings = True, approved
+    db.commit()
+    creator.error = RetryableError("TikTok is temporarily unavailable.")
+    set_lang(web_owner, "en")
+    html = web_owner.get(f"/rules/{tiktok_account.id}").text
+    # The running rule stays visibly on and can still be turned off.
+    assert re.search(r'name="enabled" value="1" data-rule-enabled checked>', html)
+    assert 'name="tiktok_fields_absent" value="1"' in html
+    if creator_ok_on_save:
+        creator.error = None
+    form = _base_form(tiktok_fields_absent="1", enabled="1", hashtags="#new")
+    form.pop("mode")
+    assert _save(web_owner, tiktok_account, form).status_code == 303
+    rule = _rule(db, tiktok_account)
+    assert rule.enabled is True and rule.hashtags == "#new"
+    assert rule.settings == approved
+    page = web_owner.get(f"/rules/{tiktok_account.id}").text
+    assert "were left as they were" in page
 
 
 def test_tiktok_disconnected_account_needs_reconnect(web_owner, tiktok_account, creator, db, monkeypatch):

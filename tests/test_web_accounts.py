@@ -123,3 +123,54 @@ def test_disconnect_other_workspace_is_404(web_owner, db, make_account):
     foreign = make_account("youtube", workspace_id=other.id)
     assert web_owner.get(f"/accounts/{foreign.id}/disconnect").status_code == 404
     assert post(web_owner, f"/accounts/{foreign.id}/disconnect", page="/accounts").status_code == 404
+
+
+# --------------------------------------------------------------------------- TikTok grant sharing
+
+
+def test_tiktok_disconnect_keeps_remote_grant_while_connected_in_another_workspace(
+    web_owner, db, make_account
+):
+    """Revoking at TikTok removes the whole user-to-app authorization, and the same open_id can be
+    connected in several workspaces: only the local tokens go while another connection is live."""
+    other = Workspace(name="Creator workspace")
+    db.add(other)
+    db.commit()
+    mine = make_account("tiktok", external_id="open-1", display_name="Magic TikTok")
+    theirs = make_account("tiktok", external_id="open-1", workspace_id=other.id)
+    fake = FakeRevoke("tiktok")
+    with override("oauth", "tiktok", fake):
+        resp = post(web_owner, f"/accounts/{mine.id}/disconnect", page="/accounts")
+    assert resp.status_code == 303
+    assert fake.revoked == []  # TikTok was not asked to revoke
+    db.expire_all()
+    assert db.get(ConnectedAccount, mine.id).token_enc is None
+    assert db.get(ConnectedAccount, mine.id).status == AccountStatus.DISABLED
+    assert db.get(ConnectedAccount, theirs.id).status == AccountStatus.ACTIVE
+    assert db.get(ConnectedAccount, theirs.id).token_enc is not None
+
+
+def test_tiktok_disconnect_revokes_when_the_other_connection_is_gone(web_owner, db, make_account):
+    other = Workspace(name="Creator workspace")
+    db.add(other)
+    db.commit()
+    mine = make_account("tiktok", external_id="open-1")
+    theirs = make_account("tiktok", external_id="open-1", workspace_id=other.id)
+    theirs.token_enc, theirs.status = None, AccountStatus.DISABLED
+    unrelated = make_account("tiktok", external_id="open-2", workspace_id=other.id)
+    db.commit()
+    fake = FakeRevoke("tiktok")
+    with override("oauth", "tiktok", fake):
+        post(web_owner, f"/accounts/{mine.id}/disconnect", page="/accounts")
+    assert fake.revoked == ["open-1"]
+    db.expire_all()
+    assert db.get(ConnectedAccount, unrelated.id).status == AccountStatus.ACTIVE
+
+
+def test_disconnect_page_states_the_retention(web_owner, make_account):
+    account = make_account("tiktok")
+    set_lang(web_owner, "en")
+    html = web_owner.get(f"/accounts/{account.id}/disconnect").text
+    assert "Within 7 days the account record" in html
+    set_lang(web_owner, "ar")
+    assert "خلال 7 أيام" in web_owner.get(f"/accounts/{account.id}/disconnect").text

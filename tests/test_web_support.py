@@ -33,13 +33,38 @@ def csrf_token(client: TestClient, path: str = "/login") -> str:
     return csrf_from(resp.text)
 
 
-def login(client: TestClient, email: str = OWNER_EMAIL, password: str = PASSWORD, next_url: str = "/"):
+def accept_consent(client: TestClient) -> None:
+    """Accept the one-time terms and privacy consent screen (a no-op when already accepted)."""
+    page = client.get("/consent", follow_redirects=False)
+    if page.status_code != 200:
+        return
+    resp = client.post(
+        "/consent",
+        data={"csrf_token": csrf_from(page.text), "accept": "1", "next": "/"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303, resp.text[:500]
+
+
+def login(
+    client: TestClient,
+    email: str = OWNER_EMAIL,
+    password: str = PASSWORD,
+    next_url: str = "/",
+    *,
+    accept_terms: bool = True,
+):
+    """Sign in. By default the one-time consent screen is accepted right after (the response of
+    the sign-in itself is returned); pass accept_terms=False to test the consent screen."""
     token = csrf_token(client, "/login")
-    return client.post(
+    resp = client.post(
         "/login",
         data={"email": email, "password": password, "csrf_token": token, "next": next_url},
         follow_redirects=False,
     )
+    if accept_terms and resp.status_code == 303:
+        accept_consent(client)
+    return resp
 
 
 def post(client: TestClient, path: str, data: dict[str, Any] | None = None, *, page: str = "/", **kw: Any):
@@ -53,7 +78,26 @@ def set_lang(client: TestClient, lang: str) -> None:
 
 
 @pytest.fixture
-def web_app():
+def web_plan_calls(monkeypatch) -> Recorder:
+    """Records every call of engine.actions.invalidate_plan (contract C2) made by the dashboard and
+    calls through to the real function. Until the engine module provides it, a stand-in that only
+    enqueues plan_workspace is installed so the dashboard keeps working."""
+    from repeater.engine import actions
+    from repeater.jobs import kinds
+
+    real = getattr(actions, "invalidate_plan", None)
+
+    def fallback(session, workspace_id, *, account_id=None, actor="system"):
+        kinds.enqueue_plan_workspace(session, workspace_id)
+        return 0
+
+    recorder = Recorder(result=real or fallback)
+    monkeypatch.setattr(actions, "invalidate_plan", recorder, raising=False)
+    return recorder
+
+
+@pytest.fixture
+def web_app(web_plan_calls):
     from repeater.web.app import create_app
 
     return create_app()
@@ -124,6 +168,33 @@ def web_make_video(db: Session, workspace, sample_video: Path):
             video.encoded_size_bytes = (folder / storage.ENCODED_NAME).stat().st_size
         db.commit()
         return video
+
+    return _make
+
+
+@pytest.fixture
+def web_make_rule(db: Session):
+    """Factory: the account's rule with COMPLETE platform settings (TikTok privacy level and music
+    consent, YouTube audience answer). New rules are created disabled and incomplete."""
+    from repeater.engine import rules
+    from repeater.models import Platform
+
+    complete = {
+        Platform.TIKTOK: {"privacy_level": "PUBLIC_TO_EVERYONE", "music_consent_at": "2026-10-01T10:00:00"},
+        Platform.YOUTUBE: {"self_declared_made_for_kids": False},
+    }
+
+    def _make(account, *, enabled: bool = False, **settings: Any):
+        rule = rules.ensure_rule(db, account)
+        assert rule is not None
+        rule.settings = {
+            **rules.default_settings(account.platform),
+            **complete.get(rule.platform, {}),
+            **settings,
+        }
+        rule.enabled = enabled
+        db.commit()
+        return rule
 
     return _make
 

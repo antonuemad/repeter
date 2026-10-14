@@ -40,7 +40,9 @@ from repeater.platforms.base import (
     PublishOutcome,
     PublishResult,
     RateLimitedError,
+    RestartPublish,
     RetryableError,
+    UnknownOutcomeError,
 )
 from repeater.queue import RetryLater
 from repeater.timeutil import utcnow
@@ -354,17 +356,88 @@ def test_poll_running_job_gets_retry_in(db, setup):
 
 
 def test_poll_timeout_needs_attention(db, setup, notifications):
+    """After 2 hours the platform is asked one last time; only a poll that still answers
+    PROCESSING gives up (the video may be live, so the post is flagged as such)."""
     post, *_ = setup("instagram")
     post.status = PostStatus.PROCESSING
     started = utcnow() - timedelta(hours=2, minutes=1)
     post.publish_state = {"container_id": "c1", "_engine": {"processing_since": started.isoformat()}}
     db.commit()
-    pub = fake("instagram")
+    still = PublishResult(PublishOutcome.PROCESSING, state={"container_id": "c1"})
+    pub = fake("instagram", poll_script=[still])
     with override("publisher", "instagram", pub):
         step = publisher.poll_post(db, post.id)
-    assert step.status == PostStatus.NEEDS_ATTENTION and pub.poll_states == []
+    assert step.status == PostStatus.NEEDS_ATTENTION and len(pub.poll_states) == 1
     assert "within 2 hours" in post.error
+    assert publisher.engine_state(post.publish_state)["may_be_live"] is True
     assert len(notifications) == 1 and notifications[0][1]["level"] == "error"
+    assert not jobs(db, "poll_post")
+
+
+def test_poll_after_two_hours_still_asks_the_platform(db, setup, notifications):
+    """engine-4: a worker that was down for 2 h 5 min (or a paused workspace) must not flag a post
+    that is live; one status check decides."""
+    post, *_ = setup("youtube")
+    post.status = PostStatus.PROCESSING
+    started = utcnow() - timedelta(hours=2, minutes=5)
+    post.publish_state = {"video_id": "yt-1", "_engine": {"processing_since": started.isoformat()}}
+    db.commit()
+    done = PublishResult(PublishOutcome.PUBLISHED, platform_post_id="yt-1", state={"video_id": "yt-1"})
+    pub = fake(poll_script=[done])
+    with override("publisher", "youtube", pub):
+        step = publisher.poll_post(db, post.id)
+    assert step.status == PostStatus.PUBLISHED and len(pub.poll_states) == 1
+    assert notifications == []
+
+
+def test_poll_keeps_polling_a_paused_workspace_for_platforms_that_are_already_live(
+    db, setup, workspace, notifications
+):
+    post, *_ = setup("youtube")
+    post.status = PostStatus.PROCESSING
+    t0 = utcnow()
+    post.publish_state = {"video_id": "yt-1", "_engine": {"processing_since": t0.isoformat()}}
+    workspace.paused = True
+    db.commit()
+    still = PublishResult(PublishOutcome.PROCESSING, state={"video_id": "yt-1"})
+    done = PublishResult(PublishOutcome.PUBLISHED, platform_post_id="yt-1", state={"video_id": "yt-1"})
+    pub = fake(poll_script=[still, done])
+    with override("publisher", "youtube", pub):
+        assert publisher.poll_post(db, post.id, now=t0 + timedelta(hours=1)).status == PostStatus.PROCESSING
+        assert publisher.poll_post(db, post.id, now=t0 + timedelta(hours=3)).status == PostStatus.PUBLISHED
+    assert len(pub.poll_states) == 2 and notifications == []
+
+
+def test_poll_error_then_timeout_never_without_an_answer(db, setup, notifications):
+    """A status check that keeps failing does not flag the post after 2 hours, only after the
+    error ceiling; a rate limit with a long retry_after keeps the upload PROCESSING (api-missed-1)."""
+    post, *_ = setup("youtube")
+    post.status = PostStatus.PROCESSING
+    t0 = utcnow() - timedelta(hours=3)
+    post.publish_state = {"video_id": "yt-1", "_engine": {"processing_since": t0.isoformat()}}
+    db.commit()
+    quota = RateLimitedError("quotaExceeded", retry_after=16 * 3600)
+    now = utcnow()
+    with override("publisher", "youtube", fake(poll_script=[quota])):
+        step = publisher.poll_post(db, post.id, now=now)
+    assert step.status == PostStatus.PROCESSING and notifications == []
+    (job,) = jobs(db, "poll_post")
+    assert job.run_at >= now + timedelta(hours=16)
+    # 16 h later the check works and the upload is live: PUBLISHED, not needs-attention.
+    done = PublishResult(PublishOutcome.PUBLISHED, platform_post_id="yt-1", state={"video_id": "yt-1"})
+    with override("publisher", "youtube", fake(poll_script=[done])):
+        step = publisher.poll_post(db, post.id, now=job.run_at)
+    assert step.status == PostStatus.PUBLISHED
+    # Failing checks give up only after POLL_ERROR_CEILING.
+    post2, *_ = setup("youtube")
+    post2.status = PostStatus.PROCESSING
+    ancient = utcnow() - publisher.POLL_ERROR_CEILING - timedelta(minutes=1)
+    post2.publish_state = {"video_id": "yt-2", "_engine": {"processing_since": ancient.isoformat()}}
+    db.commit()
+    with override("publisher", "youtube", fake(poll_script=[RetryableError("HTTP 500")])):
+        step = publisher.poll_post(db, post2.id)
+    assert step.status == PostStatus.NEEDS_ATTENTION and len(notifications) == 1
+    assert publisher.engine_state(post2.publish_state)["may_be_live"] is True
 
 
 def test_poll_transient_error_polls_again(db, setup):
@@ -397,21 +470,32 @@ def test_poll_terminal_errors(db, setup, notifications, exc):
     assert (acc.status == AccountStatus.NEEDS_RECONNECT) == isinstance(exc, AuthError)
 
 
-def test_poll_paused_or_disconnected(db, setup, workspace):
+def test_poll_paused_or_disconnected(db, setup, workspace, notifications):
     post, _video, acc, _rule = setup("instagram")
     post.status = PostStatus.PROCESSING
     now = utcnow()
-    post.publish_state = {"_engine": {"processing_since": now.isoformat()}}
+    post.publish_state = {"container_id": "c1", "_engine": {"processing_since": now.isoformat()}}
     workspace.paused = True
     db.commit()
-    with override("publisher", "instagram", fake("instagram")):
+    pub = fake("instagram")
+    with override("publisher", "instagram", pub):
         step = publisher.poll_post(db, post.id, now=now)
-    assert step.status == PostStatus.PROCESSING
+    # Instagram's poll would publish the container, so a paused workspace is not polled (and the
+    # wait does not count against the 2-hour limit).
+    assert step.status == PostStatus.PROCESSING and pub.poll_states == []
     assert jobs(db, "poll_post")[0].run_at == now + timedelta(minutes=10)
+    assert publisher._processing_since(post, now) == now
+    for minutes in range(10, 400, 10):
+        step = publisher.poll_post(db, post.id, now=now + timedelta(minutes=minutes))
+    assert step.status == PostStatus.PROCESSING and pub.poll_states == []
+    # Disconnected: the upload may be live, so never CANCELED (the planner would re-use it) and no
+    # alert for something the user did themselves.
     acc.status = AccountStatus.DISABLED
     db.commit()
-    assert publisher.poll_post(db, post.id, now=now).status == PostStatus.CANCELED
-    assert publisher.poll_post(db, post.id).status == PostStatus.CANCELED  # no-op now
+    assert publisher.poll_post(db, post.id, now=now).status == PostStatus.NEEDS_ATTENTION
+    assert "disconnected" in post.error and publisher.engine_state(post.publish_state)["may_be_live"]
+    assert post.publish_state["container_id"] == "c1" and notifications == []
+    assert publisher.poll_post(db, post.id).status == PostStatus.NEEDS_ATTENTION  # no-op now
 
 
 # =========================================================================== publish errors
@@ -440,12 +524,66 @@ def test_retry_ladder_then_needs_attention(db, setup, notifications):
     assert len(activities(db, ActivityLevel.WARNING)) == 3
 
 
-def test_rate_limit_uses_retry_after_when_longer(db, setup):
+def test_rate_limit_is_not_a_failed_attempt(db, setup, notifications):
+    """api-5: a rate limit or quota error moves the post later (jittered, after retry_after) and
+    leaves attempts and the retry ladder alone."""
     post, *_ = setup()
     now = utcnow()
-    with override("publisher", "youtube", fake(publish_script=[RateLimitedError("quota", retry_after=3600)])):
-        publisher.publish_post(db, post.id, now=now)
-    assert post.status == PostStatus.FAILED and post.scheduled_at == now + timedelta(hours=1)
+    limited = [RateLimitedError("quota", retry_after=3600) for _ in range(6)]
+    with override("publisher", "youtube", fake(publish_script=limited)):
+        for _ in range(6):  # more often than the retry ladder allows
+            step = publisher.publish_post(db, post.id, now=now)
+            assert step.status == PostStatus.SCHEDULED
+            assert post.attempts == 0 and post.status == PostStatus.SCHEDULED
+            wait = post.scheduled_at - now
+            assert (
+                timedelta(hours=1)
+                <= wait
+                < timedelta(hours=1) + timedelta(seconds=publisher.RATE_LIMIT_JITTER_SECONDS)
+            )
+            now = post.scheduled_at
+    assert notifications == [] and post.error.startswith("Rate limited")
+    (job,) = [j for j in jobs(db, "publish_post") if j.status == JobStatus.QUEUED]
+    assert job.run_at == post.scheduled_at
+
+
+def test_rate_limited_posts_are_spread_with_jitter_and_keep_the_min_gap(db, setup, workspace, make_account):
+    """Posts that hit the same quota error do not all return at 00:05: each gets its own
+    deterministic jitter, never closer than the rule's min gap to the account's other posts."""
+    first, video, acc, rule = setup()
+    rule.min_gap_minutes = 240
+    second = ScheduledPost(
+        workspace_id=workspace.id,
+        video_id=video.id,
+        connected_account_id=acc.id,
+        platform=Platform.YOUTUBE,
+        cycle=1,
+        idempotency_key=f"{video.id}:{acc.id}:1",
+        scheduled_at=utcnow(),
+        created_by="scheduler",
+    )
+    db.add(second)
+    db.commit()
+    now = utcnow()
+    quota = [RateLimitedError("quotaExceeded", retry_after=6 * 3600) for _ in range(2)]
+    with override("publisher", "youtube", fake(publish_script=quota)):
+        publisher.publish_post(db, first.id, now=now)
+        publisher.publish_post(db, second.id, now=now)
+    gap = abs(first.scheduled_at - second.scheduled_at)
+    assert gap >= timedelta(minutes=240)
+    assert min(first.scheduled_at, second.scheduled_at) >= now + timedelta(hours=6)
+    # The jitter is a function of the post, so it is repeatable.
+    assert publisher._jitter_seconds(first.id, 1800) == publisher._jitter_seconds(first.id, 1800)
+
+
+def test_rate_limit_gives_up_after_days(db, setup, notifications):
+    post, *_ = setup()
+    long_ago = utcnow() - publisher.RATE_LIMIT_GIVE_UP - timedelta(hours=1)
+    post.publish_state = {"_engine": {"rate_limited_since": long_ago.isoformat()}}
+    db.commit()
+    with override("publisher", "youtube", fake(publish_script=[RateLimitedError("quota")])):
+        step = publisher.publish_post(db, post.id)
+    assert step.status == PostStatus.NEEDS_ATTENTION and len(notifications) == 1
 
 
 def test_running_publish_job_gets_retry_in(db, setup):
@@ -465,16 +603,32 @@ def test_running_publish_job_gets_retry_in(db, setup):
     assert [j.status for j in jobs(db, "publish_post")] == [JobStatus.RUNNING]
 
 
-def test_unexpected_exception_is_retryable_and_redacted(db, setup, caplog):
+def test_unexpected_exception_after_the_upload_started_is_not_retried(db, setup, notifications, caplog):
+    """engine-3: bytes may have gone out, so a bug in the adapter ends in needs-attention
+    ("may be live"), never in a blind retry."""
     post, *_ = setup()
     boom = ValueError("leaked https://api.example/x?access_token=SECRET123")
-    with override("publisher", "youtube", fake(publish_script=[boom])):
+    pub = fake(publish_script=[boom])
+    with override("publisher", "youtube", pub):
         step = publisher.publish_post(db, post.id)
-    assert step.status == PostStatus.FAILED
+    assert step.status == PostStatus.NEEDS_ATTENTION and post.attempts == 0
     assert "Unexpected error (ValueError)" in post.error and "SECRET123" not in post.error
+    assert "may be live" in post.error and publisher.engine_state(post.publish_state)["may_be_live"]
+    assert len(notifications) == 1 and "SECRET123" not in notifications[0][0]
+    assert not [j for j in jobs(db, "publish_post") if j.status == JobStatus.QUEUED]
     for a in activities(db):
         assert "SECRET123" not in a.message and "Traceback" not in a.message
     assert "SECRET123" not in caplog.text
+
+
+def test_retryable_error_is_still_retried_and_urls_are_scrubbed(db, setup):
+    post, *_ = setup()
+    exc = RetryableError("PUT https://upload.example/session?upload_id=SECRET failed (ReadTimeout)")
+    with override("publisher", "youtube", fake(publish_script=[exc])):
+        step = publisher.publish_post(db, post.id)
+    assert step.status == PostStatus.FAILED and post.attempts == 1
+    assert "SECRET" not in post.error and "<url>" in post.error
+    assert all("SECRET" not in a.message for a in activities(db))
 
 
 @pytest.mark.parametrize(
@@ -828,3 +982,463 @@ def test_user_post_without_rule_uses_default_settings(db, setup):
         assert publisher.publish_post(db, post.id).status == PostStatus.PUBLISHED
     assert pub.requests[0].settings == rules.default_settings("youtube")
     assert pub.requests[0].caption == "Watch this coin vanish\n\nFollow for more"
+
+
+# =========================================================================== unknown outcome (engine-3, C1)
+
+
+def test_unknown_outcome_with_state_polls_instead_of_uploading_again(db, setup, notifications):
+    """The final-chunk response was lost: the adapter's state is saved and poll() asks the
+    platform; the video is never uploaded a second time."""
+    post, *_ = setup("tiktok")
+    lost = UnknownOutcomeError(
+        "No answer to the last chunk (ReadTimeout).", state={"publish_id": "p1", "upload_url": "SECRET"}
+    )
+    live = PublishResult(PublishOutcome.PUBLISHED, platform_post_id="tt-1", state={"publish_id": "p1"})
+    pub = fake("tiktok", publish_script=[lost], poll_script=[live])
+    now = utcnow()
+    with override("publisher", "tiktok", pub):
+        step = publisher.publish_post(db, post.id, now=now)
+        assert step.status == PostStatus.PROCESSING and step.retry_in is None
+        db.refresh(post)
+        assert post.status == PostStatus.PROCESSING and post.attempts == 0
+        assert post.publish_state["publish_id"] == "p1"
+        assert publisher.engine_state(post.publish_state)["processing_since"] == now.isoformat()
+        (job,) = jobs(db, "poll_post")
+        assert job.run_at == now + timedelta(seconds=publisher.UNKNOWN_OUTCOME_POLL_SECONDS)
+        assert not [j for j in jobs(db, "publish_post") if j.status == JobStatus.QUEUED]
+        step = publisher.poll_post(db, post.id, now=job.run_at)
+    assert step.status == PostStatus.PUBLISHED and pub.publish_script == []
+    assert pub.poll_states == [{"publish_id": "p1", "upload_url": "SECRET"}]
+    assert notifications == []
+    # The state (it may hold an upload URL) is not logged in the activity entries.
+    assert all("SECRET" not in a.message and "SECRET" not in str(a.data) for a in activities(db))
+
+
+def test_unknown_outcome_without_state_is_needs_attention_not_a_retry(db, setup, notifications):
+    post, *_ = setup("tiktok")
+    pub = fake("tiktok", publish_script=[UnknownOutcomeError("Timeout after the last byte.")])
+    with override("publisher", "tiktok", pub):
+        step = publisher.publish_post(db, post.id)
+    assert step.status == PostStatus.NEEDS_ATTENTION and post.attempts == 0
+    assert "may be live" in post.error
+    assert publisher.engine_state(post.publish_state)["may_be_live"] is True
+    assert len(notifications) == 1 and notifications[0][1]["level"] == "error"
+    assert not [j for j in jobs(db, "publish_post") if j.status == JobStatus.QUEUED]
+
+
+def test_unknown_outcome_resolved_to_nothing_publishes_again_with_empty_state(db, setup):
+    post, *_ = setup("instagram")
+    lost = UnknownOutcomeError("lost", state={"container_id": "c1"})
+    again = PublishResult(PublishOutcome.PROCESSING, state={"container_id": "c2"})
+    pub = fake(
+        "instagram",
+        publish_script=[lost, again],
+        poll_script=[RestartPublish("The upload is gone.", retry_after=60)],
+    )
+    now = utcnow()
+    with override("publisher", "instagram", pub):
+        publisher.publish_post(db, post.id, now=now)
+        step = publisher.poll_post(db, post.id, now=now + timedelta(minutes=1))
+        assert step.status == PostStatus.FAILED and post.attempts == 1 and post.publish_state == {}
+        publisher.publish_post(db, post.id, now=post.scheduled_at)
+    assert [r.state for r in pub.requests] == [{}, {}]
+    assert post.publish_state["container_id"] == "c2"
+
+
+def test_publish_request_carries_the_posts_adapter_state(db, setup):
+    post, *_ = setup("youtube", created_by="user")
+    post.publish_state = {"upload_uri": "resume-here", "_engine": {"may_be_live": True}}
+    db.commit()
+    pub = fake(publish_script=[PUBLISHED])
+    with override("publisher", "youtube", pub):
+        publisher.publish_post(db, post.id)
+    # The adapter sees its own state, not the engine's bookkeeping, and cannot change the row.
+    assert pub.requests[0].state == {"upload_uri": "resume-here"}
+
+
+# =========================================================================== disconnect (engine-1)
+
+
+def _youtube_ready(db, rule):
+    rule.settings = {**rule.settings, "self_declared_made_for_kids": False}
+    rule.window_start = rule.window_end = __import__("datetime").time(0, 0)
+    rule.min_gap_minutes = 0
+    db.commit()
+
+
+@pytest.mark.parametrize("state", [PostStatus.PROCESSING, PostStatus.UPLOADING])
+def test_disconnect_while_publishing_never_makes_a_reusable_canceled_post(
+    db, setup, workspace, notifications, state
+):
+    """The same video must not be posted again after a disconnect and reconnect."""
+    from repeater.accounts import disconnect, upsert_connected_accounts
+    from repeater.engine import scheduler
+    from repeater.platforms.base import ConnectedAccountData
+
+    workspace.timezone = "UTC"
+    workspace.cross_platform_gap_minutes = 0
+    post, video, acc, rule = setup()
+    _youtube_ready(db, rule)
+    processing = PublishResult(
+        PublishOutcome.PROCESSING, platform_post_id="yt-1", state={"video_id": "yt-1"}, poll_after_seconds=60
+    )
+    pub = fake(publish_script=[processing, PUBLISHED])
+    with override("publisher", "youtube", pub):
+        publisher.publish_post(db, post.id)
+        if state == PostStatus.UPLOADING:  # the disconnect lands before the adapter answered
+            post.status = PostStatus.UPLOADING
+            post.platform_post_id, post.publish_state = None, {}
+            db.commit()
+        disconnect(db, db.get(type(acc), acc.id), revoke=False)
+        db.commit()
+        db.refresh(post)
+        assert post.status == PostStatus.NEEDS_ATTENTION and "may be live" in post.error
+        assert publisher.engine_state(post.publish_state)["may_be_live"] is True
+        if state == PostStatus.PROCESSING:
+            assert post.platform_post_id == "yt-1" and post.publish_state["video_id"] == "yt-1"
+        # Reconnect the same channel and turn rotation back on: nothing is planned for the pair.
+        upsert_connected_accounts(
+            db,
+            workspace.id,
+            [
+                ConnectedAccountData(
+                    platform=Platform.YOUTUBE,
+                    external_id=acc.external_id,
+                    display_name="Magic",
+                    tokens=OAuthTokens(
+                        access_token="a2", refresh_token="r2", expires_at=utcnow() + timedelta(hours=1)
+                    ),
+                )
+            ],
+        )
+        rules.find_rule(db, acc).enabled = True
+        db.commit()
+        assert scheduler.plan_workspace(db, workspace.id) == []
+        db.commit()
+        db.refresh(post)
+        assert post.status == PostStatus.NEEDS_ATTENTION
+    assert len(pub.requests) == 1  # uploaded once
+
+
+def test_disconnect_cancels_unstarted_posts_and_marks_the_account(db, setup, workspace):
+    from repeater.accounts import disconnect
+
+    scheduled, _video, acc, _rule = setup()
+    disconnect(db, db.get(type(acc), acc.id), revoke=False)
+    db.commit()
+    db.refresh(scheduled), db.refresh(acc)
+    assert scheduled.status == PostStatus.CANCELED and scheduled.error == "account disconnected"
+    assert acc.status == AccountStatus.DISABLED and acc.token_enc is None
+    assert acc.extra["_disconnected_at"]
+
+
+def test_a_legacy_canceled_post_that_reached_the_platform_is_not_reused(db, setup):
+    """Posts canceled before the fix (platform id kept) start the next cycle instead of being wiped."""
+    post, video, acc, _rule = setup()
+    post.status, post.platform_post_id = PostStatus.CANCELED, "yt-live"
+    post.publish_state = {"video_id": "yt-live"}
+    db.commit()
+    nxt = actions.schedule_video_now(db, video, acc, actor="admin")
+    db.commit()
+    assert nxt.id != post.id and nxt.cycle == 1
+    db.refresh(post)
+    assert post.platform_post_id == "yt-live" and post.publish_state == {"video_id": "yt-live"}
+
+
+def test_a_needs_attention_post_that_may_be_live_keeps_its_row_on_publish_to_account(db, setup):
+    post, video, acc, _rule = setup()
+    post.status, post.platform_post_id = PostStatus.NEEDS_ATTENTION, "yt-live"
+    db.commit()
+    nxt = actions.schedule_video_now(db, video, acc, actor="admin")
+    assert nxt.id != post.id and nxt.cycle == 1 and post.platform_post_id == "yt-live"
+
+
+# =========================================================================== lost jobs (engine-11)
+
+
+def test_publish_now_while_the_job_is_still_running_queues_a_follow_up(db, setup):
+    """The job that ended the post is still sending its notification (RUNNING) when the user
+    presses 'Publish now': a second job is queued, so the click is not lost."""
+    post, *_ = setup()
+    post.status = PostStatus.NEEDS_ATTENTION
+    db.add(
+        Job(
+            kind=kinds.PUBLISH_POST,
+            payload={"post_id": post.id},
+            status=JobStatus.RUNNING,
+            dedupe_key=f"publish_post:{post.id}",
+            locked_at=utcnow(),
+            locked_by="w:0",
+            attempts=1,
+            max_attempts=1,
+        )
+    )
+    db.commit()
+    actions.publish_now(db, post, actor="user")
+    db.commit()
+    assert post.status == PostStatus.SCHEDULED
+    queued = [j for j in jobs(db, "publish_post") if j.status == JobStatus.QUEUED]
+    assert len(queued) == 1 and queued[0].payload == {"post_id": post.id}
+    assert queued[0].dedupe_key == f"publish_post:{post.id}:next"
+    # Pressing it again moves that job instead of adding a third.
+    actions.publish_now(db, post, actor="user")
+    db.commit()
+    assert len([j for j in jobs(db, "publish_post") if j.status == JobStatus.QUEUED]) == 1
+    # The follow-up publishes once, whoever runs it.
+    with override("publisher", "youtube", fake(publish_script=[PUBLISHED])):
+        assert publisher.publish_post(db, post.id).status == PostStatus.PUBLISHED
+        assert publisher.publish_post(db, post.id).status == PostStatus.PUBLISHED  # no-op, no second upload
+
+
+# =========================================================================== C2 and duplicates
+
+
+def test_invalidate_plan_cancels_unstarted_planner_posts_and_asks_for_a_plan(
+    db, setup, workspace, make_account
+):
+    scheduled, video, acc, _rule = setup()
+    other_acc = make_account("facebook")
+    user_post = ScheduledPost(
+        workspace_id=workspace.id,
+        video_id=video.id,
+        connected_account_id=other_acc.id,
+        platform=Platform.FACEBOOK,
+        idempotency_key=f"{video.id}:{other_acc.id}:0",
+        scheduled_at=utcnow() + timedelta(hours=1),
+        created_by="user",
+    )
+    other_planned = ScheduledPost(
+        workspace_id=workspace.id,
+        video_id=video.id,
+        connected_account_id=other_acc.id,
+        platform=Platform.FACEBOOK,
+        cycle=1,
+        idempotency_key=f"{video.id}:{other_acc.id}:1",
+        scheduled_at=utcnow() + timedelta(hours=1),
+        created_by="scheduler",
+    )
+    uploading = ScheduledPost(
+        workspace_id=workspace.id,
+        video_id=video.id,
+        connected_account_id=acc.id,
+        platform=Platform.YOUTUBE,
+        cycle=1,
+        idempotency_key=f"{video.id}:{acc.id}:1",
+        scheduled_at=utcnow(),
+        status=PostStatus.UPLOADING,
+        created_by="scheduler",
+    )
+    failed = ScheduledPost(
+        workspace_id=workspace.id,
+        video_id=video.id,
+        connected_account_id=acc.id,
+        platform=Platform.YOUTUBE,
+        cycle=2,
+        idempotency_key=f"{video.id}:{acc.id}:2",
+        scheduled_at=utcnow(),
+        status=PostStatus.FAILED,
+        created_by="scheduler",
+    )
+    db.add_all([user_post, other_planned, uploading, failed])
+    db.commit()
+    count = actions.invalidate_plan(db, workspace.id, account_id=acc.id, actor="admin")
+    db.commit()
+    assert count == 1
+    db.refresh(scheduled), db.refresh(other_planned)
+    assert scheduled.status == PostStatus.CANCELED and "re-planned" in scheduled.error
+    assert other_planned.status == PostStatus.SCHEDULED  # another account
+    assert user_post.status == PostStatus.SCHEDULED  # the user's own post
+    assert (uploading.status, failed.status) == (PostStatus.UPLOADING, PostStatus.FAILED)
+    (plan_job,) = jobs(db, "plan_workspace")
+    assert plan_job.payload == {"workspace_id": workspace.id} and plan_job.run_at <= utcnow()
+    assert any(a.actor == "admin" and "re-planned" in a.message for a in activities(db))
+    # Whole workspace; the plan job that is queued for later is pulled forward.
+    plan_job.run_at = utcnow() + timedelta(minutes=4)
+    db.commit()
+    assert actions.invalidate_plan(db, workspace.id) == 1  # only other_planned is left
+    db.commit()
+    db.refresh(plan_job), db.refresh(other_planned)
+    assert other_planned.status == PostStatus.CANCELED and plan_job.run_at <= utcnow()
+    assert actions.invalidate_plan(db, workspace.id) == 0  # nothing to cancel still asks for a plan
+
+
+def test_invalidate_plan_lets_the_planner_apply_the_new_rule(db, setup, workspace):
+    """engine-6: after a rule edit the posts outside the new window are replaced."""
+    from datetime import time as dtime
+
+    from repeater.engine import scheduler
+
+    workspace.timezone = "UTC"
+    workspace.cross_platform_gap_minutes = 0
+    post, video, acc, rule = setup()
+    post.status = PostStatus.CANCELED
+    db.commit()
+    _youtube_ready(db, rule)
+    rule.daily_cap = 5
+    db.commit()
+    now = utcnow().replace(hour=1, minute=0, second=0, microsecond=0)
+    first = scheduler.plan_workspace(db, workspace.id, now=now)
+    db.commit()
+    assert first and all(p.status == PostStatus.SCHEDULED for p in first)
+    rule.window_start, rule.window_end, rule.daily_cap = dtime(19, 0), dtime(22, 0), 1
+    db.commit()
+    assert scheduler.plan_workspace(db, workspace.id, now=now + timedelta(minutes=5)) == []  # old posts stay
+    assert actions.invalidate_plan(db, workspace.id, account_id=acc.id) == len(first)
+    db.commit()
+    replanned = scheduler.plan_workspace(db, workspace.id, now=now + timedelta(minutes=10))
+    db.commit()
+    assert replanned and all(19 <= p.scheduled_at.hour < 22 for p in replanned)
+    assert {p.id for p in replanned} <= {p.id for p in first}  # the canceled rows were re-used
+
+
+def test_cancel_conflicting_posts_after_a_duplicate_is_found(db, setup, workspace, make_account):
+    """import-media-missed-1: the copy found on TikTok means TikTok already has the clip."""
+    _post, video, yt, _rule = setup()
+    tt = make_account("tiktok")
+    ig = make_account("instagram")
+    posts = {}
+    for acc in (tt, ig):
+        posts[acc.platform] = ScheduledPost(
+            workspace_id=workspace.id,
+            video_id=video.id,
+            connected_account_id=acc.id,
+            platform=acc.platform,
+            idempotency_key=f"{video.id}:{acc.id}:0",
+            scheduled_at=utcnow() + timedelta(hours=1),
+            status=PostStatus.SCHEDULED if acc is tt else PostStatus.FAILED,
+        )
+        db.add(posts[acc.platform])
+    dup = Video(
+        workspace_id=workspace.id,
+        status=VideoStatus.DUPLICATE,
+        duplicate_of_id=video.id,
+        source_platform=Platform.TIKTOK,
+        source_account_id=tt.id,
+    )
+    published = ScheduledPost(
+        workspace_id=workspace.id,
+        video_id=video.id,
+        connected_account_id=yt.id,
+        platform=Platform.YOUTUBE,
+        cycle=3,
+        idempotency_key=f"{video.id}:{yt.id}:3",
+        scheduled_at=utcnow(),
+        status=PostStatus.PUBLISHED,
+    )
+    db.add_all([dup, published])
+    db.commit()
+    assert actions.cancel_conflicting_posts(db, video.id, actor="importer") == 1
+    db.commit()
+    db.refresh(posts[Platform.TIKTOK]), db.refresh(posts[Platform.INSTAGRAM])
+    assert posts[Platform.TIKTOK].status == PostStatus.CANCELED
+    assert "already exists on TikTok" in posts[Platform.TIKTOK].error
+    assert posts[Platform.INSTAGRAM].status == PostStatus.FAILED  # a platform the duplicate is not on
+    assert published.status == PostStatus.PUBLISHED
+    assert actions.cancel_conflicting_posts(db, video.id) == 0
+    assert actions.cancel_conflicting_posts(db, 424242) == 0
+    assert any(a.actor == "importer" and "TikTok" in a.message for a in activities(db))
+    # A video without duplicates has nothing to cancel.
+    clean = Video(workspace_id=workspace.id, status=VideoStatus.READY)
+    db.add(clean)
+    db.commit()
+    assert actions.cancel_conflicting_posts(db, clean.id) == 0
+
+
+def test_publish_checks_duplicate_origins_as_a_backstop(db, setup, workspace, notifications):
+    """A post queued before the duplicate was found is canceled when its job runs."""
+    post, video, acc, _rule = setup("tiktok")
+    dup = Video(
+        workspace_id=workspace.id,
+        status=VideoStatus.DUPLICATE,
+        duplicate_of_id=video.id,
+        source_platform=Platform.TIKTOK,
+    )
+    db.add(dup)
+    db.commit()
+    pub = fake("tiktok", publish_script=[PUBLISHED])
+    with override("publisher", "tiktok", pub):
+        step = publisher.publish_post(db, post.id)
+    assert step.status == PostStatus.CANCELED and "already exists on TikTok" in post.error
+    assert pub.requests == [] and notifications == []
+
+
+def test_may_be_live_tells_the_dashboard_to_ask_for_a_check(db, setup):
+    post, *_ = setup()
+    assert actions.may_be_live(post) is False
+    post.status = PostStatus.NEEDS_ATTENTION
+    assert actions.may_be_live(post) is False  # e.g. a validation failure: nothing reached the platform
+    post.publish_state = {"_engine": {"may_be_live": True}}
+    assert actions.may_be_live(post) is True
+    post.publish_state, post.platform_post_id = {}, "yt-1"
+    assert actions.may_be_live(post) is True
+    post.status = PostStatus.PUBLISHED
+    assert actions.may_be_live(post) is False
+
+
+def test_disconnect_during_a_token_refresh_waits_instead_of_deadlocking(db, setup):
+    """Locks are taken post first, account second (publish_post/fresh_context and disconnect
+    alike): a disconnect that arrives while a publish refreshes the token waits for it."""
+    import threading
+
+    from repeater.accounts import disconnect, save_tokens
+
+    post, _video, acc, _rule = setup()
+    save_tokens(
+        acc,
+        OAuthTokens(access_token="old", refresh_token="r", expires_at=utcnow() + timedelta(minutes=1)),
+    )
+    db.commit()
+    entered, release = threading.Event(), threading.Event()
+    errors: list[BaseException] = []
+
+    class SlowGoogle:
+        name, uses_pkce = "google", False
+
+        def refresh(self, ctx):
+            entered.set()
+            assert release.wait(10)
+            return OAuthTokens(
+                access_token="new", refresh_token="r", expires_at=utcnow() + timedelta(hours=1)
+            )
+
+    processing = PublishResult(PublishOutcome.PROCESSING, platform_post_id="yt-1", state={"video_id": "yt-1"})
+
+    def run_publish():
+        try:
+            with get_sessionmaker()() as session:
+                publisher.publish_post(session, post.id)
+        except BaseException as exc:  # noqa: BLE001 - reported below
+            errors.append(exc)
+
+    def run_disconnect():
+        try:
+            with get_sessionmaker()() as session:
+                disconnect(session, session.get(type(acc), acc.id), revoke=False)
+                session.commit()
+        except BaseException as exc:  # noqa: BLE001 - reported below
+            errors.append(exc)
+
+    with (
+        override("oauth", "google", SlowGoogle()),
+        override("publisher", "youtube", fake(publish_script=[processing])),
+    ):
+        t1 = threading.Thread(target=run_publish)
+        t1.start()
+        assert entered.wait(10)
+        t2 = threading.Thread(target=run_disconnect)
+        t2.start()
+        t2.join(0.5)
+        assert t2.is_alive()  # waiting for the post lock, not holding the account
+        release.set()
+        t1.join(15)
+        t2.join(15)
+    assert not t1.is_alive() and not t2.is_alive() and errors == []
+    db.expire_all()
+    assert db.get(type(acc), acc.id).status == AccountStatus.DISABLED
+    assert db.get(type(acc), acc.id).token_enc is None  # the refresh did not resurrect a token
+    stored = db.get(ScheduledPost, post.id)
+    assert stored.platform_post_id == "yt-1" and stored.status in (
+        PostStatus.PROCESSING,
+        PostStatus.NEEDS_ATTENTION,
+    )

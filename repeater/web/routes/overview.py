@@ -15,6 +15,7 @@ from repeater.engine.rules import rule_problems
 from repeater.media import storage
 from repeater.models import (
     ACTIVE_POST_STATUSES,
+    PUBLISH_PLATFORMS,
     AccountStatus,
     ActivityLog,
     ConnectedAccount,
@@ -52,10 +53,51 @@ def overview(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
         "failing_sources": _failing_sources(db, ws_id),
         "incomplete_rules": _incomplete_rules(db, ws_id),
         "reconnect_accounts": _reconnect_accounts(db, ws_id),
+        "setup": _setup_steps(db, ws_id),
         "disk": _disk_usage(),
         "activity": _recent_activity(db, ws_id),
     }
     return render(request, "overview.html", context)
+
+
+def _setup_steps(db: Session, ws_id: int) -> dict[str, bool]:
+    """The first-run checklist: connect an account, bring in videos, review a rule and turn it on."""
+    accounts = _count(
+        db,
+        select(func.count())
+        .select_from(ConnectedAccount)
+        .where(
+            ConnectedAccount.workspace_id == ws_id,
+            ConnectedAccount.platform.in_(PUBLISH_PLATFORMS),
+            ConnectedAccount.status != AccountStatus.DISABLED,
+        ),
+    )
+    videos = _count(
+        db,
+        select(func.count())
+        .select_from(Video)
+        .where(Video.workspace_id == ws_id, Video.status != VideoStatus.ARCHIVED),
+    )
+    sources = _count(
+        db,
+        select(func.count())
+        .select_from(Source)
+        .where(Source.workspace_id == ws_id, Source.enabled.is_(True), Source.kind != SourceKind.MANUAL),
+    )
+    rules = _count(
+        db,
+        select(func.count())
+        .select_from(RotationRule)
+        .join(ConnectedAccount, ConnectedAccount.id == RotationRule.connected_account_id)
+        .where(
+            RotationRule.workspace_id == ws_id,
+            RotationRule.enabled.is_(True),
+            ConnectedAccount.status == AccountStatus.ACTIVE,
+        ),
+    )
+    steps = {"accounts": accounts > 0, "content": videos > 0 or sources > 0, "rules": rules > 0}
+    steps["done"] = all(steps.values())
+    return steps
 
 
 def _count(db: Session, stmt: Select) -> int:

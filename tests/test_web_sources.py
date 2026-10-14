@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from repeater.models import Job, Platform, Source, SourceKind, Workspace
+from repeater.timeutil import utcnow
 from repeater.web.deps import FormError
 from repeater.web.routes.sources import normalize_profile_url
 from tests.test_web_support import post, set_lang
@@ -86,7 +87,8 @@ def test_create_ytdlp_source_with_ack(web_owner, db, make_account):
     assert _create(web_owner, "ytdlp", form).status_code == 303
     source = db.execute(select(Source)).scalar_one()
     assert source.kind == SourceKind.YTDLP and source.platform == Platform.TIKTOK
-    assert source.unofficial_ack_at is not None and source.connected_account_id == tiktok.id
+    # A yt-dlp source never keeps a connected account (contract C6), even if one is submitted.
+    assert source.unofficial_ack_at is not None and source.connected_account_id is None
     assert source.config == {"backfill_count": 3, "profile_url": "https://tiktok.com/@MagicLap"}
 
 
@@ -110,18 +112,40 @@ def test_ytdlp_validation(web_owner, db, form, message):
     assert resp.status_code == 400 and message in resp.text
 
 
-def test_ytdlp_linked_account_must_match_platform(web_owner, db, make_account):
-    youtube = make_account("youtube")
+def test_ytdlp_form_has_no_linked_account_option(web_owner, make_account):
+    make_account("tiktok", display_name="Magic TikTok")
     set_lang(web_owner, "en")
+    html = web_owner.get("/sources/new?kind=ytdlp").text
+    assert 'name="account_id"' not in html
+    assert "Linked account" not in html and "detected through the official API" not in html
+    assert "never uses the tokens or the official API of any connected account" in html
+
+
+def test_ytdlp_edit_unlinks_a_legacy_linked_account(web_owner, db, make_account):
+    tiktok = make_account("tiktok", display_name="Magic TikTok")
+    source = Source(
+        workspace_id=tiktok.workspace_id,
+        kind=SourceKind.YTDLP,
+        platform=Platform.TIKTOK,
+        connected_account_id=tiktok.id,
+        name="Old",
+        config={"profile_url": "https://www.tiktok.com/@x", "backfill_count": 0},
+        poll_interval_minutes=60,
+        enabled=False,
+        unofficial_ack_at=utcnow(),
+    )
+    db.add(source)
+    db.commit()
     form = {
         "platform": "tiktok",
         "profile_url": "https://www.tiktok.com/@x",
-        "account_id": str(youtube.id),
+        "account_id": str(tiktok.id),
         "poll_interval_minutes": "60",
-        "ack": "1",
     }
-    resp = _create(web_owner, "ytdlp", form)
-    assert resp.status_code == 400
+    resp = post(web_owner, f"/sources/{source.id}/edit", form, page=f"/sources/{source.id}/edit")
+    assert resp.status_code == 303
+    db.expire_all()
+    assert db.get(Source, source.id).connected_account_id is None
 
 
 def test_normalize_profile_url():

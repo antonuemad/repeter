@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('consent.title') }}{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>{{ t('consent.title') }}</h1>
+  <p>{{ t('consent.intro') }}</p>
+  <ul>
+    <li>{{ t('consent.point_publish') }}</li>
+    <li>{{ t('consent.point_data') }}</li>
+    <li>{{ t('consent.point_youtube') }} <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer">YouTube Terms of Service</a></li>
+  </ul>
+  <p>
+    <a href="/terms" target="_blank" rel="noopener">{{ t('footer.terms') }}</a> ·
+    <a href="/privacy" target="_blank" rel="noopener">{{ t('footer.privacy') }}</a>
+    <span class="muted small">({{ t('consent.version', version=version) }})</span>
+  </p>
+  {% if error %}<div class="flash flash-error" role="alert">{{ t(error) }}</div>{% endif %}
+  <form method="post" action="/consent" class="stack">
+    {{ m.csrf() }}
+    <input type="hidden" name="next" value="{{ next }}">
+    <label class="check"><input type="checkbox" name="accept" value="1" required> {{ t('consent.accept_label') }}</label>
+    <div class="actions">
+      <button type="submit" class="button">{{ t('consent.continue') }}</button>
+    </div>
+  </form>
+  <form method="post" action="/logout" class="inline">
+    {{ m.csrf() }}
+    <button type="submit" class="link-button">{{ t('consent.decline') }}</button>
+  </form>
+</section>
+{% endblock %}

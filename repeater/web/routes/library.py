@@ -15,19 +15,21 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from python_multipart.exceptions import FormParserError
 from python_multipart.multipart import MultipartParser, parse_options_header
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session, selectinload
 from starlette.concurrency import run_in_threadpool
 
 from repeater.activity import log_activity
 from repeater.config import get_settings
 from repeater.engine import actions, captions
+from repeater.engine import rules as engine_rules
 from repeater.jobs import kinds
 from repeater.media import storage
 from repeater.models import (
     PUBLISH_PLATFORMS,
     AccountStatus,
     ActivityLevel,
+    ActivityLog,
     ConnectedAccount,
     Platform,
     PostStatus,
@@ -37,8 +39,8 @@ from repeater.models import (
     VideoStatus,
 )
 from repeater.sources import manual
-from repeater.web import csrf
-from repeater.web.auth import CurrentWorkspace, WorkspaceContext
+from repeater.web import csrf, messages
+from repeater.web.auth import CurrentWorkspace, WorkspaceContext, require_owner
 from repeater.web.deps import (
     DB,
     Form,
@@ -94,6 +96,28 @@ def target_accounts(db: Session, workspace_id: int) -> list[ConnectedAccount]:
     )
 
 
+def incomplete_accounts(db: Session, accounts: list[ConnectedAccount]) -> dict[int, list[str]]:
+    """account id -> readiness problem codes, for the accounts whose posting settings are not
+    complete (publish-now to them would only fail)."""
+    rules = {
+        r.connected_account_id: r
+        for r in db.execute(
+            select(RotationRule).where(RotationRule.connected_account_id.in_([a.id for a in accounts]))
+        ).scalars()
+    }
+    out: dict[int, list[str]] = {}
+    for account in accounts:
+        rule = rules.get(account.id)
+        problems = (
+            engine_rules.rule_problems(rule)
+            if rule is not None
+            else engine_rules.settings_problems(account.platform, None)
+        )
+        if problems:
+            out[account.id] = problems
+    return out
+
+
 def latest_posts(db: Session, video_ids: list[int]) -> dict[int, dict[int, ScheduledPost]]:
     """video id -> account id -> newest post (highest cycle, then newest row)."""
     out: dict[int, dict[int, ScheduledPost]] = {}
@@ -143,6 +167,7 @@ def library(
         "status_filters": list(STATUS_FILTERS),
         "pager": pager,
         "accounts": accounts,
+        "incomplete": incomplete_accounts(db, accounts),
         "posts": latest_posts(db, [v.id for v in videos]),
         "max_upload_mb": get_settings().max_upload_mb,
     }
@@ -166,6 +191,8 @@ def video_detail(request: Request, db: DB, ctx: CurrentWorkspace, video_id: int)
         "video": video,
         "posts": posts,
         "accounts": [a for a in accounts if a.id != video.source_account_id],
+        "incomplete": incomplete_accounts(db, accounts),
+        "can_delete": ctx.is_owner,
         "previews": _caption_previews(db, video, accounts),
         "excluded": _excluded_platforms(video),
         "publish_platforms": [p.value for p in PUBLISH_PLATFORMS],
@@ -274,10 +301,23 @@ def _run_action(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        flash(request, "error", text=str(exc))
+        messages.flash_error(request, exc)
     else:
         flash(request, "success", success_key)
     return _back(form, default_back)
+
+
+def _may_exist_on_platform(post: ScheduledPost | None) -> str | None:
+    """Why a new upload to this account could create a second copy: 'published' when the latest
+    post is live, 'uncertain' when it needs attention but may be live (it kept a platform id or an
+    upload state)."""
+    if post is None:
+        return None
+    if post.status == PostStatus.PUBLISHED:
+        return "published"
+    if post.status == PostStatus.NEEDS_ATTENTION and (post.platform_post_id or post.publish_state):
+        return "uncertain"
+    return None
 
 
 @router.post("/library/{video_id}/publish-now")
@@ -292,15 +332,71 @@ def publish_now(request: Request, db: DB, ctx: CurrentWorkspace, form: Form, vid
     if account is None or account.workspace_id != ctx.workspace.id:
         flash(request, "error", "library.choose_account")
         return _back(form, f"/library/{video.id}")
+    if engine_rules.account_problems(db, account):
+        # The adapter would refuse the post (no privacy level, no audience answer ...).
+        flash(request, "error", "library.account_incomplete", account=account.display_name)
+        return _back(form, f"/library/{video.id}")
+    reason = _may_exist_on_platform(latest_posts(db, [video.id]).get(video.id, {}).get(account.id))
+    if reason is not None and not form_bool(form, "confirm_republish"):
+        back = form.get("next")
+        context = {
+            "nav": "library",
+            "video": video,
+            "account": account,
+            "reason": reason,
+            "next": safe_next(back if isinstance(back, str) else None, f"/library/{video.id}"),
+        }
+        return render(request, "library_republish.html", context)
     try:
         actions.schedule_video_now(db, video, account, actor=ctx.actor)
         db.commit()
     except ValueError as exc:
         db.rollback()
-        flash(request, "error", text=str(exc))
+        messages.flash_error(request, exc)
     else:
         flash(request, "success", "library.publishing_now", account=account.display_name)
     return _back(form, f"/library/{video.id}")
+
+
+@router.post("/library/{video_id}/delete")
+def delete_video(request: Request, db: DB, ctx: CurrentWorkspace, form: Form, video_id: int) -> Response:
+    """Deletes a video, its files, its post history and the activity entries that name it. Posts
+    that are already on a platform stay there. Owner only; a video that is being prepared or
+    published cannot be deleted until that is over."""
+    require_owner(ctx)
+    video = get_video(db, ctx, video_id)
+    in_flight = db.execute(
+        select(func.count())
+        .select_from(ScheduledPost)
+        .where(
+            ScheduledPost.video_id == video.id,
+            ScheduledPost.status.in_((PostStatus.UPLOADING, PostStatus.PROCESSING)),
+        )
+    ).scalar_one()
+    if video.status in (VideoStatus.IMPORTING, VideoStatus.PROCESSING) or in_flight:
+        flash(request, "error", "library.delete_busy")
+        return RedirectResponse(f"/library/{video.id}", status_code=303)
+    workspace_id, vid = video.workspace_id, video.id
+    db.execute(
+        delete(ActivityLog).where(
+            ActivityLog.workspace_id == workspace_id, ActivityLog.data["video_id"].astext == str(vid)
+        )
+    )
+    db.delete(video)
+    log_activity(
+        db,
+        workspace_id,
+        ActivityLevel.INFO,
+        "publish",
+        "Deleted a video from the library.",
+        actor=ctx.actor,
+        msg_key="activity.video_deleted",
+    )
+    kinds.enqueue_plan_workspace(db, workspace_id)
+    db.commit()
+    storage.delete_video_dir(workspace_id, vid)
+    flash(request, "success", "library.deleted")
+    return RedirectResponse("/library", status_code=303)
 
 
 @router.post("/library/{video_id}/edit")
@@ -335,6 +431,8 @@ def edit_video(request: Request, db: DB, ctx: CurrentWorkspace, form: Form, vide
         + (f"; canceled {canceled} scheduled post(s) on excluded platforms." if canceled else "."),
         actor=ctx.actor,
         video_id=video.id,
+        msg_key="activity.video_updated_canceled" if canceled else "activity.video_updated",
+        msg_params={"title": captions.video_label(video), "canceled": canceled},
     )
     kinds.enqueue_plan_workspace(db, ctx.workspace.id)
     db.commit()
@@ -538,7 +636,7 @@ def _import_upload(request: Request, db: Session, ctx: WorkspaceContext, sink: U
         db.commit()
     except ValueError as exc:
         db.rollback()
-        flash(request, "error", text=str(exc))
+        messages.flash_error(request, exc)
         return RedirectResponse("/library", status_code=303)
     finally:
         if sink.path.exists():

@@ -147,7 +147,9 @@ def _form_page(
         "source": source,
         "kind": source.kind.value,
         "is_new": is_new,
-        "accounts": _accounts_for(db, ctx.workspace.id, source.kind),
+        "accounts": []
+        if source.kind == SourceKind.YTDLP
+        else _accounts_for(db, ctx.workspace.id, source.kind),
         "values": current,
         "error": error,
         "ytdlp_platforms": [p.value for p in YTDLP_PLATFORMS],
@@ -177,7 +179,10 @@ def _parse(db: Session, ctx: WorkspaceContext, kind: SourceKind, form: FormData)
     min_poll = YTDLP_MIN_POLL_MINUTES if kind == SourceKind.YTDLP else MIN_POLL_MINUTES
     poll = form_int(form, "poll_interval_minutes", minimum=min_poll, maximum=MAX_POLL_MINUTES)
     backfill = form_int(form, "backfill_count", minimum=0, maximum=MAX_BACKFILL, default=0)
-    account = _parse_account(db, ctx, kind, form)
+    # A yt-dlp source never has a connected account (contract C6): its detection and download use
+    # yt-dlp only, never the OAuth tokens or the official API of an account. Any `account_id` in the
+    # form is ignored, which also unlinks sources created before this rule.
+    account = None if kind == SourceKind.YTDLP else _parse_account(db, ctx, kind, form)
     config: dict[str, Any] = {"backfill_count": backfill}
     platform: Platform | None
     if kind == SourceKind.PLATFORM_API:
@@ -186,8 +191,6 @@ def _parse(db: Session, ctx: WorkspaceContext, kind: SourceKind, form: FormData)
         platform = Platform(account.platform)
     elif kind == SourceKind.YTDLP:
         platform = _parse_ytdlp_platform(form)
-        if account is not None and Platform(account.platform) != platform:
-            raise FormError("sources.error_account_platform")
         config["profile_url"] = normalize_profile_url(
             form_str(form, "profile_url", max_len=500, required=True), platform
         )
@@ -334,7 +337,25 @@ def _log_change(db: Session, ctx: WorkspaceContext, source: Source, *, is_new: b
     if source.kind == SourceKind.YTDLP and is_new:
         message += " The user confirmed the unofficial import warning."
     log_activity(
-        db, ctx.workspace.id, ActivityLevel.INFO, "source", message, actor=ctx.actor, source_id=source.id
+        db,
+        ctx.workspace.id,
+        ActivityLevel.INFO,
+        "source",
+        message,
+        actor=ctx.actor,
+        source_id=source.id,
+        msg_key=(
+            "activity.source_added"
+            if is_new
+            else "activity.source_updated_reset"
+            if reset
+            else "activity.source_updated"
+        ),
+        msg_params={
+            "name": source.name,
+            "kind": source.kind.value,
+            "state": "on" if source.enabled else "off",
+        },
     )
 
 
@@ -389,6 +410,8 @@ def toggle(request: Request, db: DB, ctx: CurrentWorkspace, form: Form, source_i
         f"{'Turned on' if source.enabled else 'Turned off'} source '{source.name}'.",
         actor=ctx.actor,
         source_id=source.id,
+        msg_key="activity.source_on" if source.enabled else "activity.source_off",
+        msg_params={"name": source.name},
     )
     kinds.enqueue_plan_workspace(db, ctx.workspace.id)
     db.commit()

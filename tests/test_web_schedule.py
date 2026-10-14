@@ -139,6 +139,10 @@ def test_engine_refusal_is_shown(web_owner, db, workspace, setup, monkeypatch):
         Recorder(error=ValueError("This post is uploading and cannot be published again from here.")),
     )
     post(web_owner, f"/schedule/{row.id}/publish-now", page="/schedule")
+    # A known engine refusal is shown in the user's language (ux-compliance-8).
+    assert "لا يمكن نشر هذا المنشور" in web_owner.get("/schedule").text
+    post(web_owner, f"/schedule/{row.id}/publish-now", page="/schedule")
+    set_lang(web_owner, "en")
     assert "cannot be published again from here" in web_owner.get("/schedule").text
 
 

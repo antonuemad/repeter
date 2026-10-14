@@ -70,10 +70,12 @@ def test_body_limit_middleware_unit():
         await send({"type": "http.response.start", "status": 200, "headers": []})
         await send({"type": "http.response.body", "body": b""})
 
-    mw = BodySizeLimitMiddleware(app, max_bytes=10, unlimited_paths=frozenset({"/upload"}))
+    mw = BodySizeLimitMiddleware(app, max_bytes=10, path_limits={"/upload": 100})
     assert anyio.run(_call, mw, b"small") == 200
     assert anyio.run(_call, mw, b"x" * 11) == 413
+    # A streaming path has its own larger cap, never "no cap" (the limit runs before login).
     assert anyio.run(_call, mw, b"x" * 11, "/upload") == 200
+    assert anyio.run(_call, mw, b"x" * 101, "/upload") == 413
 
 
 def test_flash_stays_within_cookie_budget():

@@ -21,6 +21,7 @@ from repeater.models import ConnectedAccount, OAuthState, Platform, RotationRule
 from repeater.platforms import get_oauth_provider
 from repeater.platforms.base import ConnectedAccountData, PlatformError
 from repeater.timeutil import ensure_aware, utcnow
+from repeater.web import i18n
 from repeater.web.auth import CurrentWorkspace, WorkspaceContext
 from repeater.web.deps import DB
 from repeater.web.templating import flash
@@ -116,7 +117,14 @@ def callback(request: Request, db: DB, ctx: CurrentWorkspace, provider: str) -> 
             purpose=purpose,
         )
     except PlatformError as exc:
-        flash(request, "error", "oauth.exchange_failed", text=exc.message, platform=_purpose_label(purpose))
+        code_key = f"oauth.code.{exc.code}" if exc.code else ""
+        if code_key and i18n.has_key(code_key):
+            # A known failure: a translated explanation, with the platform's own text as detail.
+            flash(request, "error", code_key, text=exc.message, platform=_purpose_label(purpose))
+        else:
+            flash(
+                request, "error", "oauth.exchange_failed", text=exc.message, platform=_purpose_label(purpose)
+            )
         return RedirectResponse("/accounts", status_code=303)
     except Exception as exc:  # noqa: BLE001 - never show internals; tokens are never in our messages
         log.error("OAuth exchange with %s failed: %s", provider, type(exc).__name__)
@@ -164,12 +172,14 @@ def _save_accounts(
         ).all()
     }
     accounts = upsert_connected_accounts(db, ctx.workspace.id, items, actor=ctx.actor)
-    needs_setup: ConnectedAccount | None = None
+    # New rules start OFF (engine.rules.ensure_rule): nothing is published before the user has
+    # reviewed the account's settings and turned publishing on.
+    needs_setup: list[ConnectedAccount] = []
     for account in accounts:
         rule = engine_rules.ensure_rule(db, account)
         is_new = (account.platform, account.external_id) not in existing
-        if account.platform == Platform.TIKTOK and _needs_tiktok_setup(rule, is_new) and needs_setup is None:
-            needs_setup = account
+        if rule is not None and _needs_setup(rule, is_new):
+            needs_setup.append(account)
     kinds.enqueue_plan_workspace(db, ctx.workspace.id)
     db.commit()
     names = ", ".join(a.display_name or a.external_id for a in accounts)
@@ -181,16 +191,28 @@ def _save_accounts(
         names=names,
         platform=_purpose_label(purpose),
     )
-    if needs_setup is not None:
+    if not needs_setup:
+        return RedirectResponse("/accounts", status_code=303)
+    if purpose == "tiktok":
         flash(request, "info", "oauth.tiktok_setup")
-        return RedirectResponse(f"/rules/{needs_setup.id}", status_code=303)
-    return RedirectResponse("/accounts", status_code=303)
+    else:
+        flash(
+            request,
+            "info",
+            "oauth.publishing_off",
+            count=len(needs_setup),
+            names=", ".join(a.display_name or a.external_id for a in needs_setup),
+        )
+    # One new account: straight to its settings. Several (a Meta login returns every Page and its
+    # Instagram account): the rules list, where each one is reviewed and turned on separately.
+    target = f"/rules/{needs_setup[0].id}" if len(needs_setup) == 1 else "/rules"
+    return RedirectResponse(target, status_code=303)
 
 
-def _needs_tiktok_setup(rule: RotationRule | None, is_new: bool) -> bool:
-    if is_new:
-        return True
-    return rule is not None and bool(engine_rules.rule_problems(rule))
+def _needs_setup(rule: RotationRule, is_new: bool) -> bool:
+    """A new account always needs its settings reviewed; a reconnected one only when its rule is on
+    but cannot publish yet."""
+    return is_new or (bool(rule.enabled) and bool(engine_rules.rule_problems(rule)))
 
 
 def _purpose_label(purpose: str) -> str:

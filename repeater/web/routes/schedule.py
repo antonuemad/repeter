@@ -14,8 +14,9 @@ from sqlalchemy.orm import Session, selectinload
 from repeater.engine import actions
 from repeater.models import ACTIVE_POST_STATUSES, PostStatus, ScheduledPost
 from repeater.timeutil import ensure_aware, tz, utcnow
+from repeater.web import messages
 from repeater.web.auth import CurrentWorkspace, WorkspaceContext
-from repeater.web.deps import DB, Form, safe_next
+from repeater.web.deps import DB, Form, form_bool, safe_next
 from repeater.web.templating import flash, render
 
 router = APIRouter()
@@ -102,21 +103,47 @@ def skip(request: Request, db: DB, ctx: CurrentWorkspace, form: Form, post_id: i
         db.commit()
     except ValueError as exc:
         db.rollback()
-        flash(request, "error", text=str(exc))
+        messages.flash_error(request, exc)
     else:
         flash(request, "success", "schedule.skipped")
     return _redirect(form)
 
 
+def may_be_live(post: ScheduledPost) -> bool:
+    """A post that needs attention after bytes may have reached the platform (it kept a platform
+    post id or an upload state): publishing it again can create a second copy."""
+    return post.status == PostStatus.NEEDS_ATTENTION and bool(post.platform_post_id or post.publish_state)
+
+
+@router.get("/schedule/{post_id}/publish-now")
+def confirm_publish_now(
+    request: Request, db: DB, ctx: CurrentWorkspace, post_id: int, next: str = ""
+) -> Response:  # noqa: A002
+    """Asks before publishing a post again whose upload may already be live."""
+    post = _get_post(db, ctx, post_id)
+    if post.status not in ACTIONABLE:
+        return RedirectResponse(safe_next(next, "/schedule"), status_code=303)
+    context = {
+        "nav": "schedule",
+        "post": post,
+        "account": post.connected_account,
+        "next": safe_next(next, "/schedule"),
+    }
+    return render(request, "schedule_republish.html", context)
+
+
 @router.post("/schedule/{post_id}/publish-now")
 def publish_now(request: Request, db: DB, ctx: CurrentWorkspace, form: Form, post_id: int) -> Response:
     post = _get_post(db, ctx, post_id)
+    if may_be_live(post) and not form_bool(form, "confirm_duplicate"):
+        flash(request, "error", "schedule.confirm_required")
+        return _redirect(form)
     try:
         actions.publish_now(db, post, actor=ctx.actor)
         db.commit()
     except ValueError as exc:
         db.rollback()
-        flash(request, "error", text=str(exc))
+        messages.flash_error(request, exc)
     else:
         flash(request, "success", "schedule.publishing_now")
     return _redirect(form)

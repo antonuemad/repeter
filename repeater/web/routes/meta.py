@@ -21,6 +21,7 @@ from repeater.accounts import disconnect
 from repeater.config import get_settings
 from repeater.jobs import kinds
 from repeater.models import AccountStatus, ConnectedAccount, DataDeletionRequest, Platform
+from repeater.web import i18n
 from repeater.web.deps import DB, Form
 from repeater.web.templating import render
 
@@ -108,4 +109,6 @@ def deletion_status(request: Request, db: DB, code: str) -> Response:
         ).scalar_one_or_none()
     if record is None:
         raise HTTPException(status_code=404)
-    return render(request, "deletion_status.html", {"record": record, "nav": "legal"})
+    return i18n.remember_requested(
+        request, render(request, "deletion_status.html", {"record": record, "nav": "legal"})
+    )

@@ -12,6 +12,10 @@ refresh_tokens    {}                              refresh_tokens          repeat
 maintenance       {}                              maintenance             repeater.jobs.maintenance
 delete_user_data  {"request_id": int}             delete_user_data:{id}   repeater.engine.jobs
 
+Claim priority (repeater.queue.KIND_PRIORITY): publish_post and poll_post first, then
+plan_workspace, refresh_tokens, maintenance and delete_user_data, then poll_source, and
+import_video and process_video last, so a backfill of imports never delays a due publish.
+
 Optional payload keys written by the importer (repeater.sources.importer):
     import_video   "download_url": str, "remote_extra": dict  listing details for the download
                    (short-lived CDN URLs that have no column), "retries": int
@@ -26,7 +30,8 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from repeater.queue import enqueue
+from repeater.queue import enqueue, enqueue_or_move
+from repeater.timeutil import utcnow
 
 POLL_SOURCE = "poll_source"
 IMPORT_VIDEO = "import_video"
@@ -67,6 +72,13 @@ def enqueue_process_video(session: Session, video_id: int) -> int | None:
 
 
 def enqueue_plan_workspace(session: Session, workspace_id: int, run_at: datetime | None = None) -> int | None:
+    """Queue a plan. With an explicit `run_at` (the periodic tick) an active job with the same
+    dedupe key means "already planned for later": None is returned. Without one the caller has
+    just changed something the plan depends on and wants it applied soon: see
+    request_plan_workspace (an already queued job is moved up, and a plan job that is running right
+    now is followed by a second one)."""
+    if run_at is None:
+        return request_plan_workspace(session, workspace_id)
     return enqueue(
         session,
         PLAN_WORKSPACE,
@@ -74,6 +86,21 @@ def enqueue_plan_workspace(session: Session, workspace_id: int, run_at: datetime
         run_at=run_at,
         dedupe_key=f"{PLAN_WORKSPACE}:{workspace_id}",
         max_attempts=1,
+    )
+
+
+def request_plan_workspace(session: Session, workspace_id: int, run_at: datetime | None = None) -> int | None:
+    """Have the workspace planned as soon as possible (or at run_at): queues the job, or moves the
+    queued one earlier. When a plan job is running right now it started before the caller's change
+    and cannot see it, so a second job is queued behind it."""
+    return enqueue_or_move(
+        session,
+        PLAN_WORKSPACE,
+        {"workspace_id": workspace_id},
+        dedupe_key=f"{PLAN_WORKSPACE}:{workspace_id}",
+        run_at=run_at or utcnow(),
+        max_attempts=1,
+        only_earlier=True,
     )
 
 

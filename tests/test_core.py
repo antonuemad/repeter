@@ -214,3 +214,135 @@ def test_storage_paths():
     assert storage.abs_path("ws3/v9/x.mp4") == d / "x.mp4"
     with pytest.raises(ValueError):
         storage.abs_path("../../etc/passwd")
+
+
+# =========================================================================== queue: priority, leases
+
+
+def test_claim_order_priority_class_before_run_at(db):
+    """engine-7: a backfill of imports queued earlier never delays a due publish or poll."""
+    t0 = utcnow() - timedelta(hours=3)
+    for vid in range(1, 201):
+        queue.enqueue(db, "import_video", {"video_id": vid}, run_at=t0, dedupe_key=f"import_video:{vid}")
+        queue.enqueue(db, "process_video", {"video_id": vid}, run_at=t0, dedupe_key=f"process_video:{vid}")
+    queue.enqueue(db, "poll_source", {"source_id": 1}, run_at=t0)
+    queue.enqueue(db, "plan_workspace", {"workspace_id": 1}, run_at=t0 + timedelta(hours=1))
+    queue.enqueue(
+        db, "publish_post", {"post_id": 9}, run_at=t0 + timedelta(minutes=10), dedupe_key="publish_post:9"
+    )
+    queue.enqueue(db, "poll_post", {"post_id": 8}, run_at=t0 + timedelta(hours=1), dedupe_key="poll_post:8")
+    queue.enqueue(db, "publish_post", {"post_id": 10}, run_at=utcnow() + timedelta(hours=1))  # not due
+    db.commit()
+    order = []
+    while (job := queue.claim_next(db, "w")) is not None:
+        order.append(job.kind)
+        queue.complete(db, job)
+        db.commit()
+    assert order[:2] == ["publish_post", "poll_post"]  # urgent first, then by run_at inside the class
+    assert order[2] == "plan_workspace" and order[3] == "poll_source"
+    assert set(order[4:]) == {"import_video", "process_video"} and len(order) == 404
+
+
+def test_claim_next_with_kinds_filter_keeps_priority(db):
+    queue.enqueue(db, "import_video", {}, run_at=utcnow() - timedelta(hours=1))
+    queue.enqueue(db, "publish_post", {}, run_at=utcnow() - timedelta(minutes=1))
+    db.commit()
+    assert queue.claim_next(db, "w", ["import_video"]).kind == "import_video"
+    assert queue.claim_next(db, "w", ["import_video"]) is None
+
+
+def test_lease_renewal_and_stale_requeue_only_for_lapsed_leases(db):
+    """deploy-ops-6/engine-2: a job whose worker renews its lease is never requeued, however long
+    it runs; one whose lease lapsed (its worker died) is."""
+    queue.enqueue(db, "k", {})
+    queue.enqueue(db, "k", {})
+    db.commit()
+    alive, dead = queue.claim_next(db, "w:0"), queue.claim_next(db, "w:1")
+    db.commit()
+    long_ago = utcnow() - timedelta(hours=3)
+    alive.locked_at = dead.locked_at = long_ago
+    db.commit()
+    assert queue.renew_lease(db, alive.id, "w:0") is True
+    assert queue.renew_lease(db, alive.id, "someone-else") is False
+    db.commit()
+    assert queue.requeue_stale(db, 5) == 1
+    db.commit()
+    db.expire_all()
+    assert db.get(Job, alive.id).status == JobStatus.RUNNING
+    assert db.get(Job, dead.id).status == JobStatus.QUEUED and db.get(Job, dead.id).locked_by is None
+    assert queue.renew_lease(db, dead.id, "w:1") is False  # no longer held
+
+
+def test_lease_timeout_is_never_shorter_than_a_few_renewals(monkeypatch):
+    from repeater.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "job_lock_timeout_minutes", 1)
+    monkeypatch.setattr(settings, "job_lease_refresh_seconds", 120)
+    assert queue.lease_timeout_minutes() == 6.0
+    monkeypatch.setattr(settings, "job_lock_timeout_minutes", 30)
+    assert queue.lease_timeout_minutes() == 30.0
+
+
+def test_release_owned_returns_this_workers_jobs_without_consuming_attempts(db):
+    for _ in range(3):
+        queue.enqueue(db, "k", {})
+    db.commit()
+    mine1, mine2, theirs = (queue.claim_next(db, w) for w in ("host:1:0", "host:1:1", "host:2:0"))
+    db.commit()
+    assert queue.release_owned(db, "host:1:") == 2
+    db.commit()
+    db.expire_all()
+    for job in (mine1, mine2):
+        row = db.get(Job, job.id)
+        assert row.status == JobStatus.QUEUED and row.attempts == 0 and row.locked_by is None
+    assert db.get(Job, theirs.id).status == JobStatus.RUNNING
+    # `host:1%` must not match `host:12:0` (LIKE wildcards are escaped).
+    queue.enqueue(db, "k", {})
+    db.commit()
+    other = queue.claim_next(db, "host:12:0")
+    db.commit()
+    assert queue.release_owned(db, "host:1:") == 0 and db.get(Job, other.id).status == JobStatus.RUNNING
+
+
+def test_enqueue_or_move_moves_queued_and_adds_a_follow_up_behind_a_running_job(db):
+    now = utcnow()
+    a = queue.enqueue_or_move(db, "k", {"x": 1}, dedupe_key="k:1", run_at=now + timedelta(hours=1))
+    db.commit()
+    # Queued: moved (later or earlier), no second job.
+    b = queue.enqueue_or_move(db, "k", {"x": 1}, dedupe_key="k:1", run_at=now + timedelta(hours=2))
+    assert b == a and db.get(Job, a).run_at == now + timedelta(hours=2)
+    queue.enqueue_or_move(
+        db, "k", {"x": 1}, dedupe_key="k:1", run_at=now + timedelta(hours=3), only_earlier=True
+    )
+    assert db.get(Job, a).run_at == now + timedelta(hours=2)  # only_earlier never delays
+    queue.enqueue_or_move(db, "k", {"x": 1}, dedupe_key="k:1", run_at=now, only_earlier=True)
+    assert db.get(Job, a).run_at == now
+    db.commit()
+    # Running: the caller's change would be missed, so a second job is queued under ":next".
+    job = queue.claim_next(db, "w")
+    db.commit()
+    c = queue.enqueue_or_move(db, "k", {"x": 1}, dedupe_key="k:1", run_at=now)
+    assert c not in (None, job.id)
+    d = queue.enqueue_or_move(db, "k", {"x": 1}, dedupe_key="k:1", run_at=now + timedelta(minutes=1))
+    db.commit()
+    assert d == c  # the follow-up itself is moved, not duplicated
+    keys = sorted(j.dedupe_key for j in db.execute(select(Job)).scalars())
+    assert keys == ["k:1", "k:1:next"]
+
+
+def test_enqueue_plan_workspace_without_run_at_asks_for_a_plan_soon(db):
+    from repeater.jobs import kinds
+
+    boundary = utcnow() + timedelta(minutes=4)
+    assert kinds.enqueue_plan_workspace(db, 5, run_at=boundary) is not None  # the periodic tick
+    assert kinds.enqueue_plan_workspace(db, 5, run_at=boundary) is None  # already queued for later
+    job_id = kinds.enqueue_plan_workspace(db, 5)  # a user change: moved up to now
+    db.commit()
+    assert db.get(Job, job_id).run_at <= utcnow()
+    job = queue.claim_next(db, "w")
+    db.commit()
+    # A plan that is running started before the change: a second one is queued behind it.
+    follow_up = kinds.enqueue_plan_workspace(db, 5)
+    db.commit()
+    assert follow_up not in (None, job.id) and db.get(Job, follow_up).dedupe_key == "plan_workspace:5:next"

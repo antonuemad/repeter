@@ -273,10 +273,12 @@ def test_every_python_key_is_translated():
         text = path.read_text("utf-8")
         keys.update(
             re.findall(
-                r"\"((?:error|login|library|oauth|sources|rules|schedule|accounts)\.[a-z0-9_]+)\"", text
+                r"\"((?:error|login|library|oauth|sources|rules|schedule|accounts|activity|err|problem|consent)"
+                r"\.[a-z0-9_]+)\"",
+                text,
             )
         )
-    missing = sorted(k for k in keys if k not in i18n.EN and not k.endswith(".html"))
+    missing = sorted(k for k in keys if k not in i18n.EN and not k.endswith((".html", "_")))
     assert not missing, missing
 
 

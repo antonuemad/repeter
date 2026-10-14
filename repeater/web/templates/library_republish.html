@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('library.republish_title') }}{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>{{ t('library.republish_title') }}</h1>
+  <p>{{ m.platform(account.platform) }} <strong dir="auto">{{ account.display_name }}</strong> · <span dir="auto">{{ m.video_title(video) }}</span></p>
+  <p>{{ t('library.republish_body_' ~ reason) }}</p>
+  <p class="muted">{{ t('library.republish_check') }}</p>
+  <form method="post" action="/library/{{ video.id }}/publish-now" class="actions">
+    {{ m.csrf() }}
+    <input type="hidden" name="account_id" value="{{ account.id }}">
+    <input type="hidden" name="next" value="{{ next }}">
+    <input type="hidden" name="confirm_republish" value="1">
+    <button type="submit" class="button danger">{{ t('library.republish_confirm') }}</button>
+    <a class="button secondary" href="{{ next }}">{{ t('common.cancel') }}</a>
+  </form>
+</section>
+{% endblock %}

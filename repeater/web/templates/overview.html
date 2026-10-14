@@ -4,6 +4,22 @@
 {% block content %}
 <h1>{{ t('overview.title', name=workspace.name) }}</h1>
 
+{% if not setup.done %}
+<section class="card setup" aria-labelledby="setup-title">
+  <h2 id="setup-title">{{ t('overview.setup_title') }}</h2>
+  <p class="muted">{{ t('overview.setup_intro') }}</p>
+  <ol class="steps">
+    {% for key, href in [('accounts', '/accounts'), ('content', '/library'), ('rules', '/rules')] %}
+    <li class="step{{ ' step-done' if setup[key] else '' }}">
+      <a href="{{ href }}">{{ t('overview.step_' ~ key) }}</a>
+      <span class="muted small">{{ t('overview.step_' ~ key ~ '_help') }}</span>
+      <span class="badge badge-{{ 'active' if setup[key] else 'disabled' }}">{{ t('overview.step_done') if setup[key] else t('overview.step_todo') }}</span>
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+{% endif %}
+
 <section class="stats">
   {% for key in ['ready', 'processing', 'failed', 'accounts', 'sources', 'upcoming', 'published_week'] %}
   <div class="stat">
@@ -20,7 +36,7 @@
     {% for a in reconnect_accounts %}
     <li>
       {{ m.platform(a.platform) }} <strong dir="auto">{{ a.display_name }}</strong> — {{ t('overview.needs_reconnect') }}
-      {% if a.last_error %}<span class="muted" dir="auto">({{ a.last_error[:200] }})</span>{% endif %}
+      {% if a.last_error %}{{ m.error_text(a.last_error, 200) }}{% endif %}
       <a class="button small" href="/connect/{{ 'meta' if a.platform in ['instagram', 'facebook'] else a.platform }}">{{ t('accounts.reconnect') }}</a>
     </li>
     {% endfor %}
@@ -33,20 +49,20 @@
     {% for p in attention_posts %}
     <li>
       {{ m.platform(p.platform) }} <a href="/library/{{ p.video_id }}" dir="auto">{{ m.video_title(p.video) }}</a>
-      → <span dir="auto">{{ p.connected_account.display_name }}</span>: {{ m.badge('post_status', p.status) }}
-      {% if p.error %}<span class="muted" dir="auto">{{ p.error[:200] }}</span>{% endif %}
+      {{ t('common.flow_arrow') }} <span dir="auto">{{ p.connected_account.display_name }}</span>: {{ m.badge('post_status', p.status) }}
+      {% if p.error %}{{ m.error_text(p.error, 200) }}{% endif %}
     </li>
     {% endfor %}
     {% for v in failed_videos %}
     <li>
       <a href="/library/{{ v.id }}" dir="auto">{{ m.video_title(v) }}</a> {{ m.badge('video_status', v.status) }}
-      {% if v.error %}<span class="muted" dir="auto">{{ v.error[:200] }}</span>{% endif %}
+      {% if v.error %}{{ m.error_text(v.error, 200) }}{% endif %}
     </li>
     {% endfor %}
     {% for s in failing_sources %}
     <li>
       {{ t('overview.source') }} <a href="/sources/{{ s.id }}/edit" dir="auto">{{ s.name }}</a>:
-      <span class="muted" dir="auto">{{ s.last_error[:200] }}</span>
+      {{ m.error_text(s.last_error, 200) }}
     </li>
     {% endfor %}
   </ul>

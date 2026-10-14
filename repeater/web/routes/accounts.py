@@ -98,10 +98,17 @@ def disconnect(request: Request, db: DB, ctx: CurrentWorkspace, form: Form, acco
 
 
 def shares_grant(db: Session, account: ConnectedAccount) -> bool:
-    """True when another connected account holds the same refresh token. One Google login yields
-    one grant for all of its YouTube channels (and its Drive connection): revoking it at Google
-    would disconnect those accounts too, so only the local tokens are deleted then."""
-    if PROVIDER_FOR_PLATFORM.get(Platform(account.platform)) != "google" or not account.token_enc:
+    """True when another connected account holds the same authorization at the platform, so that
+    revoking it remotely would disconnect that account too and only the local tokens are deleted.
+
+    Google: one login yields one grant for all of its YouTube channels (and its Drive connection).
+    TikTok: revoking removes the app from the user's "Manage app permissions", i.e. the whole
+    user-to-app authorization, and the same open_id can be connected in several workspaces."""
+    if not account.token_enc:
+        return False
+    if Platform(account.platform) == Platform.TIKTOK:
+        return _tiktok_user_connected_elsewhere(db, account)
+    if PROVIDER_FOR_PLATFORM.get(Platform(account.platform)) != "google":
         return False
     refresh_token = _refresh_token(account)
     if not refresh_token:
@@ -116,6 +123,21 @@ def shares_grant(db: Session, account: ConnectedAccount) -> bool:
         )
     ).scalars()
     return any(_refresh_token(other) == refresh_token for other in others)
+
+
+def _tiktok_user_connected_elsewhere(db: Session, account: ConnectedAccount) -> bool:
+    other = db.execute(
+        select(ConnectedAccount.id)
+        .where(
+            ConnectedAccount.id != account.id,
+            ConnectedAccount.platform == Platform.TIKTOK,
+            ConnectedAccount.external_id == account.external_id,
+            ConnectedAccount.status != AccountStatus.DISABLED,
+            ConnectedAccount.token_enc.isnot(None),
+        )
+        .limit(1)
+    ).first()
+    return other is not None
 
 
 def _refresh_token(account: ConnectedAccount) -> str | None:
