@@ -49,7 +49,7 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 || {
 export REPEATER_IMAGE_TAG="${IMAGE#repeater-app:}"
 
 DEPLOY="$WORK/deploy"
-mkdir -p "$DEPLOY" "$WORK/media" "$WORK/backups"
+mkdir -p "$DEPLOY" "$WORK/media" "$WORK/backups/status"
 cp "$SRC_DIR"/{backup.sh,docker-compose.yml,Caddyfile,.env.example} "$DEPLOY/"
 chmod 777 "$WORK/media"
 WEB_PORT="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"

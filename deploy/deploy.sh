@@ -80,8 +80,18 @@ preflight() {
     compose config --quiet || die "docker-compose.yml or deploy/.env is invalid (see above)"
 }
 
+# The containers bind-mount <backup dir>/status read-only. If it does not exist when they start,
+# Docker creates it owned by root and a non-root backup run later cannot write the success marker.
+ensure_backup_status_dir() {
+    local dir
+    dir="$(env_get REPEATER_BACKUP_DIR "$ENV_FILE")"
+    dir="${dir:-/srv/repeater/backups}"
+    install -d -m 0755 "$dir/status" 2>/dev/null || warn "cannot create $dir/status; run this script as root"
+}
+
 # The media directory must exist and belong to the app user before the containers mount it.
 ensure_media_dir() {
+    ensure_backup_status_dir
     local dir owner
     dir="$(env_get REPEATER_MEDIA_DIR "$ENV_FILE")"
     dir="${dir:-/srv/repeater/media}"
