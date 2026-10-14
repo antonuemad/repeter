@@ -18,7 +18,7 @@ Written 2026-10-14 from a long Claude Code session. Read this first, then `PLAN.
 | Tests | 1657 passed, 10 skipped (shellcheck/rclone variants) on the integration run; `ruff check` and `ruff format --check` clean; `alembic upgrade head` + `alembic check` clean |
 | Docker | Image builds; compose stack smoke-tested (db, migrate, web, worker); `deploy/selftest.sh` passes as a non-root user |
 | CI | GitHub Actions `ci.yml`. The last run before the final fix failed only the "Docker image and deploy files" job (selftest ran as non-root and the status dir was created by Docker as root). Fixed in `deploy/selftest.sh` and `deploy/deploy.sh`; confirm CI is green on the newest commit |
-| Review | 86 confirmed findings were fixed and re-verified by independent skeptics; a few partial fixes and new minor issues remain (section 7) |
+| Review | 86 confirmed findings fixed by six owners and re-verified by independent skeptics: **81 fully fixed, 5 partial**, plus 18 new minor issues the re-verification found (section 7). No critical finding remains; none blocks internal use, five medium ones should be closed before the first deploy |
 | Deployed | **Nothing is deployed.** The sandbox that built this had no SSH key, no server address and no credentials |
 
 ## 3. Blocked on the user (do these first, they cannot be done from the repo)
@@ -84,23 +84,33 @@ Sandbox-only notes (ignore if your environment differs): Docker had to be starte
 - **Worker:** 2 threads by default; jobs hold a lease (`job_lease_refresh_seconds`); stale jobs are requeued; due publish/poll jobs are claimed ahead of import backfills; on SIGTERM in-flight jobs get `worker_shutdown_grace_s` (compose grace = that + 60 s).
 - **Internationalisation:** Arabic first (RTL), English second; every UI string goes through `repeater/web/i18n.py`. Rule problems are machine codes with `rules.PROBLEM_MESSAGES` as the English fallback.
 
-## 7. Known open issues (from the final re-verification; full list in `docs/review/2026-10-14-findings.md`)
+## 7. Known open issues (final re-verification; full trace in `docs/review/2026-10-14-findings.md`)
 
-Re-verification of the import/media and deploy groups had not reported when this was written; re-run or read the table.
+Each needs a regression test that fails on the current code. The reviewers' reproduction scripts lived in a temporary scratch directory that is gone; the findings file and the descriptions below are the specification.
 
-1. **Meta data-deletion after the 5-day purge** deletes nothing yet reports `completed` (`jobs/maintenance.py` `_delete_disconnected_accounts` with `engine/jobs.py` `delete_user_data`). Medium.
-2. **TikTok "Publish now" on a needs-attention post** re-polls the dead upload instead of uploading again (`platforms/tiktok.py`). Medium.
-3. **TikTok PULL_FROM_URL init answered with HTTP 5xx** is retried with a second init and could post twice (`platforms/tiktok.py`). Low.
-4. **Facebook poll can send the "finish" request while the workspace is paused or the rule disabled** (`platforms/facebook.py`, `engine/publisher.py` `PUBLISH_ON_POLL`). Low.
-5. `delete_account_records` matches account names by substring and can delete other accounts' activity rows (`accounts.py`). Low.
-6. `engine-8`: activity rows that quote a deleted video's caption but carry another video id survive deletion (partial).
-7. `api-tiktok-youtube-5`: no exact per-day ledger of YouTube `videos.insert` starts and no project-wide circuit breaker (partial). The planner uses `youtube_daily_upload_quota`.
-8. `ux-compliance-8`: activity entries written by the engine, importer, platforms and notify still show English text in the Arabic UI (partial; needs message keys).
-9. Smaller UX items: overview "needs attention" lists every OFF rule with incomplete settings; dark-mode link contrast in warning banners; the "no accounts" error mentions `ads_read` as declined.
+**Medium (close before the first deploy):**
+1. **Meta data-deletion request arriving after the 5-day account purge** deletes nothing yet reports `completed` (`repeater/jobs/maintenance.py` `_delete_disconnected_accounts` with `repeater/engine/jobs.py` `delete_user_data`). Imported videos and activity rows that quote their captions must still be found and deleted by external user id.
+2. **TikTok "Publish now" on a needs-attention post** re-polls the dead upload instead of uploading again (`repeater/platforms/tiktok.py`).
+3. **Rollback restore prints (and `docs/ar/05-operations.md`, `docs/ar/00-deploy.md` section 8 repeat) a worker start command without `REPEATER_IMAGE_TAG`**, which brings the broken release back (`deploy/backup.sh`). Related: pre-deploy dumps rotate by count, so reruns and failed rollback attempts can evict the only pre-migration dump.
+4. **BT.601 SDR sources** (smpte170m / bt470bg) are retagged BT.709 without a matrix conversion, so colours shift (`repeater/media/filters.py`).
+5. **`SAR_SCALE` clamps width to 4096 without scaling the height**, distorting any source wider than 4096 px (`repeater/media/filters.py`).
+
+**Partially fixed:**
+- `engine-8` / `ux-compliance-missed-2`: the activity row written by `importer._mark_duplicate` quotes a deleted video's caption and carries only `duplicate_of_id`, so it survives `delete_user_data`.
+- `api-tiktok-youtube-5`: no exact per-day ledger of YouTube `videos.insert` session starts and no project-wide circuit breaker; attempts-weighting under-counts some cases. The planner uses `youtube_daily_upload_quota` (default 100, budget 90 percent).
+- `ux-compliance-8`: activity entries and error strings written by the engine, publisher, importer, platforms and notify carry no message key and show in English in the Arabic UI (also `sources/manual.py` "not a supported video file"). Needs message keys end to end.
+
+**Low:**
+- TikTok `PULL_FROM_URL` init answered with HTTP 5xx is retried with a second init and could post twice (`platforms/tiktok.py`).
+- Facebook `poll()` can send the "finish" request while the workspace is paused or the rule disabled (`platforms/facebook.py`, `engine/publisher.py` `PUBLISH_ON_POLL`).
+- `delete_account_records` matches account names by substring and can delete other accounts' activity rows (`accounts.py`).
+- Overview "needs attention" lists every OFF rule with incomplete settings (`web/routes/overview.py`); dark-mode link contrast in warning banners is below AA (`web/static/app.css`); the "no accounts" error mentions `ads_read` as declined (`platforms/meta.py`).
+- Originals of ARCHIVED videos that never got an encode are never purged (`media/retention.py`); a PROCESSING original whose job died absorbs later identical uploads as DUPLICATE with nothing to recover them (`sources/importer.py`); `test_source_disabled_during_a_poll_creates_no_videos` does not exercise the in-poll disable path.
+- `deploy.sh --no-build` silently builds the current source under a missing tag and prints "Roll back with" even when `:previous` does not exist; the trusted-proxy list is never checked against the real proxy address, so a mismatch silently collapses all clients into one login-throttle bucket (`deploy/docker-compose.yml`).
 
 ## 8. Backlog, in priority order
 
-1. Close section 7 (each needs a regression test; the reviewers' reproduction scripts were in a temporary scratch dir that is gone, the findings file has the scenarios).
+1. Close the medium items in section 7, then the partial and low ones.
 2. Deploy phase 0 once the user supplies section 3; run `deploy/selftest.sh` and `server-inspect` first; verify `https://rotator.magic-lap.com/healthz`; create the admin; connect Magic Lap's accounts (Meta Pages and Instagram in Development mode, Google in Testing, TikTok sandbox/private).
 3. Soak for 30 days: no manual interventions, failure rate under 5 percent (phase 0 exit criterion in `PLAN.md`). Add uptime monitoring (Uptime Kuma or healthchecks.io on `/healthz`) and off-site backups (`RCLONE_REMOTE`).
 4. Phase 1, **not started**: self-service sign-up with email verification and password reset, workspace invites and roles, plan limits enforcement, onboarding, landing page (Arabic/English), billing (Paymob for EGP, Paddle as merchant of record for USD; Stripe does not support Egyptian companies), support email.
