@@ -447,7 +447,7 @@ def test_bt601_encode_converts_pixels_instead_of_only_retagging(matrix, source_r
         "-i",
         str(original),
         "-vf",
-        f"scale=in_color_matrix=bt709:out_color_matrix={matrix}:in_range=tv:out_range={source_range}:flags=accurate_rnd+full_chroma_int",
+        f"scale=in_color_matrix=bt709:out_color_matrix=bt601:in_range=tv:out_range={source_range}:flags=accurate_rnd+full_chroma_int",
         "-c:v",
         "ffv1",
         "-colorspace",

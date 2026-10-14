@@ -70,9 +70,10 @@ def colour_filter(info: ProbeResult | None) -> str:
         return ""
     if _is_bt601_sdr(info):
         # SD Y'CbCr uses the BT.601 matrix: tagging those pixels BT.709 changes their colours.
-        # swscale performs the matrix/range conversion without requiring the HDR tools.
+        # swscale performs the matrix/range conversion without requiring the HDR tools. Both
+        # tags use the BT.601 coefficients; ffmpeg 7.1's scale accepts bt601, not bt470bg.
         return (
-            f"scale=in_color_matrix={info.color_space}:out_color_matrix=bt709:"
+            "scale=in_color_matrix=bt601:out_color_matrix=bt709:"
             f"in_range={info.color_range or 'tv'}:out_range=tv:flags=accurate_rnd+full_chroma_int,"
             "setparams=colorspace=bt709:range=tv"
         )
