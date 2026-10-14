@@ -72,6 +72,21 @@ class RestartPublish(RetryableError):
     the post may already be live, and re-publishing could post it twice."""
 
 
+class UnknownOutcomeError(PlatformError):
+    """Raised by Publisher.publish() when bytes may already have reached the platform but the
+    result is unclear (lost final-chunk response, unreadable 2xx body, timeout after the last
+    byte). Re-publishing from scratch could post the video twice. `state` carries whatever the
+    adapter needs to find out what happened (publish_id, video_id, resumable session URI,
+    container id ...). The engine stores it in scheduled_posts.publish_state and polls: poll()
+    must resolve it to PUBLISHED, PROCESSING, RestartPublish (definitely nothing there) or a
+    final error. With an empty `state` the engine marks the post needs-attention ("may be live")
+    instead of retrying. `state` may hold secrets such as upload URLs: never log it."""
+
+    def __init__(self, message: str, *, state: dict[str, Any] | None = None, **kw: Any) -> None:
+        super().__init__(message, **kw)
+        self.state: dict[str, Any] = dict(state or {})
+
+
 class AuthError(PlatformError):
     """Token invalid, expired beyond refresh, or permission revoked: the user must reconnect."""
 
@@ -247,7 +262,9 @@ RULE_SETTINGS_DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "youtube": {
         "privacy_status": "public",  # public | unlisted | private
-        "self_declared_made_for_kids": False,
+        # No default: YouTube requires an explicit audience answer and the user must give it
+        # (settings validation fails while this is None).
+        "self_declared_made_for_kids": None,
         "category_id": "22",
         "notify_subscribers": False,
         "contains_synthetic_media": False,
@@ -272,6 +289,9 @@ class PublishRequest:
     settings: dict[str, Any]
     thumbnail_path: Path | None = None
     fps: float | None = None  # frame rate of the encoded file (Video.fps); None = unknown
+    # scheduled_posts.publish_state from earlier attempts (empty on the first). Adapters resume
+    # or check what an earlier attempt left behind instead of uploading again.
+    state: dict[str, Any] = field(default_factory=dict)
 
 
 class PublishOutcome(enum.StrEnum):
@@ -300,12 +320,20 @@ class Publisher(Protocol):
         ...
 
     def publish(self, account: AccountContext, req: PublishRequest) -> PublishResult:
-        """Upload and publish (or start publishing). Must be safe to call again after a
-        RetryableError: adapters resume from req state where the platform allows it."""
+        """Upload and publish (or start publishing).
+
+        RetryableError means nothing went live: the engine calls publish() again later.
+        UnknownOutcomeError means bytes may have been delivered: the engine polls instead.
+        Adapters must raise UnknownOutcomeError (with state) from the moment the final byte or
+        the final "finish"/"publish" request has been sent, until the outcome is known.
+        `req.state` carries state saved by earlier attempts."""
         ...
 
     def poll(self, account: AccountContext, state: dict[str, Any]) -> PublishResult:
-        """Check a PROCESSING publish. Return PROCESSING again if not finished."""
+        """Check a PROCESSING publish. Return PROCESSING again if not finished. `state` may be
+        incomplete (e.g. only a resumable session URI from an UnknownOutcomeError): resolve it
+        by asking the platform. Raise RestartPublish only when the platform confirms nothing
+        was published."""
         ...
 
 

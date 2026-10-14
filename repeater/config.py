@@ -54,6 +54,20 @@ class Settings(BaseSettings):
     # Touched by the worker loop; the container healthcheck reads its age.
     worker_heartbeat_path: Path = Path("/tmp/repeater-worker.heartbeat")  # noqa: S108
 
+    # Encoding: timeout = min(encode_timeout_max_s, encode_timeout_base_s + per_media_s * duration)
+    encode_preset: str = "medium"
+    encode_timeout_base_s: int = 300
+    encode_timeout_per_media_s: float = 20.0
+    encode_timeout_max_s: int = 1800
+
+    # Worker: how long in-flight jobs may finish after SIGTERM before they are abandoned (the
+    # compose stop_grace_period must exceed this), and how often a running job renews its lease.
+    worker_shutdown_grace_s: int = 600
+    job_lease_refresh_seconds: int = 60
+
+    # YouTube Data API: videos.insert calls per Google Cloud project per day (shared by all users).
+    youtube_daily_upload_quota: int = 100
+
     # Retention
     original_retention_days: int = 30
     platform_data_retention_days: int = 30  # YouTube API policy: refresh or delete within 30 days
