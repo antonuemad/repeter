@@ -307,6 +307,8 @@ def _enqueue_due_polls(session: Session, now: datetime) -> int:
 
 
 def _enqueue_plans(session: Session, now: datetime) -> int:
+    if not get_settings().publishing_enabled:
+        return 0
     run_at = next_boundary(now, PLAN_EVERY)
     ids = session.execute(
         select(Workspace.id).where(Workspace.paused.is_(False)).order_by(Workspace.id)

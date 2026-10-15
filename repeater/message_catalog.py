@@ -39,6 +39,7 @@ AR.update(
         "publish.restored": "عاد «{p0}» إلى دورة النشر.",
         "publish.restored_processing": "تمت استعادة «{p0}»؛ سينضم إلى دورة النشر بعد المعالجة.",
         "publish.paused": "النشر متوقف لهذه المساحة؛ ستُعاد الجدولة عند استئنافه.",
+        "publish.testing_lock": "النشر ممنوع على هذا النظام خلال فترة الاختبار.",
         "publish.disconnected": "تم فصل الحساب.",
         "publish.reconnect_first": "أعد ربط الحساب؛ ستُعاد جدولة المنشور بعد ذلك.",
         "publish.rotation_off": "دورة النشر متوقفة لهذا الحساب.",

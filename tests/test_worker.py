@@ -278,6 +278,12 @@ def test_worker_threads_finish_running_job_on_stop(db, sessions, tmp_path):
 # =========================================================================== tick
 
 
+def test_server_testing_lock_keeps_planning_jobs_out_of_queue(db, workspace, monkeypatch):
+    monkeypatch.setattr(get_settings(), "publishing_enabled", False)
+    assert worker._enqueue_plans(db, utcnow()) == 0
+    assert not list(db.scalars(select(Job).where(Job.kind == kinds.PLAN_WORKSPACE)))
+
+
 def test_tick_enqueues_periodic_jobs_idempotently(db, sessions, workspace, make_account):
     paused = Workspace(name="Paused", paused=True)
     db.add(paused)

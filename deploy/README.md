@@ -4,6 +4,11 @@ Production packaging for Repeater on a single VPS (Magic Lap's Hostinger KVM 4),
 `https://rotator.magic-lap.com`. Step-by-step operator guides are in Arabic in
 [`docs/ar/`](../docs/ar/00-deploy.md).
 
+During the customer testing period, keep `REPEATER_PUBLISHING_ENABLED=false` (the default).
+It blocks every workspace's automatic/manual publication and publisher polling, including private
+test posts. Account linking and content preparation remain available. Only the user's explicit
+permission ending this restriction can authorize enabling publishing and recreating web/worker.
+
 | File | Purpose |
 |---|---|
 | `docker-compose.yml` | Project `repeater`: `db` (Postgres 16, named volume), `migrate` (one-shot), `web` (127.0.0.1:8090), `worker`, `caddy` (profile `caddy`). Limits keep the stack near 2 vCPU / 6 GB. |

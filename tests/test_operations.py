@@ -69,10 +69,25 @@ def test_integration_report_distinguishes_configured_connected_and_acceptance(db
     assert tiktok["state"] == "needs_connection" and tiktok["visibility_limit"] == "private_only"
     assert result["queue"]["oldest_due_age_seconds"] >= 1200
     assert result["live_publishing_verified"] is False
+    assert result["publishing_enabled"] is True
     assert result["backups"]["ok"] is False
     serialized = json.dumps(result)
     for secret in (account.token_enc, "g-secret", "tt-secret", "customer-data", account.external_id):
         assert secret not in serialized
+
+
+def test_publishing_is_locked_by_default_and_reported_independently_of_connection(
+    db, make_account, monkeypatch
+):
+    from repeater.config import Settings
+
+    monkeypatch.delenv("REPEATER_PUBLISHING_ENABLED", raising=False)
+    assert Settings(_env_file=None).publishing_enabled is False
+    make_account("youtube")
+    reset_settings_cache()
+    report = readiness.report(db, ["youtube"])
+    assert report["platforms"][0]["state"] == "connected"
+    assert report["publishing_enabled"] is False
 
 
 def test_integration_cli_reports_incomplete_without_writes(db, capsys):

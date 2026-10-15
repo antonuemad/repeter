@@ -2,7 +2,21 @@
 
 Written 2026-10-14 from a long Claude Code session. Read this first, then `PLAN.md` (Arabic product and technical plan, the source of truth for intent), then `docs/review/2026-10-14-findings.md` (what the last review found and how it was resolved).
 
-## Latest update: manual invited-customer access (2026-10-15)
+## Latest update: platform links and testing restriction (2026-10-15)
+
+The user forbids all real publication to every page/account throughout testing, including
+private/unlisted test posts. See `AGENTS.md`. Production must keep
+`REPEATER_PUBLISHING_ENABLED=false`; manual publish, planning, queued publication and publisher
+polling are blocked independently of workspace/rule settings. Never lift the lock or run a real
+publication acceptance test until the user explicitly ends the restriction. Use mocks only.
+
+Google/Meta initial account links succeeded: 1 YouTube, 95 Facebook Pages, 51 Instagram accounts.
+All 147 rules are disabled and the current workspace is paused. TikTok is not configured.
+Encrypted Drive offsite backups and an isolated database restore have been verified; media
+restoration awaits real media. Host monitoring runs; Telegram delivery is deferred by the user.
+See `docs/ar/07-pilot-operations.md` for operator checks. No live publication has been performed.
+
+## Earlier update: manual invited-customer access (2026-10-15)
 
 The invitation/password setup/manual recovery lifecycle is implemented. Read
 [the operator guide](docs/ar/07-invitations.md) and

@@ -85,6 +85,15 @@ def ready_settings(platform) -> dict:
     return settings
 
 
+def test_server_testing_lock_prevents_automatic_planning(db, ws, make_account, rule_for, video, monkeypatch):
+    account = make_account("youtube")
+    rule_for(account)
+    video()
+    monkeypatch.setattr(get_settings(), "publishing_enabled", False)
+    assert scheduler.plan_workspace(db, ws.id, now=DEC1_0800) == []
+    assert not list(db.scalars(select(ScheduledPost)))
+
+
 @pytest.fixture
 def rule_for(db, ws):
     def _make(account, **kw) -> RotationRule:

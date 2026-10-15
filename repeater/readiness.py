@@ -82,6 +82,7 @@ def report(db: Session, platforms: list[str] | None = None) -> dict:
         select(func.min(Job.run_at)).where(Job.status == JobStatus.QUEUED, Job.run_at <= utcnow())
     )
     return {
+        "publishing_enabled": settings.publishing_enabled,
         "platforms": entries,
         "telegram": {
             "configured": bool(settings.telegram_bot_token and settings.telegram_chat_id),

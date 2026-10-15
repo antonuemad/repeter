@@ -13,6 +13,7 @@ from fastapi import Request
 from fastapi.templating import Jinja2Templates
 from starlette.responses import HTMLResponse
 
+from repeater.config import get_settings
 from repeater.engine.actions import may_be_live
 from repeater.engine.captions import platform_name
 from repeater.timeutil import ensure_aware, tz
@@ -134,6 +135,7 @@ def base_context(request: Request) -> dict[str, Any]:
         "csrf_field": csrf.FORM_FIELD,
         "user": user,
         "workspace": workspace,
+        "publishing_enabled": get_settings().publishing_enabled,
         "role": getattr(request.state, "role", None),
         "zone": tz(workspace.timezone if workspace is not None else None),
         "flashes": pop_flashes(request, lang),

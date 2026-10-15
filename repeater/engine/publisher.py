@@ -60,6 +60,7 @@ from repeater.accounts import (
     mark_needs_reconnect,
 )
 from repeater.activity import log_activity
+from repeater.config import get_settings
 from repeater.crypto import signed_media_url
 from repeater.engine import captions, rules
 from repeater.jobs import kinds
@@ -267,6 +268,12 @@ def publish_post(session: Session, post_id: int, *, now: datetime | None = None)
 
 def _publish_target(session: Session, post: ScheduledPost, now: datetime) -> _Target | StepResult:
     """Everything needed to publish, or the StepResult of cancelling/deferring the post."""
+    if not get_settings().publishing_enabled:
+        return _cancel(
+            session,
+            post,
+            Message("publish.testing_lock", "Publishing is disabled on this server during testing.", {}),
+        )
     workspace = session.get(Workspace, post.workspace_id)
     if workspace is None or workspace.paused:
         return _cancel(
@@ -664,7 +671,9 @@ def poll_post(session: Session, post_id: int, *, now: datetime | None = None) ->
             session, target, DISCONNECTED_WHILE_PUBLISHING, may_be_live=True, notify=False
         )
     target = _Target(post, video, account, rules.find_rule(session, account), Path())
-    if target.platform in PUBLISH_ON_POLL and _publishing_halted(session, target):
+    if not get_settings().publishing_enabled or (
+        target.platform in PUBLISH_ON_POLL and _publishing_halted(session, target)
+    ):
         return _wait_while_halted(session, target, now)
     try:
         ctx = fresh_context(session, account, now=now)

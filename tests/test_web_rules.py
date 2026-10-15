@@ -9,11 +9,27 @@ from datetime import time
 import pytest
 from sqlalchemy import select
 
+from repeater.config import get_settings
 from repeater.models import Job, RotationRule, Workspace
 from repeater.platforms.base import RULE_SETTINGS_DEFAULTS, RetryableError, TikTokCreatorInfo
 from tests.test_web_support import post, set_lang
 
 pytest_plugins = ["tests.test_web_support"]
+
+
+@pytest.mark.parametrize(
+    "lang,text",
+    [
+        ("en", "Testing period: publishing is disabled for every account."),
+        ("ar", "فترة الاختبار: النشر ممنوع على كل الحسابات."),
+    ],
+)
+def test_testing_lock_is_visible_without_workspace_resume_link(web_owner, monkeypatch, lang, text):
+    monkeypatch.setattr(get_settings(), "publishing_enabled", False)
+    set_lang(web_owner, lang)
+    response = web_owner.get("/settings/workspace")
+    assert response.status_code == 200 and text in response.text
+    assert "Resume in settings" not in response.text and "استئناف من الإعدادات" not in response.text
 
 
 def _info(**overrides) -> TikTokCreatorInfo:

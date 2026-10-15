@@ -14,6 +14,7 @@ import respx
 from sqlalchemy import select
 
 from repeater.accounts import load_tokens
+from repeater.config import get_settings
 from repeater.db import get_sessionmaker
 from repeater.engine import actions, captions, publisher, rules
 from repeater.jobs import kinds
@@ -153,6 +154,58 @@ def fake(platform: str = "youtube", **kw) -> FakePublisher:
 
 def jobs(db, kind: str) -> list[Job]:
     return list(db.execute(select(Job).where(Job.kind == kind).order_by(Job.id)).scalars())
+
+
+@pytest.mark.parametrize("platform", ["youtube", "facebook", "instagram", "tiktok"])
+@pytest.mark.parametrize("created_by", ["scheduler", "user"])
+def test_server_testing_lock_blocks_publish_before_any_platform_call(
+    db, setup, monkeypatch, platform, created_by
+):
+    post, _, _, _ = setup(platform, created_by=created_by)
+    monkeypatch.setattr(get_settings(), "publishing_enabled", False)
+    monkeypatch.setattr(
+        publisher, "fresh_context", lambda *a, **kw: pytest.fail("platform access while locked")
+    )
+    adapter = fake(platform, publish_script=[PUBLISHED])
+    with override("publisher", platform, adapter):
+        step = publisher.publish_post(db, post.id)
+    assert step.status == PostStatus.CANCELED
+    assert not adapter.requests and adapter.publish_script == [PUBLISHED]
+    db.refresh(post)
+    assert post.error_info["key"] == "publish.testing_lock"
+
+
+@pytest.mark.parametrize("platform", ["youtube", "facebook", "instagram", "tiktok"])
+def test_server_testing_lock_holds_processing_without_poll_or_finishing_publish(
+    db, setup, monkeypatch, platform
+):
+    post, _, _, _ = setup(platform, status=PostStatus.PROCESSING, publish_state={"video_id": "pending"})
+    monkeypatch.setattr(get_settings(), "publishing_enabled", False)
+    monkeypatch.setattr(
+        publisher, "fresh_context", lambda *a, **kw: pytest.fail("platform access while locked")
+    )
+    adapter = fake(platform, poll_script=[PUBLISHED])
+    with override("publisher", platform, adapter):
+        step = publisher.poll_post(db, post.id)
+    assert step.status == PostStatus.PROCESSING
+    follow_up = jobs(db, kinds.POLL_POST)
+    assert len(follow_up) == 1 and follow_up[0].run_at > utcnow()
+    assert not adapter.poll_states and adapter.poll_script == [PUBLISHED]
+    db.refresh(post)
+    assert post.publish_state["video_id"] == "pending" and post.published_at is None
+
+
+@pytest.mark.parametrize("action", ["existing_post", "library_video"])
+def test_server_testing_lock_refuses_manual_publish_even_with_enabled_rule(db, setup, monkeypatch, action):
+    post, video, account, rule = setup()
+    assert rule.enabled
+    monkeypatch.setattr(get_settings(), "publishing_enabled", False)
+    with pytest.raises(ValueError, match="disabled.*testing"):
+        if action == "existing_post":
+            actions.publish_now(db, post, actor="owner")
+        else:
+            actions.schedule_video_now(db, video, account, actor="owner")
+    assert not jobs(db, kinds.PUBLISH_POST)
 
 
 def test_publish_now_restarts_a_terminal_tiktok_upload(db, setup):

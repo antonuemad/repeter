@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     default_timezone: str = "Africa/Cairo"
     default_locale: str = "ar"
 
+    # Server-wide safety lock. Connecting accounts and importing media still work; publishing
+    # requires explicit operator enablement after the testing period ends.
+    publishing_enabled: bool = False
+
     # Platform credentials (developer apps). Empty means the platform is not configured.
     tiktok_client_key: str = ""
     tiktok_client_secret: str = ""

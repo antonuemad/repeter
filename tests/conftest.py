@@ -39,6 +39,8 @@ def _test_env(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         "REPEATER_TOKEN_ENCRYPTION_KEYS": generate_key_spec("t1"),
         "REPEATER_MEDIA_ROOT": str(media),
         "REPEATER_BASE_URL": "https://rotator.test",
+        # Publishing tests use synthetic accounts, fake adapters and mocked HTTP only.
+        "REPEATER_PUBLISHING_ENABLED": "true",
         "REPEATER_TIKTOK_CLIENT_KEY": "tt-key",
         "REPEATER_TIKTOK_CLIENT_SECRET": "tt-secret",
         "REPEATER_GOOGLE_CLIENT_ID": "g-id",

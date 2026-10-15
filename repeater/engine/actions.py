@@ -15,6 +15,7 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from repeater.activity import log_activity
+from repeater.config import get_settings
 from repeater.engine import captions
 from repeater.engine.publisher import queue_publish, reached_platform
 from repeater.engine.scheduler import duplicate_origins, limits_problem, lock_workspace
@@ -399,6 +400,8 @@ def _post_for_now(session: Session, video: Video, account: ConnectedAccount) -> 
 
 
 def _check_can_publish(session: Session, workspace_id: int, account: ConnectedAccount | None) -> None:
+    if not get_settings().publishing_enabled:
+        raise UserError("err.publishing_disabled", "Publishing is disabled on this server during testing.")
     workspace = session.get(Workspace, workspace_id)
     if workspace is None or workspace.paused:
         raise UserError("err.paused", "Publishing is paused for this workspace; resume it first.")

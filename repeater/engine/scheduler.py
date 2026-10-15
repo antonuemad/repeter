@@ -174,6 +174,8 @@ class _Context:
 
 def plan_workspace(session: Session, workspace_id: int, now: datetime | None = None) -> list[ScheduledPost]:
     """Create (or revive) scheduled posts for the workspace's horizon. Returns them."""
+    if not get_settings().publishing_enabled:
+        return []
     now = ensure_aware(now) or utcnow()
     workspace = session.get(Workspace, workspace_id)
     if workspace is None or workspace.paused:

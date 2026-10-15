@@ -69,7 +69,8 @@
       </div>
     </header>
     <main id="main" class="container" tabindex="-1">
-      {% if workspace and workspace.paused %}<div class="banner banner-warning">{{ m.icon('clock', 18) }}<span>{{ t('banner.paused') }} <a href="/settings/workspace">{{ t('banner.paused_link') }}</a></span></div>{% endif %}
+      {% if workspace and not publishing_enabled %}<div class="banner banner-warning" role="status">{{ m.icon('clock', 18) }}<span>{{ t('banner.testing_lock') }}</span></div>
+      {% elif workspace and workspace.paused %}<div class="banner banner-warning">{{ m.icon('clock', 18) }}<span>{{ t('banner.paused') }} <a href="/settings/workspace">{{ t('banner.paused_link') }}</a></span></div>{% endif %}
       {% for f in flashes %}<div class="flash flash-{{ f.level }}" role="{{ 'alert' if f.level == 'error' else 'status' }}">{{ f.message }}</div>{% endfor %}
       {% block content %}{% endblock %}
     </main>

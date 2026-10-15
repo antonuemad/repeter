@@ -35,11 +35,14 @@ different capabilities; not every platform is an official download source.
   opted-in unofficial sources feed the library.
 - Rotation rules, publication history, attention states, pause and reconnect are
   existing capabilities and must remain available.
-- Real platform credentials are not configured on the deployed instance as of
-  this review. Real publishing and platform approvals remain
-  launch gates; a healthy server does not establish publishing readiness.
+- Google and Meta developer credentials and initial account links are configured
+  (2026-10-15). TikTok setup, customer platform approvals and real publication acceptance
+  remain launch gates; a healthy server does not establish publishing readiness.
 - Preserve owner/editor authorization, tenant isolation, CSRF, explicit consent,
   platform-required settings and unknown-outcome publication safeguards.
+- User restriction, 2026-10-15: no real publication to any page or account during testing,
+  including private/unlisted test posts. Keep the server publishing lock disabled until
+  the user explicitly ends the restriction; publication tests use mocks and synthetic accounts.
 - The installed database migration is immutable. Any later schema change needs
   a new Alembic revision.
 
