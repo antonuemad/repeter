@@ -61,8 +61,8 @@ COPY = {
     "plan.slot_filled": ("{n}/{total} pages with content", "{n}/{total} صفحة بمحتوى"),
     "nav.plans": ("People & plans", "الأشخاص والخطط"),
     "plan.intro": (
-        "A person, their video sources and the pages they want to keep active.",
-        "شخص، ومصادر فيديوهاته، والصفحات اللي عايز يفضل نشط عليها.",
+        "A person, their content library and the pages they want to keep active.",
+        "شخص، ومكتبة محتواه، والصفحات اللي عايز يفضل نشط عليها.",
     ),
     "plan.new": ("Add a person or brand", "إضافة شخص أو علامة تجارية"),
     "plan.name": ("Person or brand name", "اسم الشخص أو العلامة التجارية"),
@@ -77,8 +77,8 @@ COPY = {
         "خطط الأشخاص للمعاينة فقط؛ النشر غير متاح.",
     ),
     "plan.scope": (
-        "Build each person’s video library from Drive, Instagram or Facebook and preview its rotation. Photos and stories come later. Publishing stays locked during testing.",
-        "كوّن مكتبة فيديوهات كل شخص من Drive أو Instagram أو Facebook وعاين الروتيشن. الصور والستوريز في مراحل لاحقة. النشر مقفول أثناء الاختبار.",
+        "Build each person’s library with videos, images and text posts. Choose post, story or short-video formats and preview rotation on compatible pages. Publishing stays locked during testing.",
+        "كوّن مكتبة كل شخص من فيديوهات وصور وبوستات نصية. اختار بوست أو ستوري أو فيديو قصير، وعاين الروتيشن على الصفحات المتوافقة. النشر مقفول أثناء الاختبار.",
     ),
     "plan.setup_help": (
         "Save each step before moving on. Connecting an account returns you here; it does not publish or import anything.",
@@ -146,20 +146,20 @@ COPY = {
     "plan.mode_once": ("Once per page", "مرة واحدة لكل صفحة"),
     "plan.mode_repeat": ("Keep rotating the library", "تدوير المكتبة باستمرار"),
     "plan.rotation_help": (
-        "Choose unused videos first, then the least recently used on each page. Library order breaks ties. The plan automatically includes newly ready videos whenever you preview it.",
-        "الأولوية للفيديوهات اللي ما اتستخدمتش على الصفحة، وبعدها الأقدم استخدامًا عليها. ترتيب المكتبة بيفصل بين المتساويين. أي فيديو جديد جاهز بيدخل في الحساب تلقائيًا عند المعاينة.",
+        "Choose unused content first, then the least recently used on each page. Library order breaks ties. The plan includes newly ready, compatible items whenever you preview it.",
+        "الأولوية للمحتوى اللي ما اتستخدمش على الصفحة، وبعدها الأقدم استخدامًا عليها. ترتيب المكتبة بيفصل بين المتساويين. أي عنصر جديد جاهز ومتوافق بيدخل في الحساب تلقائيًا عند المعاينة.",
     ),
     "plan.repeat_days": (
         "Minimum days before repeating on the same page",
-        "أقل عدد أيام قبل إعادة نفس الفيديو على نفس الصفحة",
+        "أقل عدد أيام قبل إعادة نفس المحتوى على نفس الصفحة",
     ),
     "plan.repeat_help": (
         "1–365 days; each day means 24 full hours. Applies when rotation is selected, separately for each page. A small library leaves gaps rather than shortening this wait.",
         "من يوم لـ٣٦٥ يوم؛ اليوم يعني ٢٤ ساعة كاملة. يُطبّق عند اختيار التدوير، بشكل مستقل لكل صفحة. لو المكتبة صغيرة، بنسيب مواعيد فاضية بدل تقصير الفاصل.",
     ),
     "plan.rotation_safe": (
-        "Saving calculates a draft only. It does not start publishing, import files or consume videos from the library.",
-        "الحفظ بيحسب مسودة فقط. ما بيشغّلش النشر، وما بيستوردش ملفات، وما بيسجّلش الفيديوهات كمحتوى مستخدم.",
+        "Saving calculates a draft only. It does not start publishing, import files or consume content from the library.",
+        "الحفظ بيحسب مسودة فقط. ما بيشغّلش النشر، وما بيستوردش ملفات، وما بيسجّلش عناصر المكتبة كمحتوى مستخدم.",
     ),
     "plan.rotation_invalid": (
         "Choose once per page or automatic rotation, and a repeat interval from 1 to 365 days.",
@@ -176,26 +176,26 @@ COPY = {
     "plan.previous_actual": ("Last recorded publication: {at}", "آخر نشر مسجّل: {at}"),
     "plan.reason_cooldown": ("Waiting for the repeat interval", "في انتظار انتهاء فاصل الإعادة"),
     "plan.eligible_after": ("Eligible again from {at}", "متاح للإعادة بدايةً من {at}"),
-    "plan.reason_exhausted": ("All eligible videos used once", "كل الفيديوهات المناسبة اتستخدمت مرة"),
-    "plan.reason_no_eligible": ("No eligible video in this library", "مفيش فيديو مناسب في المكتبة"),
+    "plan.reason_exhausted": ("All eligible items used once", "كل العناصر المناسبة اتستخدمت مرة"),
+    "plan.reason_no_eligible": ("No eligible content in this library", "مفيش محتوى مناسب في المكتبة"),
     "plan.reason_pending": (
-        "Remaining videos have pending or unresolved publications",
-        "الفيديوهات المتبقية عليها نشر معلّق أو نتيجة غير محسومة",
+        "Remaining items have pending or unresolved publications",
+        "المحتوى المتبقي عليه نشر معلّق أو نتيجة غير محسومة",
     ),
     "plan.reason_account_unavailable": (
         "Reconnect or check this page’s ownership",
         "أعد ربط الصفحة أو راجع تخصيصها للشخص",
     ),
     "plan.pending_uses": (
-        "{n} video/page pairs are held until pending or uncertain publications are resolved. Rotation never bypasses them.",
+        "{n} item/page pairs are held until pending or uncertain publications are resolved. Rotation never bypasses them.",
         "تم تعليق {n} حالة محتوى/صفحة لحين حسم النشر المعلّق أو غير المؤكد. الروتيشن ما بيتخطّاش الحالات دي.",
     ),
-    "plan.imports": ("Bring videos into their library", "إضافة الفيديوهات لمكتبته"),
+    "plan.imports": ("Import files into their library", "استيراد ملفات لمكتبته"),
     "plan.import_help": (
-        "Importing downloads and prepares videos only. Start it separately when you are ready. The publishing lock stays on.",
-        "الاستيراد بينزّل ويجهّز الفيديوهات فقط. شغّله بشكل منفصل لما تكون جاهز. قفل النشر بيفضل شغّال.",
+        "Importing downloads and prepares videos and optionally images from the folder. Start it separately when ready. The publishing lock stays on.",
+        "الاستيراد بينزّل ويجهّز فيديوهات الفولدر والصور لو اخترت ضمها. شغّله بشكل منفصل لما تكون جاهز. قفل النشر بيفضل شغّال.",
     ),
-    "plan.import_start": ("Start importing videos", "بدء استيراد الفيديوهات"),
+    "plan.import_start": ("Start importing files", "بدء استيراد الملفات"),
     "plan.import_pause": ("Pause imports", "إيقاف الاستيراد مؤقتًا"),
     "plan.import_on": ("Folder monitoring is on", "متابعة الفولدر شغّالة"),
     "plan.import_off": ("Imports are paused", "الاستيراد متوقف"),

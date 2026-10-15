@@ -287,3 +287,30 @@ reported 78 passing tests after the consent fix. The Inter hook warning is inten
 the user's pinned font identity; hooks remained active and no standalone detector was run.
 This documentation handoff records the accepted review and its limitations without rerunning
 the browser, detector, or tests.
+
+### Phase-four entry-copy follow-up (2026-10-16)
+
+The main phase-four implementation (`0335541`) passed CI and was deployed. A final read of
+the live `/plans` page then exposed outdated copy saying photos and stories would come later.
+The bounded follow-up corrects the English and Arabic plan introduction, scope, general rotation,
+and Drive wording to describe the implemented mixed library and preview accurately. Social
+imports remain video/reel-only, and the publishing lock remains explicit. This changes copy,
+not the phase-four capability or visual-system scope.
+
+Accepted follow-up evidence is `/Users/mac/dev/repeter-preview/media-entry-copy-desktop.jpg`.
+The capture offered as mobile evidence was actually 1728 × 934, so it does not establish narrow
+viewport coverage. Mobile confirmation of the corrected copy therefore remains limited; the
+earlier mobile Drive checkbox limitation also remains in force.
+
+The follow-up verification reported 118 passing tests across mixed media, content plans, and
+plan rotation, including two new rendered-page regressions for English and Arabic copy.
+Ruff check, format, and diff checks were clean. Fresh independent follow-up disposition: SHIP.
+
+| Finding | Final status | Resolution evidence |
+| --- | --- | --- |
+| F1 — Preserve Drive image consent | Resolved | Prior mocked browse, pagination, and selection coverage remains unchanged. |
+| F2 — Correct outdated mixed-content copy | Resolved | Desktop render accurately describes the mixed library and publishing lock; English/Arabic rendered-page regressions and the 118-test verification pass. |
+
+No open material findings remain. These observations preserve the distinction between reviewed
+UI and verified live integrations. This documentation-only follow-up did not rerun the browser,
+detector, or tests.

@@ -562,3 +562,17 @@ def test_folder_browse_pagination_and_choice_keep_explicit_image_selection(
     assert post(web_owner, f"/plans/{p.id}/source", chosen).status_code == 303
     db.expire_all()
     assert db.get(Source, p.source_id).config["include_images"] is selected
+
+
+@pytest.mark.parametrize(
+    "lang,available,obsolete",
+    [
+        ("en", "videos, images and text posts", "Photos and stories come later"),
+        ("ar", "فيديوهات وصور وبوستات نصية", "الصور والستوريز في مراحل لاحقة"),
+    ],
+)
+def test_people_entry_explains_mixed_content_as_available(web_owner, lang, available, obsolete):
+    set_lang(web_owner, lang)
+    page = web_owner.get("/plans")
+    assert page.status_code == 200 and available in page.text and obsolete not in page.text
+    assert 'name="name"' in page.text  # The actual first-person setup entry remains available.
