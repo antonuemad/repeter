@@ -589,7 +589,7 @@ class Graph:
             items = [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
             yield from items
             following = _next_page_params(body.get("paging"))
-            if not items or following is None:
+            if following is None or (not items and not require_complete):
                 return
             merged = {**current, **following}
             if merged == current:

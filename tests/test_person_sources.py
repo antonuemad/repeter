@@ -366,6 +366,21 @@ def test_incomplete_pagination_is_reported_not_accepted(mock_network):
             list(graph.paginate("123/media", max_pages=3, action="test", require_complete=True))
 
 
+def test_complete_listing_continues_across_empty_page_with_next_cursor(mock_network):
+    url = "https://graph.facebook.com/v26.0/123/media"
+    route = mock_network.get(url).mock(
+        side_effect=[
+            Response(
+                200, json={"data": [], "paging": {"next": url + "?after=next", "cursors": {"after": "next"}}}
+            ),
+            Response(200, json={"data": [{"id": "after-empty-page"}]}),
+        ]
+    )
+    with meta.Graph("synthetic-token") as graph:
+        result = list(graph.paginate("123/media", action="test", require_complete=True))
+    assert result == [{"id": "after-empty-page"}] and route.call_count == 2
+
+
 def test_mock_download_and_preparation_feed_rotation_without_publication(
     web_owner, db, make_account, monkeypatch, tmp_path
 ):
