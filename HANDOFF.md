@@ -10,11 +10,19 @@ private/unlisted test posts. See `AGENTS.md`. Production must keep
 polling are blocked independently of workspace/rule settings. Never lift the lock or run a real
 publication acceptance test until the user explicitly ends the restriction. Use mocks only.
 
-Google/Meta initial account links succeeded: 1 YouTube, 95 Facebook Pages, 51 Instagram accounts.
+Google/Meta initial account links succeeded: 1 YouTube, 95 Facebook Pages, 51 Instagram accounts,
+and 1 read-only Google Drive account. Drive folder import has been exercised with mocked HTTP
+and synthetic media only; no customer folder or live media was imported as an acceptance test.
 All 147 rules are disabled and the current workspace is paused. TikTok is not configured.
+The user explicitly deferred TikTok developer setup after the signup email code failed to arrive.
+Do not repeatedly request signup or invent credentials. Telegram delivery is also deferred.
 Encrypted Drive offsite backups and an isolated database restore have been verified; media
 restoration awaits real media. Host monitoring runs; Telegram delivery is deferred by the user.
 See `docs/ar/07-pilot-operations.md` for operator checks. No live publication has been performed.
+`integration-status --testing --platform gdrive --platform youtube --platform instagram --platform facebook`
+checks the selected links, disabled publication and all three fresh backup receipts without API
+calls or alerts. The default report still includes TikTok so that deferral is visible. It is not
+customer platform approval or live publication certification.
 
 ## Earlier update: manual invited-customer access (2026-10-15)
 

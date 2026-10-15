@@ -37,11 +37,18 @@
 cd /srv/repeater/app/deploy
 sudo docker compose --env-file .env exec -T web python -m repeater.cli integration-status
 sudo docker compose --env-file .env exec -T web python -m repeater.cli integration-status --platform youtube
+sudo docker compose --env-file .env exec -T web python -m repeater.cli integration-status --testing --platform gdrive --platform youtube
 ```
 
 الأمر يقرأ الحالة فقط ويعرض عدد الحسابات الفعالة والمحتاجة لإعادة الربط والمنشورات المؤكدة،
 دون أسماء العملاء أو التوكنات. يرجع رمزًا غير صفري عند نقص الإعدادات أو الربط أو التنبيهات أو
 النسخ، ويظل اختبار النشر الفعلي مطلوبًا حتى لو نجح الفحص.
+
+الفحص الافتراضي يشمل Drive أيضًا. أثناء الحظر يعرض النشر `blocked_by_testing_lock` بدل
+طلب اختبار نشر، ويعرض Drive كاستيراد للقراءة فقط. خيار `--testing` يفحص الربط للمنصات
+المختارة، وقفل النشر، وحداثة إيصالات النسخ المحلية والخارجية الثلاثة. لا يشترط تفعيل
+Telegram الذي أجّله المستخدم، ولا يرسل رسائل أو يتصل بواجهات المنصات. يرجع فشلًا إذا
+رُفع قفل النشر أو غابت أي مرحلة نسخ أو ربط؛ نجاحه ليس قبول نشر أو شهادة إطلاق للعملاء.
 
 ## النسخ خارج السيرفر
 

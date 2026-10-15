@@ -70,7 +70,7 @@
     </label>
     <label>{{ t('field.backfill_count') }}
       <input type="number" name="backfill_count" min="0" max="{{ max_backfill }}" value="{{ values.backfill_count or 0 }}">
-      <span class="muted small">{{ t('sources.backfill_help') }}</span>
+      <span class="muted small">{{ t('sources.backfill_help_drive' if kind == 'drive' else 'sources.backfill_help') }}</span>
     </label>
   </div>
   <label class="check"><input type="checkbox" name="enabled" value="1"{% if values.enabled %} checked{% endif %}> {{ t('sources.enabled_label') }}</label>

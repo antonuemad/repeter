@@ -97,6 +97,82 @@ def test_integration_cli_reports_incomplete_without_writes(db, capsys):
     assert result["scope"] == "operator_preflight_not_launch_certification"
 
 
+def test_default_preflight_includes_drive_and_does_not_request_publication(db, monkeypatch):
+    from repeater.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "publishing_enabled", False)
+    result = readiness.report(db)
+    entries = {entry["platform"]: entry for entry in result["platforms"]}
+    assert set(entries) == {"youtube", "instagram", "facebook", "tiktok", "gdrive"}
+    assert entries["gdrive"]["acceptance"] == "read_only_source_test_required"
+    assert entries["gdrive"]["visibility_limit"] is None
+    for name in ("youtube", "instagram", "facebook", "tiktok"):
+        assert entries[name]["acceptance"] == "blocked_by_testing_lock"
+        assert entries[name]["visibility_limit"] == "publishing_blocked"
+    assert result["telegram"]["delivery"] == "not_configured"
+
+
+@pytest.mark.parametrize("publishing_enabled,expected", [(False, 0), (True, 1)])
+def test_testing_preflight_requires_lock_and_checks_connection_without_alert_delivery(
+    db, make_account, monkeypatch, tmp_path, capsys, publishing_enabled, expected
+):
+    from repeater.config import get_settings
+
+    account = make_account("gdrive")
+    settings = get_settings()
+    monkeypatch.setattr(settings, "publishing_enabled", publishing_enabled)
+    monkeypatch.setattr(settings, "backup_status_file", tmp_path / "last_success")
+    for name in (
+        "last_success",
+        "last_local_success",
+        "last_offsite_db_success",
+        "last_offsite_media_success",
+    ):
+        (tmp_path / name).write_text(str(time.time()))
+    before = account.token_enc
+    assert cli.main(["integration-status", "--testing", "--platform", "gdrive"]) == expected
+    result = json.loads(capsys.readouterr().out)
+    assert result["platforms"][0]["state"] == "connected"
+    assert result["publishing_enabled"] is publishing_enabled
+    assert not result["telegram"]["configured"] and result["backups"]["ok"]
+    db.refresh(account)
+    assert account.token_enc == before and not list(db.query(Job))
+
+
+def test_testing_preflight_does_not_hide_missing_connections(db, monkeypatch, capsys):
+    from repeater.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "publishing_enabled", False)
+    assert cli.main(["integration-status", "--testing"]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert all(p["state"] != "connected" for p in result["platforms"])
+
+
+@pytest.mark.parametrize(
+    "missing", ["last_local_success", "last_offsite_db_success", "last_offsite_media_success"]
+)
+def test_testing_preflight_requires_each_backup_phase(
+    db, make_account, monkeypatch, tmp_path, capsys, missing
+):
+    from repeater.config import get_settings
+
+    make_account("gdrive")
+    monkeypatch.setattr(get_settings(), "publishing_enabled", False)
+    monkeypatch.setattr(get_settings(), "backup_status_file", tmp_path / "last_success")
+    for name in (
+        "last_success",
+        "last_local_success",
+        "last_offsite_db_success",
+        "last_offsite_media_success",
+    ):
+        if name != missing:
+            (tmp_path / name).write_text(str(time.time()))
+    assert cli.main(["integration-status", "--testing", "--platform", "gdrive"]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["backups"]["ok"]  # aggregate receipt alone must not hide an absent phase
+    assert any(receipt["state"] == "missing" for receipt in report["backups"]["receipts"].values())
+
+
 def test_test_alert_requires_destination(monkeypatch, capsys):
     import repeater.notify
 

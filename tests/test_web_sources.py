@@ -181,6 +181,24 @@ def test_create_drive_source_from_link(web_owner, db, make_account):
     assert source.config["folder_id"] == FOLDER_ID
 
 
+@pytest.mark.parametrize(
+    "lang,help_text",
+    [
+        ("en", "0 skips videos present at the first check and imports new additions afterward."),
+        ("ar", "صفر يتخطّى الفيديوهات الموجودة عند أول فحص، ثم يستورد الإضافات الجديدة فقط."),
+    ],
+)
+def test_drive_explains_first_folder_snapshot_without_a_publication_claim(
+    web_owner, make_account, lang, help_text
+):
+    make_account("gdrive")
+    set_lang(web_owner, lang)
+    response = web_owner.get("/sources/new?kind=drive")
+    assert response.status_code == 200 and help_text in response.text
+    assert "only videos published from now on" not in response.text
+    assert "الفيديوهات المنشورة من الآن فقط" not in response.text
+
+
 def test_drive_source_rejects_bad_folder(web_owner, db, make_account):
     drive = make_account("gdrive")
     set_lang(web_owner, "en")

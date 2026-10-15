@@ -35,8 +35,9 @@ different capabilities; not every platform is an official download source.
   opted-in unofficial sources feed the library.
 - Rotation rules, publication history, attention states, pause and reconnect are
   existing capabilities and must remain available.
-- Google and Meta developer credentials and initial account links are configured
-  (2026-10-15). TikTok setup, customer platform approvals and real publication acceptance
+- Google and Meta developer credentials and initial account links (including read-only Drive)
+  are configured (2026-10-15). TikTok setup was explicitly deferred after signup email delivery
+  failed. Customer platform approvals and real publication acceptance
   remain launch gates; a healthy server does not establish publishing readiness.
 - Preserve owner/editor authorization, tenant isolation, CSRF, explicit consent,
   platform-required settings and unknown-outcome publication safeguards.

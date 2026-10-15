@@ -270,13 +270,18 @@ def cmd_integration_status(args: argparse.Namespace) -> int:
     with session_scope() as db:
         result = report(db, args.platform)
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return (
-        0
-        if all(p["state"] == "connected" for p in result["platforms"])
-        and result["backups"]["ok"]
-        and result["telegram"]["configured"]
-        else 1
-    )
+    healthy = all(p["state"] == "connected" for p in result["platforms"]) and result["backups"]["ok"]
+    # The managed testing trial intentionally has no live publishing or Telegram delivery.
+    # This mode is explicit and fails when the publication lock has been lifted.
+    if args.testing:
+        healthy = (
+            healthy
+            and not result["publishing_enabled"]
+            and all(receipt["state"] == "fresh" for receipt in result["backups"]["receipts"].values())
+        )
+    else:
+        healthy = healthy and result["telegram"]["configured"]
+    return 0 if healthy else 1
 
 
 def cmd_test_alert(_: argparse.Namespace) -> int:
@@ -392,6 +397,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     integration.add_argument(
         "--platform", action="append", choices=["youtube", "gdrive", "instagram", "facebook", "tiktok"]
+    )
+    integration.add_argument(
+        "--testing",
+        action="store_true",
+        help="require connected platforms, fresh backups and publishing disabled; alerts may be unconfigured",
     )
     integration.set_defaults(fn=cmd_integration_status)
     sub.add_parser("test-alert", help="send one minimal test to the configured operator chat").set_defaults(

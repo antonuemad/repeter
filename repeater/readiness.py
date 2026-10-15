@@ -29,7 +29,7 @@ PROVIDERS = {
 
 def report(db: Session, platforms: list[str] | None = None) -> dict:
     settings = get_settings()
-    platforms = platforms or ["youtube", "instagram", "facebook", "tiktok"]
+    platforms = platforms or ["youtube", "instagram", "facebook", "tiktok", "gdrive"]
     entries = []
     for name in platforms:
         platform = Platform(name)
@@ -71,10 +71,16 @@ def report(db: Session, platforms: list[str] | None = None) -> dict:
                 else "needs_connection"
                 if configured
                 else "missing_credentials",
-                "visibility_limit": "private_only"
+                "visibility_limit": "publishing_blocked"
+                if name != "gdrive" and not settings.publishing_enabled
+                else "private_only"
                 if name == "tiktok" and not settings.tiktok_audited
                 else None,
-                "acceptance": "manual_platform_test_required",
+                "acceptance": "read_only_source_test_required"
+                if name == "gdrive"
+                else "blocked_by_testing_lock"
+                if not settings.publishing_enabled
+                else "manual_platform_test_required",
             }
         )
     backup_ok, backup_text = backups.status()
@@ -86,7 +92,9 @@ def report(db: Session, platforms: list[str] | None = None) -> dict:
         "platforms": entries,
         "telegram": {
             "configured": bool(settings.telegram_bot_token and settings.telegram_chat_id),
-            "delivery": "run_test_alert_to_verify",
+            "delivery": "run_test_alert_to_verify"
+            if settings.telegram_bot_token and settings.telegram_chat_id
+            else "not_configured",
         },
         "backups": {
             "ok": backup_ok and bool(settings.backup_status_file),
