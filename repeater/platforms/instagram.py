@@ -537,6 +537,7 @@ class InstagramLister:
                 params,
                 action="listing the Instagram posts",
                 max_pages=MAX_LIST_PAGES,
+                require_complete=bool((config or {}).get("require_complete")),
             )
             for item in pages:
                 posted = meta.parse_graph_time(item.get("timestamp"))

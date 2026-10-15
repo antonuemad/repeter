@@ -1,11 +1,66 @@
 """Copy for the person-led draft planning flow; kept together in both supported languages."""
 
 COPY = {
+    "plan.latest30_option": ("Latest 30 + new videos", "آخر ٣٠ فيديو والجديد"),
+    "plan.new_option": ("New videos only", "الفيديوهات الجديدة فقط"),
+    "plan.platforms": ("Import from their platforms", "الاستيراد من منصاته"),
+    "plan.platform_help": (
+        "Choose an owned Instagram professional account or Facebook Page. Import up to its latest 30 videos and reels, then check for new videos about every 15 minutes. Ready videos join this person’s rotation preview automatically.",
+        "اختار حساب Instagram احترافي أو صفحة Facebook بتملكها. استورد آخر ٣٠ فيديو وريل بحد أقصى، وبعدها بنتابع الجديد كل ١٥ دقيقة تقريبًا. الفيديوهات الجاهزة بتدخل معاينة روتيشن الشخص تلقائيًا.",
+    ),
+    "plan.platform_limits": (
+        "Only videos the platform makes available can be downloaded. Photos, carousel albums and stories are excluded. For unavailable files or YouTube originals, use Drive. TikTok import is deferred.",
+        "التنزيل للفيديوهات اللي المنصة بتتيح ملفاتها فقط. الصور والألبومات والستوريز مش ضمن الاستيراد. للملفات غير المتاحة أو أصول YouTube استخدم Drive. استيراد TikTok مؤجل.",
+    ),
+    "plan.source_account": ("Source account", "حساب المصدر"),
+    "plan.pick_source": ("Select an account", "اختار حسابًا"),
+    "plan.import_mode": ("On the first check", "في أول فحص"),
+    "plan.latest30": ("Latest 30 videos, then follow new videos", "آخر ٣٠ فيديو، وبعدها متابعة الجديد"),
+    "plan.new_only": ("New videos from when monitoring starts", "الفيديوهات الجديدة من وقت بدء المتابعة"),
+    "plan.add_source": ("Save source", "حفظ المصدر"),
+    "plan.source_save_help": (
+        "Saving assigns this account to this person; it does not start importing. Start monitoring below when ready. This source account is excluded when rotating its own videos.",
+        "الحفظ بيخصص الحساب للشخص ده، من غير بدء الاستيراد. شغّل المتابعة بالأسفل لما تكون جاهز. حساب المصدر بيتستبعد من روتيشن فيديوهاته الأصلية.",
+    ),
+    "plan.no_source_accounts": (
+        "No other eligible accounts. Connect Instagram or Facebook above; accounts assigned to another person cannot be chosen.",
+        "مفيش حسابات أخرى متاحة. اربط Instagram أو Facebook بالأعلى؛ الحساب المخصص لشخص آخر مش متاح للاختيار.",
+    ),
+    "plan.no_platform_sources": (
+        "No platform sources yet. You can use Drive, platform sources, or both.",
+        "لسه مفيش مصادر منصات. تقدر تستخدم Drive أو مصادر المنصات أو الاتنين.",
+    ),
+    "plan.watch_on": ("Monitoring on · about every 15 minutes", "المتابعة شغّالة · كل ١٥ دقيقة تقريبًا"),
+    "plan.watch_off": ("Monitoring paused", "المتابعة متوقفة"),
+    "plan.watch_start": ("Start / resume monitoring", "بدء / استئناف المتابعة"),
+    "plan.watch_pause": ("Pause monitoring", "إيقاف المتابعة مؤقتًا"),
+    "plan.watch_check": ("Check now", "فحص الآن"),
+    "plan.watch_help": (
+        "Pausing stops new checks; files already queued can finish. Resuming keeps the same library and does not repeat the initial archive import. After three failed checks monitoring pauses; reconnect or resolve the error, then resume.",
+        "الإيقاف بيوقف الفحوص الجديدة؛ الملفات اللي دخلت الطابور ممكن تكمل. الاستئناف بيحافظ على المكتبة من غير إعادة استيراد الأرشيف الأول. بعد ٣ فحوص فاشلة المتابعة بتتوقف؛ أعد الربط أو عالج الخطأ، ثم استأنف.",
+    ),
+    "plan.source_totals": (
+        "{total} imported · {ready} ready · {pending} preparing · {failed} failed · {duplicate} duplicates",
+        "{total} مستورد · {ready} جاهز · {pending} قيد التجهيز · {failed} فاشل · {duplicate} مكرر",
+    ),
+    "plan.sources_summary": ("{n} saved video sources", "{n} مصادر فيديوهات محفوظة"),
+    "plan.platform_invalid": (
+        "Choose an active Instagram or Facebook account belonging to this person. Reconnect it if needed; start monitoring before checking now.",
+        "اختار حساب Instagram أو Facebook متصل وتابع للشخص ده. أعد ربطه لو محتاج؛ ابدأ المتابعة قبل الفحص الآن.",
+    ),
+    "plan.platform_exists": (
+        "This source is already saved. Use its monitoring controls below.",
+        "المصدر ده محفوظ بالفعل. استخدم أدوات المتابعة الخاصة بيه بالأسفل.",
+    ),
+    "plan.source_busy": (
+        "This account has active legacy imports or pending publications. Pause the old source and resolve pending publications before assigning it.",
+        "الحساب ده عليه مصدر استيراد قديم شغّال أو نشر معلّق. أوقف المصدر القديم وعالج النشر المعلّق قبل تخصيصه.",
+    ),
     "plan.slot_filled": ("{n}/{total} pages with content", "{n}/{total} صفحة بمحتوى"),
     "nav.plans": ("People & plans", "الأشخاص والخطط"),
     "plan.intro": (
-        "A person, their content folder and the pages they want to keep active. Start with a video plan.",
-        "شخص، وفولدر محتواه، والصفحات اللي عايز يفضل نشط عليها. ابدأ بخطة للفيديوهات.",
+        "A person, their video sources and the pages they want to keep active.",
+        "شخص، ومصادر فيديوهاته، والصفحات اللي عايز يفضل نشط عليها.",
     ),
     "plan.new": ("Add a person or brand", "إضافة شخص أو علامة تجارية"),
     "plan.name": ("Person or brand name", "اسم الشخص أو العلامة التجارية"),
@@ -20,8 +75,8 @@ COPY = {
         "خطط الأشخاص للمعاينة فقط؛ النشر غير متاح.",
     ),
     "plan.scope": (
-        "Plan automatic rotation from each person’s Drive video library. Photos, stories and social-platform archive imports come later. Publishing stays locked during testing.",
-        "خطّط للروتيشن التلقائي من مكتبة فيديوهات Drive لكل شخص. الصور والستوريز واستيراد أرشيف المنصات في مراحل لاحقة. النشر مقفول أثناء الاختبار.",
+        "Build each person’s video library from Drive, Instagram or Facebook and preview its rotation. Photos and stories come later. Publishing stays locked during testing.",
+        "كوّن مكتبة فيديوهات كل شخص من Drive أو Instagram أو Facebook وعاين الروتيشن. الصور والستوريز في مراحل لاحقة. النشر مقفول أثناء الاختبار.",
     ),
     "plan.setup_help": (
         "Save each step before moving on. Connecting an account returns you here; it does not publish or import anything.",

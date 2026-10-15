@@ -579,6 +579,7 @@ class Graph:
         *,
         action: str,
         max_pages: int = DEFAULT_MAX_PAGES,
+        require_complete: bool = False,
     ) -> Iterator[dict[str, Any]]:
         """Yield the objects of `data` across pages (at most `max_pages` requests)."""
         current = dict(params or {})
@@ -592,8 +593,18 @@ class Graph:
                 return
             merged = {**current, **following}
             if merged == current:
+                if require_complete:
+                    raise RetryableError(
+                        "The platform repeated a listing cursor; retry the check.", code="listing_incomplete"
+                    )
                 return
             current = merged
+        if require_complete:
+            raise RetryableError(
+                "The platform listing exceeded the safe page limit. No checkpoint was advanced; "
+                "contact support or use the original files in Drive.",
+                code="listing_incomplete",
+            )
 
 
 # --------------------------------------------------------------------------- signed_request

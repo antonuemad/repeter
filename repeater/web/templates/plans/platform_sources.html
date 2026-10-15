@@ -1,0 +1,42 @@
+<section class="card" id="platforms">
+  <h2>{{ t('plan.platforms') }}</h2>
+  <p class="plan-measure">{{ t('plan.platform_help') }}</p>
+  <p class="muted small plan-measure">{{ t('plan.platform_limits') }}</p>
+  {% if import_accounts %}
+  <form method="post" action="/plans/{{ plan.id }}/platforms" class="stack">
+    {{ revision() }}
+    <div class="grid-2">
+      <label>{{ t('plan.source_account') }}<select name="source_account_id" required>
+        <option value="">{{ t('plan.pick_source') }}</option>
+        {% for a in import_accounts %}<option value="{{ a.id }}"{% if submitted.get('source_account_id')|int == a.id %} selected{% endif %}>{{ a.display_name or a.external_id }} · {{ platform_name(a.platform) }}</option>{% endfor %}
+      </select></label>
+      <label>{{ t('plan.import_mode') }}<select name="import_mode" required>
+        <option value="latest30">{{ t('plan.latest30_option') }}</option>
+        <option value="new"{% if submitted.get('import_mode') == 'new' %} selected{% endif %}>{{ t('plan.new_option') }}</option>
+      </select></label>
+    </div>
+    <p class="small muted plan-measure">{{ t('plan.source_save_help') }}</p>
+    <button type="submit" class="button">{{ t('plan.add_source') }}</button>
+  </form>
+  {% else %}<p><a href="#connections">{{ t('plan.no_source_accounts') }}</a></p>{% endif %}
+  <ul class="plain plan-import-list">
+    {% for s in social_sources %}
+    {% set counts = source_counts.get(s.id, {}) %}
+    <li>
+      <h3><bdi>{{ s.name }}</bdi> {{ m.platform(s.platform) }}</h3>
+      <p><span class="badge badge-{{ 'active' if s.enabled else 'disabled' }}">{{ t('plan.watch_on') if s.enabled else t('plan.watch_off') }}</span></p>
+      <p class="small">{{ t('plan.latest30') if s.config.get('backfill_count') else t('plan.new_only') }}</p>
+      <p class="small">{{ t('plan.source_totals', total=counts.values()|sum, ready=counts.get('ready', 0), pending=counts.get('importing', 0) + counts.get('processing', 0), failed=counts.get('failed', 0), duplicate=counts.get('duplicate', 0)) }}</p>
+      <dl class="details compact"><dt>{{ t('sources.last_polled') }}</dt><dd>{{ fmt_dt(s.last_polled_at, plan.timezone) }}</dd><dt>{{ t('sources.last_success') }}</dt><dd>{{ fmt_dt(s.last_success_at, plan.timezone) }}</dd></dl>
+      {% if s.last_error %}<p class="flash flash-error small" role="status">{{ m.error_text(s.last_error, 300, s.last_error_info) }}</p>{% endif %}
+      <form method="post" action="/plans/{{ plan.id }}/platforms/{{ s.id }}" class="actions">
+        {{ revision() }}
+        <button type="submit" name="action" value="{{ 'pause' if s.enabled else 'start' }}" class="button secondary">{{ t('plan.watch_pause') if s.enabled else t('plan.watch_start') }}</button>
+        {% if s.enabled %}<button type="submit" name="action" value="check" class="button secondary">{{ t('plan.watch_check') }}</button>{% endif %}
+        <a href="/library?profile_id={{ person.id }}">{{ t('plan.library') }}</a>
+      </form>
+    </li>
+    {% else %}<li class="muted">{{ t('plan.no_platform_sources') }}</li>{% endfor %}
+  </ul>
+  <p class="small muted plan-measure">{{ t('plan.watch_help') }}</p>
+</section>

@@ -110,3 +110,20 @@ does not consume content, record a publication, run a background scheduler or co
 provider. Saving rotation settings never starts imports or publishing; both the global lock
 and independent person-plan publishing guards remain in place. Live execution is still a
 separate launch gate, as explicitly required during the customer test period.
+
+## Person-led phase three (2026-10-15)
+
+Each person can now add multiple connected Instagram professional accounts and Facebook
+Pages as video sources alongside their Drive folder. Save a source with either latest 30
+videos then follow new content, or new content only from the explicit monitoring start.
+Saving assigns the source account to that person but leaves monitoring paused. Start/resume,
+pause and check-now are separate actions; periodic discovery runs about every 15 minutes.
+Source status, last check/success, preparation failures and ready/duplicate counts are visible.
+Already queued file preparation may finish after pausing. Ready content automatically enters
+the next rotation preview; its original source account remains excluded for that video.
+
+Only available video/reel files are supported, with the existing platform permission and
+copyright/download restrictions. No photos, stories or carousel albums. YouTube originals
+can come through Drive; unofficial scraping is not added to the person flow. TikTok remains
+deferred. This phase's verification uses mock APIs and synthetic media only. Production
+sources are not started by deployment; publishing and execution of person plans remain locked.

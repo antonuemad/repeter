@@ -287,3 +287,29 @@ releases on `claude/saas-video-platform-plan-tfi4ar` unless the owner requests o
 - Tests: `tests/test_plan_rotation.py`, expanded legacy safety tests in
   `tests/test_content_plans.py`, and installed-0003 plan upgrade defaults in
   `tests/test_access_migration.py`. 248 focused regression tests passed locally before finish review.
+
+### 2026-10-15 — Person platform sources, phase three
+
+- `/plans/{id}/edit#platforms` supports multiple Instagram/Facebook sources per person plus
+  the existing Drive folder. A saved source is disabled; explicit start/resume begins a
+  15-minute periodic poll using the existing worker tick, or check-now queues a deduplicated
+  poll. Source identity/import mode stay fixed after saving; pause preserves library/history.
+- New migration `0005` adds a partial unique profile/account index for platform API sources.
+  Account claims lock the row and reject another person/tenant, unsupported/disconnected
+  accounts, active legacy sources and pending publications. Legacy source forms cannot claim
+  person-owned platform accounts; their edit links now resolve all person sources to the plan.
+- First successful check selects up to 30 latest video/reel entries, or new-only entries since
+  the explicit start time (including delays before the worker first runs). Follow-up checks
+  allow up to 1,000 entries and use a 24-hour overlap from the last successful check, never
+  earlier than the initial baseline. Timestamp delays exceeding that overlap are not covered.
+  Exhausted pagination, repeated cursors or saturated windows fail visibly without advancing
+  the checkpoint. Three consecutive failures pause monitoring; resolve/reconnect then resume.
+- Source control revisions reject stale in-flight listings, including pause/resume during a
+  slow request. Person/account ownership is checked again on listing and download. Imported
+  identity/dedup remains person-scoped and source-owned posts are excluded from rotation.
+- Fixed a pre-existing bulk import bug: the ON CONFLICT coalesce expression now uses a literal
+  zero to match its unique index even when psycopg switches to a generic prepared query plan.
+- All publication guards remain unchanged. No real API imports/publishing acceptance tests;
+  mock listers/HTTP/media exercise latest30, a 60-video burst, resume, new-only, pagination,
+  auth/rate/permission failures, preparation-to-ready-to-preview, tenancy, CSRF and dedup.
+  UI supports Arabic/English and both themes with source counts and recovery guidance.

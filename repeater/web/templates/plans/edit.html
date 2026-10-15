@@ -7,7 +7,7 @@
 A saved draft is the truth. Preview is read-only and import is an independent action. -->
 <div class="page-heading"><div><h1 dir="auto">{{ person.name }}</h1><p>{{ t('plan.setup_help') }}</p></div><div class="actions"><a class="button" href="/plans/{{ plan.id }}">{{ t('plan.preview') }}</a><a href="/library?profile_id={{ person.id }}">{{ t('plan.library') }}</a></div></div>
 {{ m.form_error(error) }}
-<nav class="settings-tabs" aria-label="{{ t('plan.edit') }}"><a href="#connections">{{ t('plan.connections') }}</a><a href="#source">{{ t('plan.folder') }}</a><a href="#targets">{{ t('plan.targets') }}</a><a href="#schedule">{{ t('plan.schedule') }}</a><a href="#rotation">{{ t('plan.rotation') }}</a></nav>
+<nav class="settings-tabs" aria-label="{{ t('plan.edit') }}"><a href="#connections">{{ t('plan.connections') }}</a><a href="#source">{{ t('plan.folder') }}</a><a href="#platforms">{{ t('plan.platforms') }}</a><a href="#targets">{{ t('plan.targets') }}</a><a href="#schedule">{{ t('plan.schedule') }}</a><a href="#rotation">{{ t('plan.rotation') }}</a></nav>
 <div class="plan-setup">
 <section class="card" id="connections"><h2>{{ t('plan.connections') }}</h2><p class="muted">{{ t('plan.connect_help') }}</p><div class="actions">
 {% for purpose, configured in connections %}
@@ -24,6 +24,7 @@ A saved draft is the truth. Preview is read-only and import is an independent ac
 {% if source %}<p class="small"><strong dir="auto">{{ source.name }}</strong> · <span>{{ t('plan.import_on') if source.enabled else t('plan.import_off') }}</span></p>{% endif %}
 {% if folders is not none %}<div class="plan-folder-list"><ul class="plain">{% for f in folders %}<li><form method="post" action="/plans/{{ plan.id }}/source" class="plan-folder-row">{{ revision() }}<input type="hidden" name="drive_id" value="{{ folder_drive_id }}"><input type="hidden" name="folder" value="{{ f.id }}"><input type="hidden" name="backfill" value="{{ submitted.get('backfill', source.config.get('backfill_count', 30) if source else 30) }}"><span dir="auto">{{ f.name }}</span><button class="button small secondary" type="submit">{{ t('plan.choose_folder') }}</button></form></li>{% else %}<li>{{ t('plan.no_folders') }}</li>{% endfor %}</ul></div>{% if folder_page %}<form method="post" action="/plans/{{ plan.id }}/folders">{{ m.csrf() }}<input type="hidden" name="drive_id" value="{{ folder_drive_id }}"><input type="hidden" name="page_token" value="{{ folder_page }}"><button class="button secondary">{{ t('plan.next_folders') }}</button></form>{% endif %}{% endif %}
 </section>
+{% include "plans/platform_sources.html" %}
 <section class="card" id="targets"><h2>{{ t('plan.targets') }}</h2><p class="muted">{{ t('plan.targets_help') }}</p><p>{{ t('plan.saved_pages', n=selected|length) }}</p>
 <form method="post" action="/plans/{{ plan.id }}/targets" class="stack" data-plan-targets>{{ revision() }}
 {% if accounts %}<label data-filter-control hidden>{{ t('plan.search') }}<input type="search" data-plan-filter autocomplete="off"></label>

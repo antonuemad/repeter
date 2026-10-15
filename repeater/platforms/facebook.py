@@ -705,6 +705,7 @@ class FacebookLister:
                         params,
                         action=f"listing the Facebook Page {label}",
                         max_pages=MAX_LIST_PAGES,
+                        require_complete=bool((config or {}).get("require_complete")),
                     )
                     for item in items:
                         video = _remote_video(item, edge)

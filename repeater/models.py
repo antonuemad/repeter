@@ -322,6 +322,13 @@ class Source(TimestampMixin, Base):
 
     __tablename__ = "sources"
     __table_args__ = (
+        Index(
+            "uq_person_platform_source",
+            "profile_id",
+            "connected_account_id",
+            unique=True,
+            postgresql_where=text("profile_id IS NOT NULL AND kind = 'platform_api'"),
+        ),
         ForeignKeyConstraint(
             ["profile_id", "workspace_id"],
             ["creator_profiles.id", "creator_profiles.workspace_id"],

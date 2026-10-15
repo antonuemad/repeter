@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from repeater.accounts import AccountUnavailable, fresh_context
 from repeater.activity import log_activity
@@ -29,6 +29,7 @@ from repeater.models import (
     ScheduledPost,
     Source,
     SourceKind,
+    Video,
 )
 from repeater.platforms.base import PlatformError
 from repeater.sources.drive import browse_folders, folder_details, parse_folder_id
@@ -38,6 +39,7 @@ from repeater.web.deps import DB, Form, FormError, Page, form_int, form_str, que
 from repeater.web.templating import flash, render
 
 router = APIRouter()
+IMPORT_PLATFORMS = (Platform.FACEBOOK, Platform.INSTAGRAM)
 
 
 def get_plan(db, ctx, plan_id, *, lock=False):
@@ -85,7 +87,39 @@ def _context(db, ctx, plan):
             .order_by(ConnectedAccount.platform, ConnectedAccount.display_name, ConnectedAccount.id)
         )
     )
+    social_sources = list(
+        db.scalars(
+            select(Source)
+            .where(
+                Source.workspace_id == plan.workspace_id,
+                Source.profile_id == plan.profile_id,
+                Source.kind == SourceKind.PLATFORM_API,
+            )
+            .order_by(Source.id)
+        )
+    )
+    source_counts = {}
+    for source_id, status, count in db.execute(
+        select(Video.source_id, Video.status, func.count())
+        .where(
+            Video.workspace_id == plan.workspace_id,
+            Video.profile_id == plan.profile_id,
+        )
+        .group_by(Video.source_id, Video.status)
+    ):
+        source_counts.setdefault(source_id, {})[status.value] = count
+    used = {s.connected_account_id for s in social_sources}
     return {
+        "social_sources": social_sources,
+        "source_counts": source_counts,
+        "import_accounts": [
+            a
+            for a in accounts
+            if a.platform in IMPORT_PLATFORMS
+            and a.status == AccountStatus.ACTIVE
+            and a.profile_id in (None, plan.profile_id)
+            and a.id not in used
+        ],
         "nav": "plans",
         "plan": plan,
         "person": db.get(CreatorProfile, plan.profile_id),
@@ -188,13 +222,15 @@ def folders(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, form:
 
 @router.post("/plans/{plan_id}/{section}")
 def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section: str, form: Form) -> Response:
-    if section not in {"person", "source", "targets", "schedule", "rotation", "imports"}:
+    if section not in {"person", "source", "targets", "schedule", "rotation", "imports", "platforms"}:
         raise HTTPException(404)
     plan = get_plan(db, ctx, plan_id, lock=True)
     try:
         _revision(form, plan)
         if section == "person":
             db.get(CreatorProfile, plan.profile_id).name = form_str(form, "name", max_len=200, required=True)
+        elif section == "platforms":
+            _add_platform_source(db, ctx, plan, form)
         elif section == "source":
             account = _drive(db, ctx, form)
             folder_id = parse_folder_id(form_str(form, "folder", max_len=1000, required=True))
@@ -351,6 +387,133 @@ def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section:
             submitted["weekdays"] = form.getlist("weekdays")
             submitted["times"] = form.getlist("times")
         return _edit(request, db, ctx, get_plan(db, ctx, plan_id), error=exc, submitted=submitted)
+
+
+def _add_platform_source(db, ctx, plan, form):
+    account_id = form_int(form, "source_account_id", minimum=1, maximum=2**31 - 1)
+    mode = form_str(form, "import_mode", max_len=16, required=True)
+    account = db.scalar(
+        select(ConnectedAccount)
+        .where(
+            ConnectedAccount.id == account_id,
+            ConnectedAccount.workspace_id == ctx.workspace.id,
+        )
+        .with_for_update()
+    )
+    if (
+        mode not in {"latest30", "new"}
+        or account is None
+        or account.platform not in IMPORT_PLATFORMS
+        or account.status != AccountStatus.ACTIVE
+        or account.profile_id not in (None, plan.profile_id)
+    ):
+        raise FormError("plan.platform_invalid")
+    existing = db.scalar(
+        select(Source.id).where(
+            Source.profile_id == plan.profile_id,
+            Source.connected_account_id == account.id,
+            Source.kind == SourceKind.PLATFORM_API,
+        )
+    )
+    if existing:
+        raise FormError("plan.platform_exists")
+    busy = db.scalar(
+        select(ScheduledPost.id)
+        .where(
+            ScheduledPost.connected_account_id == account.id,
+            ScheduledPost.status.in_(ACTIVE_POST_STATUSES),
+        )
+        .limit(1)
+    )
+    legacy = db.scalar(
+        select(Source.id)
+        .where(
+            Source.connected_account_id == account.id,
+            Source.profile_id.is_(None),
+            Source.enabled.is_(True),
+        )
+        .limit(1)
+    )
+    if busy or legacy:
+        raise FormError("plan.source_busy")
+    account.profile_id = plan.profile_id
+    db.add(
+        Source(
+            workspace_id=plan.workspace_id,
+            profile_id=plan.profile_id,
+            connected_account_id=account.id,
+            kind=SourceKind.PLATFORM_API,
+            platform=account.platform,
+            name=account.display_name or account.external_id,
+            config={"backfill_count": 30 if mode == "latest30" else 0},
+            poll_interval_minutes=15,
+            enabled=False,
+        )
+    )
+
+
+@router.post("/plans/{plan_id}/platforms/{source_id}")
+def control_platform(
+    request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, source_id: int, form: Form
+) -> Response:
+    plan = get_plan(db, ctx, plan_id, lock=True)
+    source = db.scalar(
+        select(Source)
+        .where(
+            Source.id == source_id,
+            Source.workspace_id == ctx.workspace.id,
+            Source.profile_id == plan.profile_id,
+            Source.kind == SourceKind.PLATFORM_API,
+        )
+        .with_for_update()
+    )
+    if source is None:
+        raise HTTPException(404)
+    try:
+        _revision(form, plan)
+        action = form_str(form, "action", max_len=16)
+        if action not in {"start", "pause", "check"}:
+            raise FormError("plan.platform_invalid")
+        if action == "pause":
+            source.enabled = False
+        else:
+            account = db.get(ConnectedAccount, source.connected_account_id)
+            if (
+                account is None
+                or account.workspace_id != ctx.workspace.id
+                or account.profile_id != plan.profile_id
+                or account.platform != source.platform
+                or account.status != AccountStatus.ACTIVE
+                or source.platform not in IMPORT_PLATFORMS
+                or (action == "check" and not source.enabled)
+            ):
+                raise FormError("plan.platform_invalid")
+            source.enabled = True
+            source.consecutive_failures = 0
+            config = dict(source.config or {})
+            config.setdefault("watch_from", utcnow().isoformat())
+            source.config = config
+            kinds.enqueue_poll_source(db, source.id)
+        # Reject a stale in-flight listing even if pause and resume both happen before it returns.
+        source.config = {**source.config, "control_revision": plan.revision + 1}
+        plan.revision += 1
+        log_activity(
+            db,
+            plan.workspace_id,
+            "info",
+            "plans",
+            f"Person source {source.id}: {action}.",
+            actor=ctx.actor,
+            plan_id=plan.id,
+            source_id=source.id,
+            action=action,
+        )
+        db.commit()
+        flash(request, "success", "plan.saved")
+        return RedirectResponse(f"/plans/{plan.id}/edit#platforms", 303)
+    except FormError as exc:
+        db.rollback()
+        return _edit(request, db, ctx, get_plan(db, ctx, plan_id), error=exc)
 
 
 @router.get("/plans/{plan_id}")

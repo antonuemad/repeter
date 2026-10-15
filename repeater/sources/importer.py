@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 from urllib.parse import urlparse
 
-from sqlalchemy import func, select
+from sqlalchemy import func, literal_column, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -204,6 +204,10 @@ def _watched(source: Source) -> tuple[Any, ...]:
         source.kind,
         source.platform,
         source.connected_account_id,
+        source.profile_id,
+        config.get("control_revision"),
+        config.get("backfill_count"),
+        config.get("watch_from"),
         tuple(str(config.get(key) or "") for key in IDENTITY_KEYS),
         str(config.get("proxy") or ""),
         "baseline_at" in config,
@@ -267,6 +271,14 @@ def _detect(session: Session, source: Source) -> list[RemoteVideo]:
     first_poll = "baseline_at" not in config
     backfill = _backfill_count(config) if first_poll else 0
     since = None if first_poll else _parse_iso(config.get("baseline_at"))
+    person_platform = source.profile_id is not None and source.kind == SourceKind.PLATFORM_API
+    if person_platform:
+        config["require_complete"] = True
+        if first_poll and not backfill:
+            since = _parse_iso(config.get("watch_from"))
+        if since is not None and source.last_success_at:
+            # Overlap for delayed provider visibility; external-id uniqueness makes it idempotent.
+            since = max(since, ensure_aware(source.last_success_at) - timedelta(days=1))
 
     if source.kind == SourceKind.YTDLP:
         # Detection and download use yt-dlp only: never an OAuth token or an official lister,
@@ -289,7 +301,15 @@ def _detect(session: Session, source: Source) -> list[RemoteVideo]:
             ctx, since=None, limit=max(drive.FULL_LISTING_LIMIT, backfill), config=config
         )
     limit = max(POLL_LIST_LIMIT, backfill)
-    return get_lister(platform).list_recent(ctx, since=since, limit=limit, config=config)
+    if person_platform and (not first_poll or not backfill):
+        limit = 1001
+    remotes = get_lister(platform).list_recent(ctx, since=since, limit=limit, config=config)
+    if person_platform and limit == 1001 and len(remotes) >= limit:
+        raise SourceConfigError(
+            "Too many new videos to check safely in one pass. No checkpoint was advanced. "
+            "Contact support or use the original files in Drive."
+        )
+    return remotes
 
 
 def _lister_platform(source: Source) -> Platform:
@@ -310,6 +330,8 @@ def _source_account(source: Source, platform: Platform) -> ConnectedAccount:
         raise SourceConfigError("No connected account is linked to this source. Connect the account first.")
     if account.workspace_id != source.workspace_id or account.platform != platform:
         raise SourceConfigError("The linked account does not match this source's platform.")
+    if source.kind == SourceKind.PLATFORM_API and account.profile_id != source.profile_id:
+        raise SourceConfigError("The linked account belongs to a different person's library.")
     return account
 
 
@@ -324,7 +346,13 @@ def _ingest(session: Session, source: Source, remotes: list[RemoteVideo], now: d
     baseline = _parse_iso(config.get("baseline_at"))
     if baseline is None:
         chosen = _newest(candidates, _backfill_count(config))
-        config["baseline_at"] = now.isoformat()
+        watch_from = _parse_iso(config.get("watch_from"))
+        if source.profile_id and source.kind == SourceKind.PLATFORM_API and watch_from:
+            # New-only starts at the explicit start action, not when the worker eventually runs.
+            baseline = watch_from
+            if not _backfill_count(config):
+                chosen = [r for r in candidates if r.created_at and ensure_aware(r.created_at) > baseline]
+        config["baseline_at"] = (baseline or now).isoformat()
     else:
         chosen = _new_items(source, candidates, remotes, baseline, set(seen))
     created = _create_videos(session, source, chosen)
@@ -454,7 +482,8 @@ def _create_videos(session: Session, source: Source, items: list[RemoteVideo]) -
             .on_conflict_do_nothing(
                 index_elements=[
                     "workspace_id",
-                    func.coalesce(Video.profile_id, 0),
+                    # Must match the index literally even after psycopg prepares a generic plan.
+                    func.coalesce(Video.profile_id, literal_column("0")),
                     "source_platform",
                     "external_id",
                 ],

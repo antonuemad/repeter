@@ -74,6 +74,7 @@ def _accounts_for(db: Session, workspace_id: int, kind: SourceKind) -> list[Conn
                 ConnectedAccount.workspace_id == workspace_id,
                 ConnectedAccount.platform.in_(KIND_ACCOUNT_PLATFORMS[kind]),
                 ConnectedAccount.status != AccountStatus.DISABLED,
+                (ConnectedAccount.profile_id.is_(None) | (ConnectedAccount.platform == Platform.GDRIVE)),
             )
             .order_by(ConnectedAccount.platform, ConnectedAccount.id)
         ).scalars()
@@ -114,8 +115,10 @@ def sources_page(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
             "kinds": [k.value for k in EDITABLE_KINDS],
             "source_plans": dict(
                 db.execute(
-                    select(ContentPlan.source_id, ContentPlan.id).where(
-                        ContentPlan.workspace_id == ctx.workspace.id
+                    select(Source.id, ContentPlan.id)
+                    .join(ContentPlan, ContentPlan.profile_id == Source.profile_id)
+                    .where(
+                        ContentPlan.workspace_id == ctx.workspace.id, Source.workspace_id == ctx.workspace.id
                     )
                 ).all()
             ),
@@ -140,12 +143,17 @@ def new_source(request: Request, db: DB, ctx: CurrentWorkspace, kind: str = "pla
 @router.get("/sources/{source_id}/edit")
 def edit_source(request: Request, db: DB, ctx: CurrentWorkspace, source_id: int) -> Response:
     plan_id = db.scalar(
-        select(ContentPlan.id).where(
-            ContentPlan.source_id == source_id, ContentPlan.workspace_id == ctx.workspace.id
+        select(ContentPlan.id)
+        .join(Source, Source.profile_id == ContentPlan.profile_id)
+        .where(
+            Source.id == source_id,
+            Source.workspace_id == ctx.workspace.id,
+            ContentPlan.workspace_id == ctx.workspace.id,
         )
     )
     if plan_id:
-        return RedirectResponse(f"/plans/{plan_id}/edit#source", 303)
+        section = "platforms" if db.get(Source, source_id).kind == SourceKind.PLATFORM_API else "source"
+        return RedirectResponse(f"/plans/{plan_id}/edit#{section}", 303)
     return _form_page(request, db, ctx, _get_source(db, ctx, source_id), is_new=False)
 
 
@@ -258,6 +266,7 @@ def _parse_account(
         or account.workspace_id != ctx.workspace.id
         or Platform(account.platform) not in KIND_ACCOUNT_PLATFORMS[kind]
         or account.status == AccountStatus.DISABLED
+        or (account.profile_id is not None and account.platform != Platform.GDRIVE)
     ):
         raise FormError("sources.error_account_required")
     return account

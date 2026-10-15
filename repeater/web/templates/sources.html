@@ -35,7 +35,7 @@
     <div class="flash flash-error small" dir="auto">{{ t('sources.last_error') }}: {{ t.error(s.last_error, s.last_error_info) }}{% if s.consecutive_failures %} ({{ t('sources.failures', count=s.consecutive_failures) }}){% endif %}</div>
     {% endif %}
     <div class="actions">
-      {% if s.profile_id %}<a class="button small secondary" href="/plans/{{ source_plans.get(s.id) }}/edit#source">{{ t('plan.edit') }}</a>{% else %}
+      {% if s.profile_id %}<a class="button small secondary" href="/plans/{{ source_plans.get(s.id) }}/edit#{{ 'platforms' if s.kind == 'platform_api' else 'source' }}">{{ t('plan.edit') }}</a>{% else %}
       <a class="button small secondary" href="/sources/{{ s.id }}/edit">{{ t('common.edit') }}</a>
       {% if s.enabled %}
       <form method="post" action="/sources/{{ s.id }}/poll" class="inline">
