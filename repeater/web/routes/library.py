@@ -402,6 +402,7 @@ def delete_video(request: Request, db: DB, ctx: CurrentWorkspace, form: Form, vi
         flash(request, "error", "library.delete_busy")
         return RedirectResponse(f"/library/{video.id}", status_code=303)
     workspace_id, vid = video.workspace_id, video.id
+    library_url = f"/library?profile_id={video.profile_id}" if video.profile_id else "/library"
     db.execute(
         delete(ActivityLog).where(
             ActivityLog.workspace_id == workspace_id, ActivityLog.data["video_id"].astext == str(vid)
@@ -421,7 +422,7 @@ def delete_video(request: Request, db: DB, ctx: CurrentWorkspace, form: Form, vi
     db.commit()
     storage.delete_video_dir(workspace_id, vid)
     flash(request, "success", "library.deleted")
-    return RedirectResponse("/library", status_code=303)
+    return RedirectResponse(library_url, status_code=303)
 
 
 @router.post("/library/{video_id}/edit")

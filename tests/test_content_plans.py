@@ -561,3 +561,17 @@ def test_empty_selection_retains_page_ownership_without_scheduling(web_owner, db
     assert a.profile_id == p.profile_id
     assert db.scalar(select(func.count()).select_from(PlanTarget)) == 0
     assert db.scalar(select(func.count()).select_from(Job)) == 0
+
+
+def test_video_details_and_deletion_return_to_the_person_library(web_owner, db):
+    p = create_plan(web_owner, db)
+    v = video(db, p, "Person video")
+    db.commit()
+    page = web_owner.get(f"/library/{v.id}")
+    assert page.status_code == 200
+    assert f'href="/library?profile_id={p.profile_id}"' in page.text
+    assert f'action="/library/{v.id}/publish-now"' not in page.text
+    response = post(web_owner, f"/library/{v.id}/delete")
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/library?profile_id={p.profile_id}"
+    assert web_owner.get(response.headers["location"]).status_code == 200

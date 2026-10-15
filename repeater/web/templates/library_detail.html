@@ -2,7 +2,7 @@
 {% import "macros.html" as m with context %}
 {% block title %}{{ m.video_title(video) }}{% endblock %}
 {% block content %}
-<p><a href="/library">{{ t('common.back_arrow') }} {{ t('library.back') }}</a></p>
+<p><a href="/library{{ '?profile_id=' ~ video.profile_id if video.profile_id else '' }}">{{ t('common.back_arrow') }} {{ t('library.back') }}</a></p>
 <h1 dir="auto">{{ m.video_title(video) }}</h1>
 
 <div class="grid-2">
