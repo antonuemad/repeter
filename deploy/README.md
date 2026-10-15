@@ -12,6 +12,7 @@ Production packaging for Repeater on a single VPS (Magic Lap's Hostinger KVM 4),
 | `bootstrap.sh` | First install, idempotent, as root: OS check, Docker, `/srv/repeater/{app,media,backups}`, secrets, reverse-proxy detection (re-checked on every run; `--redetect-proxy`), build and start, admin, backup cron. |
 | `deploy.sh` | Every deploy: (`--pull`: refresh postgres/caddy too), build, pre-deploy dump (kept 30 days), migrate, `up -d --remove-orphans`, wait for health. Never edits `.env`. `:previous` moves only when a build differs. |
 | `backup.sh` | Daily `pg_dump` to `/srv/repeater/backups` (14 days), Telegram alert on failure, optional `rclone` off-site copy (dumps copied and expired by age, media mirrored with a trash and a delete cap); `pre-deploy`, `status`, and `restore FILE --yes [--resume]` (one transaction, workspaces paused, web only). |
+| `monitor.py` | Host Python 3 monitor every five minutes: HTTPS, container health, queue delay, disk and separate backup receipts. Telegram failures/recoveries are deduplicated; failed deliveries retry. |
 | `selftest.sh` | Real-container check in a throwaway compose project: atomic restore (also over a newer schema), pause-on-restore, trusted-proxy handling of `X-Forwarded-For`. CI runs it. |
 
 ## Layout on the server
@@ -39,12 +40,21 @@ bash selftest.sh repeater-app:latest      # restore/forwarded-header self-test o
 docker compose --env-file .env ps         # status
 docker compose --env-file .env logs -f --tail 200 web worker
 docker compose --env-file .env exec web python -m repeater.cli check
+docker compose --env-file .env exec web python -m repeater.cli integration-status
+docker compose --env-file .env exec web python -m repeater.cli test-alert
+python3 monitor.py --no-notify             # inspect without a Telegram message
 ```
 
 After a restore, use the worker start command printed by `backup.sh`: it carries the same
 `REPEATER_IMAGE_TAG` used for the restore. Keep that tag on subsequent compose commands too.
 Pre-deploy dumps expire after 30 days; retries never prune them by count or overwrite a dump
 taken in the same second.
+
+The operator preflight separates credentials, connected accounts and confirmed publications;
+it does not certify live publishing. See [the invited-pilot runbook](../docs/ar/07-pilot-operations.md).
+The host monitor cannot detect loss of the entire VPS; an independent uptime service is still
+required for that failure. Existing installations must refresh `/etc/cron.d/repeater-backup`
+using `install_backup_cron` from `bootstrap.sh` after deploying this version.
 
 `--no-build` requires the selected image tag to exist locally and refuses a missing tag before
 backup or migration. The completion message offers rollback only when `:previous` exists.

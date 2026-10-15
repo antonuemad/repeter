@@ -178,8 +178,13 @@ exit 0
 
 RCLONE_STUB = """#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$STUB_RCLONE_LOG"
+printf '%s\\n' "${RCLONE_CONFIG:-}" >> "$STUB_RCLONE_LOG.config"
 if [[ -n "${STUB_RCLONE_FAIL_ON:-}" && " $* " == *" ${STUB_RCLONE_FAIL_ON} "* ]]; then exit 1; fi
 if [[ "${STUB_RCLONE_RC:-0}" != 0 ]]; then exit "$STUB_RCLONE_RC"; fi
+if [[ "$1" == cat ]]; then
+    if [[ -n "${STUB_RCLONE_CORRUPT:-}" ]]; then printf corrupted
+    else cat "$REPEATER_BACKUP_DIR/${2##*/}"; fi
+fi
 if [[ "$1" == lsf ]]; then printf '%s' "${STUB_RCLONE_LSF:-}"; fi
 exit 0
 """
@@ -201,7 +206,7 @@ def sandbox(tmp_path: Path) -> dict:
     """A copy of deploy/ under tmp_path/app/deploy plus stub commands; returns paths and env."""
     deploy = tmp_path / "app" / "deploy"
     deploy.mkdir(parents=True)
-    for name in (*SCRIPTS, ".env.example", "docker-compose.yml", "Caddyfile"):
+    for name in (*SCRIPTS, "monitor.py", ".env.example", "docker-compose.yml", "Caddyfile"):
         shutil.copy2(DEPLOY / name, deploy / name)
     (tmp_path / "state").mkdir()
     bin_dir = tmp_path / "bin"
@@ -1834,6 +1839,42 @@ def test_backup_alerts_when_the_offsite_copy_fails_and_keeps_the_marker_unchange
     assert not status_file(sandbox).exists()
 
 
+@pytest.mark.parametrize("failure", [{"STUB_RCLONE_CORRUPT": "1"}, {"STUB_RCLONE_FAIL_ON": "cat"}])
+def test_offsite_readback_failure_preserves_previous_success_and_remote_history(
+    sandbox: dict, failure
+) -> None:
+    make_env(sandbox, RCLONE_REMOTE="crypt:repeater", RCLONE_MEDIA_SYNC="off")
+    _write_status(sandbox, 40)
+    previous = status_file(sandbox).read_text()
+    result = backup(sandbox, **failure)
+    assert result.returncode != 0
+    assert status_file(sandbox).read_text() == previous
+    assert (status_file(sandbox).parent / "last_local_success").exists()
+    assert not (status_file(sandbox).parent / "last_offsite_db_success").exists()
+    assert "delete " not in (sandbox["logs"] / "rclone.log").read_text()
+
+
+def test_offsite_phase_receipts_and_dedicated_config(sandbox: dict) -> None:
+    config = sandbox["root"] / "rclone.conf"
+    config.write_text("[test]\ntype=local\n")
+    make_env(sandbox, RCLONE_REMOTE="crypt:repeater", RCLONE_MEDIA_SYNC="off", RCLONE_CONFIG=str(config))
+    result = backup(sandbox)
+    assert result.returncode == 0, result.stderr
+    folder = status_file(sandbox).parent
+    assert (folder / "last_local_success").exists()
+    assert (folder / "last_offsite_db_success").exists()
+    assert not (folder / "last_offsite_media_success").exists()
+    assert "read-back SHA-256 verified" in result.stdout
+    assert set((sandbox["logs"] / "rclone.log.config").read_text().splitlines()) == {str(config)}
+
+
+def test_missing_dedicated_rclone_config_fails_before_upload(sandbox: dict) -> None:
+    make_env(sandbox, RCLONE_REMOTE="crypt:x", RCLONE_CONFIG="/no/such/config")
+    result = backup(sandbox)
+    assert result.returncode != 0 and "not readable" in result.stderr
+    assert not (sandbox["logs"] / "rclone.log").exists()
+
+
 def _write_status(sandbox: dict, hours_ago: float) -> None:
     path = status_file(sandbox)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1854,6 +1895,15 @@ def test_status_reports_fresh_and_stale_backups(sandbox: dict) -> None:
     alerted = backup(sandbox, "status", "--alert")
     assert alerted.returncode == 1
     assert "Repeater backup is STALE" in (sandbox["logs"] / "curl-stdin.log").read_text()
+
+
+@pytest.mark.parametrize("epoch", ["nan", "inf", "garbage", "0", "-1", "99999999999999999"])
+def test_status_rejects_invalid_receipt_instead_of_reporting_healthy(sandbox: dict, epoch) -> None:
+    make_env(sandbox)
+    _write_status(sandbox, 0)
+    status_file(sandbox).write_text(epoch)
+    result = backup(sandbox, "status")
+    assert result.returncode == 1 and "receipt is invalid" in result.stderr
 
 
 def test_status_without_any_record_waits_a_day_and_a_half(sandbox: dict) -> None:
@@ -1879,6 +1929,7 @@ def test_cron_runs_the_staleness_check(sandbox: dict) -> None:
     assert re.search(
         r"^7 9 \* \* \* root REPEATER_BACKUP_DIR=\S+ bash \S+/backup\.sh status --alert 2>&1", cron, re.M
     )
+    assert re.search(r"^\*/5 \* \* \* \* root REPEATER_BACKUP_DIR=\S+ python3 \S+/monitor\.py", cron, re.M)
 
 
 # ----- restore (deploy-ops-1, deploy-ops-2)

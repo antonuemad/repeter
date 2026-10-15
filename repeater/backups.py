@@ -1,12 +1,10 @@
-"""Freshness of the database backup, from the marker file backup.sh writes after each success.
-
-backup.sh (deploy/) records "<epoch> <ISO time>" in settings.backup_status_file; the directory is
-mounted read-only into the web and worker containers. Both `repeater.cli check` and the dashboard
-overview use `status` to warn when the last successful backup is older than BACKUP_STALE_HOURS."""
+"""Backup freshness from host-written, read-only receipts. Unknown is never healthy."""
 
 from __future__ import annotations
 
+import math
 import time
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from repeater.config import get_settings
@@ -14,25 +12,64 @@ from repeater.config import get_settings
 BACKUP_STALE_HOURS = 36
 
 
+@dataclass(frozen=True)
+class Receipt:
+    state: str
+    age_hours: int | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.state == "fresh"
+
+
+def receipt(path: str | Path, now: float | None = None, *, max_hours: int = BACKUP_STALE_HOURS) -> Receipt:
+    now = time.time() if now is None else now
+    try:
+        epoch = float(Path(path).read_text().split()[0])
+        if not math.isfinite(epoch) or epoch <= 0 or epoch > now + 300:
+            return Receipt("invalid")
+    except FileNotFoundError:
+        return Receipt("missing")
+    except (OSError, ValueError, IndexError):
+        return Receipt("invalid")
+    age = max(0, int((now - epoch) / 3600))
+    return Receipt("stale" if now - epoch >= max_hours * 3600 else "fresh", age)
+
+
 def status(path: str | Path | None = None, now: float | None = None) -> tuple[bool, str]:
-    """(ok, text). The text is empty when no marker location is configured here (a development
-    machine); a missing or unreadable marker is not stale (a new server has no backup yet)."""
     marker = path if path is not None else get_settings().backup_status_file
     if not marker:
         return True, ""
-    try:
-        epoch = float(Path(marker).read_text().split()[0])
-    except (OSError, ValueError, IndexError):
-        return True, "no successful backup recorded yet (backup.sh runs daily at 03:17)"
-    age_hours = ((now if now is not None else time.time()) - epoch) / 3600
-    if age_hours >= BACKUP_STALE_HOURS:
-        return False, f"STALE (the last successful backup was {int(age_hours)} hours ago)"
-    return True, f"ok (last success {int(age_hours)} hours ago)"
+    record = receipt(marker, now)
+    if record.state in ("missing", "invalid"):
+        return False, "no successful backup recorded yet (backup.sh runs daily at 03:17)"
+    if record.state == "stale":
+        return False, f"STALE (the last successful backup was {record.age_hours} hours ago)"
+    return True, f"ok (last success {record.age_hours} hours ago)"
 
 
 def stale_hours(now: float | None = None) -> int | None:
-    """Age in whole hours of the last successful backup when it is stale, else None."""
-    ok, text = status(None, now)
-    if ok or not text:
+    marker = get_settings().backup_status_file
+    if not marker:
         return None
-    return int(text.split("was ")[1].split(" hours")[0])
+    record = receipt(marker, now)
+    return record.age_hours if record.state == "stale" else None
+
+
+def receipts(now: float | None = None) -> dict[str, dict]:
+    """Separate local/offsite database/media receipts; configuration alone proves none of them."""
+    marker = get_settings().backup_status_file
+    if not marker:
+        return {
+            name: {"state": "not_configured", "age_hours": None}
+            for name in ("local", "offsite_db", "offsite_media")
+        }
+    folder = Path(marker).parent
+    return {
+        name: asdict(receipt(folder / filename, now))
+        for name, filename in (
+            ("local", "last_local_success"),
+            ("offsite_db", "last_offsite_db_success"),
+            ("offsite_media", "last_offsite_media_success"),
+        )
+    }

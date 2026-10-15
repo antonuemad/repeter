@@ -263,6 +263,35 @@ def cmd_issue_password_reset(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_integration_status(args: argparse.Namespace) -> int:
+    from repeater.db import session_scope
+    from repeater.readiness import report
+
+    with session_scope() as db:
+        result = report(db, args.platform)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return (
+        0
+        if all(p["state"] == "connected" for p in result["platforms"])
+        and result["backups"]["ok"]
+        and result["telegram"]["configured"]
+        else 1
+    )
+
+
+def cmd_test_alert(_: argparse.Namespace) -> int:
+    from repeater.config import get_settings
+    from repeater.notify import notify
+
+    settings = get_settings()
+    if not settings.telegram_bot_token or not settings.telegram_chat_id:
+        print("Telegram is not configured; no message sent", file=sys.stderr)
+        return 2
+    delivered = notify("Repeater operator delivery test", category="operator_test")
+    print("Telegram test delivered" if delivered else "Telegram delivery failed")
+    return 0 if delivered else 1
+
+
 def cmd_check(_: argparse.Namespace) -> int:
     from repeater import backups
     from repeater.config import get_settings
@@ -358,6 +387,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     reset.add_argument("--email", required=True)
     reset.set_defaults(fn=cmd_issue_password_reset)
+    integration = sub.add_parser(
+        "integration-status", help="read-only JSON preflight; never proves live platform acceptance"
+    )
+    integration.add_argument(
+        "--platform", action="append", choices=["youtube", "gdrive", "instagram", "facebook", "tiktok"]
+    )
+    integration.set_defaults(fn=cmd_integration_status)
+    sub.add_parser("test-alert", help="send one minimal test to the configured operator chat").set_defaults(
+        fn=cmd_test_alert
+    )
     args = p.parse_args(argv)
     return args.fn(args)
 

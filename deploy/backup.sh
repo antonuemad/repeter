@@ -126,13 +126,15 @@ on_exit() {
     fi
 }
 
-record_success() {
+record_marker() {
+    local marker_name="${1:-last_success}"
+    case "$marker_name" in last_success|last_local_success|last_offsite_db_success|last_offsite_media_success) ;; *) die "invalid receipt name" ;; esac
     install -d -m 0755 "$STATUS_DIR"
     local tmp
     tmp="$(mktemp "$STATUS_DIR/.last_success.XXXXXX")"
     printf '%s %s\n' "$(date -u +%s)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$tmp"
     chmod 0644 "$tmp"
-    mv -f "$tmp" "$STATUS_FILE"
+    mv -f "$tmp" "$STATUS_DIR/$marker_name"
 }
 
 # Exit 1 (and optionally a Telegram alert) when the last successful backup is too old. Without a
@@ -147,8 +149,14 @@ status_cmd() {
     install -d -m 0700 "$BACKUP_DIR"
     install -d -m 0755 "$STATUS_DIR"
     now="$(date -u +%s)"
-    if [[ -s "$STATUS_FILE" ]] && epoch="$(cut -d' ' -f1 "$STATUS_FILE")" && [[ "$epoch" =~ ^[0-9]+$ ]]; then
-        :
+    if [[ -s "$STATUS_FILE" ]]; then
+        epoch="$(cut -d' ' -f1 "$STATUS_FILE")"
+        if [[ ! "$epoch" =~ ^[1-9][0-9]{0,9}$ ]] || ((epoch > now + 300)); then
+            FAILURE="the backup success receipt is invalid; run a verified backup"
+            warn "$FAILURE"
+            if ((alert)); then notify "Repeater backup status is INVALID: $FAILURE"; fi
+            return 1
+        fi
     else
         if [[ ! -s "$STATUS_DIR/.first_seen" ]]; then date -u +%s >"$STATUS_DIR/.first_seen"; fi
         epoch="$(cat "$STATUS_DIR/.first_seen")"
@@ -254,6 +262,14 @@ offsite_dumps() {
     log "copying dumps to $remote/db"
     rclone copy "$BACKUP_DIR" "$remote/db" --include "${PREFIX}*.sql.gz" "${RCLONE_TIMEOUTS[@]}" ||
         die "rclone copy of the database dumps failed"
+    # Read the newly written dump back through the remote (and decrypt it when crypt is used).
+    # A successful upload alone does not establish that the recovery bytes can be read.
+    local local_hash remote_hash
+    local_hash="$(sha256sum "$DUMP_FILE" | cut -d' ' -f1)"
+    remote_hash="$(rclone cat "$remote/db/${DUMP_FILE##*/}" "${RCLONE_TIMEOUTS[@]}" | sha256sum | cut -d' ' -f1)" ||
+        die "the off-site database dump could not be read back"
+    [[ "$local_hash" == "$remote_hash" ]] || die "the off-site database dump failed SHA-256 verification"
+    log "off-site database read-back SHA-256 verified"
     # Expire only when something newer than the cut-off exists remotely, so a stalled copy can
     # never age the whole history out.
     recent="$(rclone lsf "$remote/db" --include "${PREFIX}*.sql.gz" --max-age "${keep}d" "${RCLONE_TIMEOUTS[@]}" | head -n 1 || true)"
@@ -297,11 +313,17 @@ offsite_expire_trash() {
 }
 
 offsite_copy() {
-    local remote media_mode
+    local remote media_mode config
     remote="$(env_get RCLONE_REMOTE "$ENV_FILE")"
     [[ -n "$remote" ]] || return 0
     command -v rclone >/dev/null || die "RCLONE_REMOTE is set but rclone is not installed (apt-get install rclone, then rclone config)"
+    config="$(env_get RCLONE_CONFIG "$ENV_FILE")"
+    if [[ -n "$config" ]]; then
+        [[ -r "$config" ]] || die "the configured RCLONE_CONFIG file is not readable"
+        export RCLONE_CONFIG="$config"
+    fi
     offsite_dumps "$remote"
+    record_marker last_offsite_db_success
     media_mode="$(env_get RCLONE_MEDIA_SYNC "$ENV_FILE")"
     media_mode="${media_mode:-weekly}"
     case "$media_mode" in
@@ -311,6 +333,7 @@ offsite_copy() {
         *) die "RCLONE_MEDIA_SYNC must be weekly, daily or off" ;;
     esac
     offsite_media "$remote"
+    record_marker last_offsite_media_success
 }
 
 # --------------------------------------------------------------------------- commands
@@ -337,8 +360,9 @@ backup() {
     dump_database "$PREFIX"
     prune_old "$days"
     prune_safety_dumps
+    record_marker last_local_success
     offsite_copy
-    record_success
+    record_marker
     log "backup finished"
 }
 

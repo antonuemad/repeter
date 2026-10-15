@@ -215,7 +215,7 @@ def test_check_reports_a_stale_backup(use_ring, monkeypatch, tmp_path: Path, cap
     marker = tmp_path / "last_success"
     monkeypatch.setenv("REPEATER_BACKUP_STATUS_FILE", str(marker))
     code, out, _ = run_cli(capsys, "check")
-    assert code == 0 and "backups: no successful backup recorded yet" in out
+    assert code == 1 and "backups: no successful backup recorded yet" in out
     marker.write_text(f"{int(time.time() - 3 * 3600)} 2026-10-14T03:17:00Z\n")
     code, out, _ = run_cli(capsys, "check")
     assert code == 0 and "backups: ok (last success 3 hours ago)" in out
@@ -235,7 +235,7 @@ def test_backup_status_parses_garbage_as_no_record(tmp_path: Path) -> None:
     marker = tmp_path / "m"
     marker.write_text("not a number\n")
     assert backups.status(str(marker)) == (
-        True,
+        False,
         "no successful backup recorded yet (backup.sh runs daily at 03:17)",
     )
     assert backups.status(None) == (True, "")

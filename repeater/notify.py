@@ -45,6 +45,7 @@ _CATEGORIES: dict[str, tuple[str, str, str]] = {
         "The server's disk is nearly full, so imports are waiting",
         "/library",
     ),
+    "operator_test": ("Operator notification test succeeded", "Operator notification test succeeded", "/"),
     "alert": ("Something needs your attention", "Something needs your attention", "/"),
 }
 _BOT_TOKEN_RE = re.compile(r"/bot[^/\s]+/")

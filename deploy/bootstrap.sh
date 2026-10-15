@@ -190,6 +190,7 @@ install_host_tools() {
     command -v openssl >/dev/null || missing+=(openssl)
     command -v ss >/dev/null || missing+=(iproute2)
     command -v flock >/dev/null || missing+=(util-linux)
+    command -v python3 >/dev/null || missing+=(python3)
     [[ -d /etc/cron.d ]] || missing+=(cron)
     dpkg -s ca-certificates >/dev/null 2>&1 || missing+=(ca-certificates)
     if ((${#missing[@]} > 0)); then
@@ -702,6 +703,7 @@ SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 17 3 * * * root REPEATER_BACKUP_DIR=$BACKUP_DIR bash $TARGET_APP_DIR/deploy/backup.sh 2>&1 | logger -t repeater-backup
 7 9 * * * root REPEATER_BACKUP_DIR=$BACKUP_DIR bash $TARGET_APP_DIR/deploy/backup.sh status --alert 2>&1 | logger -t repeater-backup
+*/5 * * * * root REPEATER_BACKUP_DIR=$BACKUP_DIR python3 $TARGET_APP_DIR/deploy/monitor.py 2>&1 | logger -t repeater-monitor
 EOF
     )"
     if [[ ! -f "$CRON_FILE" || "$(cat "$CRON_FILE")" != "$content" ]]; then
