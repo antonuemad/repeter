@@ -32,6 +32,7 @@ from repeater.models import (
     ActivityLevel,
     ActivityLog,
     ConnectedAccount,
+    CreatorProfile,
     Platform,
     PostStatus,
     RotationRule,
@@ -91,6 +92,7 @@ def target_accounts(db: Session, workspace_id: int) -> list[ConnectedAccount]:
                 ConnectedAccount.workspace_id == workspace_id,
                 ConnectedAccount.platform.in_(PUBLISH_PLATFORMS),
                 ConnectedAccount.status == AccountStatus.ACTIVE,
+                ConnectedAccount.profile_id.is_(None),
             )
             .order_by(ConnectedAccount.platform, ConnectedAccount.id)
         ).scalars()
@@ -144,11 +146,30 @@ def _back(form: Any, default: str) -> RedirectResponse:
 
 @router.get("/library")
 def library(
-    request: Request, db: DB, ctx: CurrentWorkspace, status: str = "active", page: str = "1"
+    request: Request,
+    db: DB,
+    ctx: CurrentWorkspace,
+    status: str = "active",
+    page: str = "1",
+    profile_id: int | None = None,
 ) -> Response:
     statuses = STATUS_FILTERS.get(status) or STATUS_FILTERS["active"]
     status = status if status in STATUS_FILTERS else "active"
-    where = (Video.workspace_id == ctx.workspace.id, Video.status.in_(statuses))
+    profiles = list(
+        db.scalars(
+            select(CreatorProfile)
+            .where(CreatorProfile.workspace_id == ctx.workspace.id)
+            .order_by(CreatorProfile.name)
+        )
+    )
+    profile = next((p for p in profiles if p.id == profile_id), None)
+    if profile_id is not None and profile is None:
+        raise HTTPException(status_code=404)
+    where = (
+        Video.workspace_id == ctx.workspace.id,
+        Video.status.in_(statuses),
+        Video.profile_id.is_not_distinct_from(profile_id),
+    )
     total = int(db.execute(select(func.count()).select_from(Video).where(*where)).scalar_one())
     pager = Page(number=query_int(page, default=1), size=PAGE_SIZE, total=total)
     videos = list(
@@ -160,8 +181,11 @@ def library(
             .limit(PAGE_SIZE)
         ).scalars()
     )
-    accounts = target_accounts(db, ctx.workspace.id)
+    accounts = [] if profile_id is not None else target_accounts(db, ctx.workspace.id)
     context = {
+        "profiles": profiles,
+        "profile": profile,
+        "profile_id": profile_id,
         "nav": "library",
         "videos": videos,
         "status_filter": status,
@@ -186,7 +210,7 @@ def video_detail(request: Request, db: DB, ctx: CurrentWorkspace, video_id: int)
             .order_by(ScheduledPost.scheduled_at.desc(), ScheduledPost.id.desc())
         ).scalars()
     )
-    accounts = target_accounts(db, ctx.workspace.id)
+    accounts = [] if video.profile_id is not None else target_accounts(db, ctx.workspace.id)
     context = {
         "nav": "library",
         "video": video,

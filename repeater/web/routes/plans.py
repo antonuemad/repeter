@@ -1,0 +1,363 @@
+"""Person setup: connect → folder → pages → schedule → read-only preview."""
+
+from __future__ import annotations
+
+import re
+from datetime import date, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import RedirectResponse, Response
+from sqlalchemy import delete, select
+
+from repeater.accounts import AccountUnavailable, fresh_context
+from repeater.activity import log_activity
+from repeater.config import get_settings
+from repeater.content_plans import simulate, targets
+from repeater.engine.rules import rule_problems
+from repeater.jobs import kinds
+from repeater.models import (
+    ACTIVE_POST_STATUSES,
+    PUBLISH_PLATFORMS,
+    AccountStatus,
+    ConnectedAccount,
+    ContentPlan,
+    CreatorProfile,
+    PlanTarget,
+    Platform,
+    RotationRule,
+    ScheduledPost,
+    Source,
+    SourceKind,
+)
+from repeater.platforms.base import PlatformError
+from repeater.sources.drive import browse_folders, folder_details, parse_folder_id
+from repeater.timeutil import utcnow
+from repeater.web.auth import CurrentWorkspace
+from repeater.web.deps import DB, Form, FormError, Page, form_int, form_str, query_int
+from repeater.web.templating import flash, render
+
+router = APIRouter()
+
+
+def get_plan(db, ctx, plan_id, *, lock=False):
+    plan = db.scalar(
+        select(ContentPlan)
+        .where(ContentPlan.id == plan_id, ContentPlan.workspace_id == ctx.workspace.id)
+        .with_for_update()
+        if lock
+        else select(ContentPlan).where(
+            ContentPlan.id == plan_id, ContentPlan.workspace_id == ctx.workspace.id
+        )
+    )
+    if plan is None:
+        raise HTTPException(404)
+    return plan
+
+
+def _source(db, plan):
+    source = db.get(Source, plan.source_id) if plan.source_id else None
+    if source and (source.workspace_id != plan.workspace_id or source.profile_id != plan.profile_id):
+        raise HTTPException(404)
+    return source
+
+
+def _drive(db, ctx, form):
+    account_id = form_int(form, "drive_id", minimum=1, maximum=2**31 - 1)
+    account = db.scalar(
+        select(ConnectedAccount).where(
+            ConnectedAccount.id == account_id,
+            ConnectedAccount.workspace_id == ctx.workspace.id,
+            ConnectedAccount.platform == Platform.GDRIVE,
+            ConnectedAccount.status == AccountStatus.ACTIVE,
+        )
+    )
+    if account is None:
+        raise FormError("plan.drive_invalid")
+    return account
+
+
+def _context(db, ctx, plan):
+    accounts = list(
+        db.scalars(
+            select(ConnectedAccount)
+            .where(ConnectedAccount.workspace_id == ctx.workspace.id)
+            .order_by(ConnectedAccount.platform, ConnectedAccount.display_name, ConnectedAccount.id)
+        )
+    )
+    return {
+        "nav": "plans",
+        "plan": plan,
+        "person": db.get(CreatorProfile, plan.profile_id),
+        "source": _source(db, plan),
+        "selected": {a.id for a in targets(db, plan)},
+        "accounts": [
+            a for a in accounts if a.platform in PUBLISH_PLATFORMS and a.profile_id in (None, plan.profile_id)
+        ],
+        "drives": [a for a in accounts if a.platform == Platform.GDRIVE and a.status == AccountStatus.ACTIVE],
+        "connections": [
+            (p, get_settings().platform_configured(provider))
+            for p, provider in [
+                ("gdrive", "google"),
+                ("youtube", "google"),
+                ("meta", "meta"),
+                ("tiktok", "tiktok"),
+            ]
+        ],
+        "zones": sorted(available_timezones()),
+        "error": None,
+        "submitted": {},
+        "folders": None,
+        "folder_drive_id": None,
+        "folder_page": "",
+    }
+
+
+def _edit(request, db, ctx, plan, *, error=None, submitted=None, **extra):
+    data = _context(db, ctx, plan)
+    data.update(error=error, submitted=submitted or {}, **extra)
+    return render(request, "plans/edit.html", data, status_code=422 if error else 200)
+
+
+def _revision(form, plan):
+    if form_int(form, "revision", minimum=1, maximum=2**31 - 1) != plan.revision:
+        raise FormError("plan.stale")
+
+
+@router.get("/plans")
+def index(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
+    rows = db.execute(
+        select(CreatorProfile, ContentPlan)
+        .join(ContentPlan, ContentPlan.profile_id == CreatorProfile.id)
+        .where(CreatorProfile.workspace_id == ctx.workspace.id)
+        .order_by(CreatorProfile.id)
+    ).all()
+    return render(request, "plans/index.html", {"nav": "plans", "people": rows, "error": None})
+
+
+@router.post("/plans")
+def create(request: Request, db: DB, ctx: CurrentWorkspace, form: Form) -> Response:
+    try:
+        name = form_str(form, "name", max_len=200, required=True)
+    except FormError as exc:
+        flash(request, "error", exc.key, **exc.params)
+        return RedirectResponse("/plans#new", 303)
+    person = CreatorProfile(workspace_id=ctx.workspace.id, name=name)
+    db.add(person)
+    db.flush()
+    plan = ContentPlan(
+        workspace_id=ctx.workspace.id,
+        profile_id=person.id,
+        timezone=ctx.workspace.timezone,
+        start_date=utcnow().astimezone(ZoneInfo(ctx.workspace.timezone)).date(),
+    )
+    db.add(plan)
+    db.commit()
+    return RedirectResponse(f"/plans/{plan.id}/edit", 303)
+
+
+@router.get("/plans/{plan_id}/edit")
+def edit(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int) -> Response:
+    return _edit(request, db, ctx, get_plan(db, ctx, plan_id))
+
+
+@router.post("/plans/{plan_id}/folders")
+def folders(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, form: Form) -> Response:
+    plan = get_plan(db, ctx, plan_id)
+    try:
+        account = _drive(db, ctx, form)
+        page = form_str(form, "page_token", max_len=2000)
+        items, next_page = browse_folders(fresh_context(db, account), page_token=page)
+        db.commit()  # persist a refreshed credential, if any
+        return _edit(
+            request,
+            db,
+            ctx,
+            plan,
+            submitted=dict(form),
+            folders=items,
+            folder_drive_id=account.id,
+            folder_page=next_page,
+        )
+    except (PlatformError, AccountUnavailable):
+        db.commit()
+        return _edit(request, db, ctx, plan, error=FormError("plan.drive_failed"), submitted=dict(form))
+    except FormError as exc:
+        return _edit(request, db, ctx, plan, error=exc, submitted=dict(form))
+
+
+@router.post("/plans/{plan_id}/{section}")
+def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section: str, form: Form) -> Response:
+    if section not in {"person", "source", "targets", "schedule", "imports"}:
+        raise HTTPException(404)
+    plan = get_plan(db, ctx, plan_id, lock=True)
+    try:
+        _revision(form, plan)
+        if section == "person":
+            db.get(CreatorProfile, plan.profile_id).name = form_str(form, "name", max_len=200, required=True)
+        elif section == "source":
+            account = _drive(db, ctx, form)
+            folder_id = parse_folder_id(form_str(form, "folder", max_len=1000, required=True))
+            backfill = form_int(form, "backfill", minimum=0, maximum=200, default=30)
+            source = _source(db, plan)
+            if source and (source.enabled or source.last_polled_at):
+                if source.connected_account_id != account.id or source.config.get("folder_id") != folder_id:
+                    raise FormError("plan.source_locked")
+            details = folder_details(fresh_context(db, account), folder_id)
+            if source is None:
+                source = Source(
+                    workspace_id=ctx.workspace.id,
+                    profile_id=plan.profile_id,
+                    kind=SourceKind.DRIVE,
+                    platform=Platform.GDRIVE,
+                    enabled=False,
+                    poll_interval_minutes=15,
+                    config={},
+                )
+                db.add(source)
+                db.flush()
+                plan.source_id = source.id
+            source.connected_account_id = account.id
+            source.name = details["name"]
+            if not source.last_polled_at and not source.enabled:
+                source.config = {**source.config, "folder_id": folder_id, "backfill_count": backfill}
+        elif section == "targets":
+            raw = form.getlist("targets")
+            if len(raw) > 100 or any(
+                not isinstance(v, str) or not v.isascii() or not v.isdecimal() or len(v) > 10 for v in raw
+            ):
+                raise FormError("plan.targets_invalid")
+            ids = {int(v) for v in raw}
+            accounts = list(
+                db.scalars(
+                    select(ConnectedAccount)
+                    .where(ConnectedAccount.id.in_(ids), ConnectedAccount.workspace_id == ctx.workspace.id)
+                    .order_by(ConnectedAccount.id)
+                    .with_for_update()
+                )
+            )
+            if len(accounts) != len(ids) or any(
+                a.platform not in PUBLISH_PLATFORMS
+                or a.status != AccountStatus.ACTIVE
+                or a.profile_id not in (None, plan.profile_id)
+                for a in accounts
+            ):
+                raise FormError("plan.targets_invalid")
+            busy = db.scalar(
+                select(ScheduledPost.id)
+                .where(
+                    ScheduledPost.connected_account_id.in_(ids),
+                    ScheduledPost.status.in_(ACTIVE_POST_STATUSES),
+                )
+                .limit(1)
+            )
+            if busy:
+                raise FormError("plan.account_busy")
+            db.execute(delete(PlanTarget).where(PlanTarget.plan_id == plan.id))
+            for a in accounts:
+                a.profile_id = plan.profile_id
+                db.add(PlanTarget(plan_id=plan.id, account_id=a.id, workspace_id=plan.workspace_id))
+        elif section == "schedule":
+            zone = form_str(form, "timezone", max_len=64, required=True)
+            try:
+                ZoneInfo(zone)
+                start = date.fromisoformat(form_str(form, "start_date", max_len=10, required=True))
+            except (ValueError, ZoneInfoNotFoundError):
+                raise FormError("plan.schedule_invalid") from None
+            today = utcnow().astimezone(ZoneInfo(zone)).date()
+            if not today <= start <= today + timedelta(days=365):
+                raise FormError("plan.date_invalid")
+            days = form.getlist("weekdays")
+            times = [str(t).strip() for t in form.getlist("times") if str(t).strip()]
+            if (
+                not days
+                or any(d not in [str(i) for i in range(7)] for d in days)
+                or not 1 <= len(times) <= 5
+                or any(not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", t) for t in times)
+                or len(set(times)) != len(times)
+            ):
+                raise FormError("plan.schedule_invalid")
+            ordering = form_str(form, "ordering", max_len=16)
+            if ordering not in {"oldest", "newest"}:
+                raise FormError("plan.schedule_invalid")
+            plan.timezone, plan.start_date = zone, start
+            plan.weekdays, plan.times, plan.ordering = sorted({int(d) for d in days}), sorted(times), ordering
+        elif section == "imports":
+            source = _source(db, plan)
+            if source is None:
+                raise FormError("plan.drive_invalid")
+            action = form_str(form, "action", max_len=16)
+            if action not in {"start", "pause"}:
+                raise FormError("plan.schedule_invalid")
+            if action == "start":
+                account = db.get(ConnectedAccount, source.connected_account_id)
+                if (
+                    account is None
+                    or account.workspace_id != ctx.workspace.id
+                    or account.status != AccountStatus.ACTIVE
+                ):
+                    raise FormError("plan.drive_invalid")
+                source.enabled = True
+                kinds.enqueue_poll_source(db, source.id)
+            else:
+                source.enabled = False
+        log_activity(
+            db,
+            plan.workspace_id,
+            "info",
+            "plans",
+            f"Draft plan {plan.id}: saved {section}.",
+            actor=ctx.actor,
+            plan_id=plan.id,
+            profile_id=plan.profile_id,
+            section=section,
+        )
+        plan.revision += 1
+        db.commit()
+        flash(request, "success", "plan.saved")
+        return RedirectResponse(
+            f"/plans/{plan.id}" if section == "schedule" else f"/plans/{plan.id}/edit#{section}", 303
+        )
+    except (PlatformError, AccountUnavailable):
+        # Only credential refresh can have changed persistent state before Drive lookup fails.
+        # Keep rotated credentials rather than rolling them back to an invalid refresh token.
+        db.commit()
+        return _edit(
+            request,
+            db,
+            ctx,
+            get_plan(db, ctx, plan_id),
+            error=FormError("plan.drive_failed"),
+            submitted=dict(form),
+        )
+    except FormError as exc:
+        db.rollback()
+        submitted = dict(form)
+        if section == "targets":
+            submitted["targets"] = form.getlist("targets")
+        if section == "schedule":
+            submitted["weekdays"] = form.getlist("weekdays")
+            submitted["times"] = form.getlist("times")
+        return _edit(request, db, ctx, get_plan(db, ctx, plan_id), error=exc, submitted=submitted)
+
+
+@router.get("/plans/{plan_id}")
+def preview(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, page: str = "1") -> Response:
+    plan = get_plan(db, ctx, plan_id)
+    result = simulate(db, plan)
+    pager = Page(number=query_int(page, default=1), size=10, total=len(result["rows"]))
+    result["rows"] = result["rows"][pager.offset : pager.offset + pager.size]
+    rules = {
+        r.connected_account_id: r
+        for r in db.scalars(select(RotationRule).where(RotationRule.workspace_id == ctx.workspace.id))
+    }
+    warnings = [
+        a
+        for a in result["accounts"]
+        if a.status != AccountStatus.ACTIVE or a.id not in rules or rule_problems(rules[a.id])
+    ]
+    return render(
+        request,
+        "plans/preview.html",
+        {**_context(db, ctx, plan), "preview": result, "warnings": warnings, "pager": pager},
+    )

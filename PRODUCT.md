@@ -74,3 +74,21 @@ email addresses cannot be invited into a second workspace in this initial flow.
 Full member removal, workspace closure, commercial packaging, support commitments
 and trial volume remain open. The review should identify
 their impact without inventing pricing, customers or operating guarantees.
+
+## Person-led phase one (2026-10-15)
+
+The primary preparation flow is now People & plans: one person/brand, a separate library,
+one Drive folder, selected owned pages, local weekdays/times, and a 30-day draft preview.
+Customers connect through the application's OAuth clients; they do not create developer
+apps themselves. Google/Meta review and testing-mode limits still apply to customer access.
+
+Plans save intent only. They never create publishing jobs, and assigned pages/person media
+are excluded from the legacy publishing paths even if the server switch changes. Folder
+importing is explicitly started separately. Each person currently has one draft and one
+folder; page ownership stays attached when a page is removed from the draft. Imported video
+identity and duplicate detection are scoped to the person's library. Legacy unassigned
+content remains available as an explicitly labeled library.
+
+Phase one does not activate publishing, import the latest 30 videos from social platforms,
+add photos/stories, or provide automatic rotation. TikTok setup remains deferred. All
+acceptance tests for this phase use synthetic accounts and mock platform requests.

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-14T23:55:39.635371+00:00",
+  "generatedAt": "2026-10-15T14:31:50.572401+00:00",
   "title": "Design System: Repeater",
   "extensions": {
     "colorMeta": {
@@ -453,6 +453,11 @@
         "repeater/web/templates/access_password.html",
         "repeater/web/templates/access_forgot.html",
         "repeater/web/templates/access_issued.html"
+      ],
+      "planTemplates": [
+        "repeater/web/templates/plans/index.html",
+        "repeater/web/templates/plans/edit.html",
+        "repeater/web/templates/plans/preview.html"
       ]
     },
     "componentSizing": "Canonical component height values describe the observed minimum height; content can expand. Access cards cap inline size at 620px, embedded access forms at 580px, and explanatory copy at 72ch. Access-card block margins are 32px, reducing to 16px at 600px and below; row action forms fill the width at that breakpoint."
@@ -486,7 +491,7 @@
       "name": "Text field",
       "kind": "input",
       "refersTo": "input",
-      "description": "A visible label, generous hit height, and native input behavior.",
+      "description": "Visible labels and the shared field treatment for text, native search, and native date inputs.",
       "html": "<label class=\"ds-field\">Email<input type=\"email\" autocomplete=\"username\" placeholder=\"you@example.com\" dir=\"ltr\"></label>",
       "css": ".ds-field{display:flex;flex-direction:column;gap:7px;font-family:var(--font,Inter,\"IBM Plex Sans Arabic\",system-ui,sans-serif);font-size:14px;font-weight:500;line-height:1.65;color:var(--text,#0f172a)}.ds-field input{font-family:var(--font,Inter,\"IBM Plex Sans Arabic\",system-ui,sans-serif);font-size:14px;line-height:1.65;color:var(--text,#0f172a);background:var(--surface,#fff);border:1px solid var(--border-strong,#cbd3e1);border-radius:10px;padding:10px 12px;min-width:0;min-height:44px}.ds-field input::placeholder{color:var(--subtle,#607087);opacity:1}.ds-field input:focus-visible{outline:3px solid var(--primary,#2563eb);outline-offset:3px;}"
     },

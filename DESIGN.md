@@ -258,7 +258,9 @@ Compact actions use smaller type (12px) and padding (8px 12px), with a desktop m
 
 ### Inputs / Fields
 
-Text fields, selects, and textareas use the surface fill, stronger control edge, control corner, full available width, and a minimum height (44px). Labels remain visible above fields with a small gap (7px). Placeholders use quiet slate. Focus uses the shared outline. Textareas resize vertically; checkbox and radio controls retain their native behavior with the primary accent. File upload uses a dashed edge on a quiet surface.
+Text fields, native search and date fields, selects, and textareas use the surface fill, stronger control edge, control corner, full available width, and a minimum height (44px). Labels remain visible above fields with a small gap (7px). Placeholders use quiet slate. Focus uses the shared outline. Textareas resize vertically; checkbox and radio controls retain their native behavior with the primary accent. File upload uses a dashed edge on a quiet surface.
+
+Checkbox labels place the native control beside its text, including within stacked forms. Groups wrap as space narrows; longer option names wrap within the text area. Selectable list rows can reuse blue wash to reinforce the checked state while keeping the native checkbox visible.
 
 Validation messages use explanatory alert content. The current shared styles do not define a separate invalid-field border token; do not infer one from the error badge.
 

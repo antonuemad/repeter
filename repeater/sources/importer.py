@@ -439,6 +439,7 @@ def _create_videos(session: Session, source: Source, items: list[RemoteVideo]) -
             pg_insert(Video)
             .values(
                 workspace_id=source.workspace_id,
+                profile_id=source.profile_id,
                 source_id=source.id,
                 source_platform=platform,
                 source_account_id=account_id,
@@ -451,7 +452,12 @@ def _create_videos(session: Session, source: Source, items: list[RemoteVideo]) -
                 overrides={},
             )
             .on_conflict_do_nothing(
-                index_elements=["workspace_id", "source_platform", "external_id"],
+                index_elements=[
+                    "workspace_id",
+                    func.coalesce(Video.profile_id, 0),
+                    "source_platform",
+                    "external_id",
+                ],
                 index_where=Video.external_id.isnot(None),
             )
             .returning(Video.id)
@@ -817,6 +823,7 @@ def find_duplicate(
     committed (they are being encoded right now and will be the original)."""
     base = select(Video).where(
         Video.workspace_id == video.workspace_id,
+        Video.profile_id.is_not_distinct_from(video.profile_id),
         Video.id != video.id,
         Video.status.in_([VideoStatus.READY, VideoStatus.ARCHIVED, VideoStatus.PROCESSING]),
     )

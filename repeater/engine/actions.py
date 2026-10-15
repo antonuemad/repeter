@@ -117,6 +117,8 @@ def schedule_video_now(
     bypassing windows/caps but not platform validation. Enqueue publish_post."""
     if video.workspace_id != account.workspace_id:
         raise UserError("err.workspace_mismatch", "The video and the account belong to different workspaces.")
+    if video.profile_id is not None or account.profile_id is not None:
+        raise UserError("plan.draft_only", "Person plans are preview-only; publishing is unavailable.")
     platform = Platform(account.platform)
     if platform not in PUBLISH_PLATFORMS:
         raise UserError(

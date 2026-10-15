@@ -16,6 +16,8 @@ from fastapi import Request
 from starlette.responses import Response
 
 from repeater.config import get_settings
+from repeater.web.plan_i18n import AR as PLAN_AR
+from repeater.web.plan_i18n import EN as PLAN_EN
 
 SUPPORTED = ("ar", "en")
 DEFAULT = "ar"
@@ -1519,5 +1521,9 @@ AR["consent.changed"] = "إصدار النصوص تغيّر أو غير محدد
 
 EN["notify.operator_test"] = "Operator notification test succeeded"
 AR["notify.operator_test"] = "نجح اختبار إرسال التنبيهات للمشغّل"
+
+
+EN.update(PLAN_EN)
+AR.update(PLAN_AR)
 
 MESSAGES: dict[str, dict[str, str]] = {"en": EN, "ar": AR}

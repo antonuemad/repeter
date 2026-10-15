@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% macro revision() %}{{ m.csrf() }}<input type="hidden" name="revision" value="{{ plan.revision }}">{% endmacro %}
+{% block title %}{{ person.name }} · {{ t('plan.edit') }}{% endblock %}
+{% block content %}
+<!-- Operate / Magic Lap: one person, one library, explicit source and destinations.
+A saved draft is the truth. Preview is read-only and import is an independent action. -->
+<div class="page-heading"><div><h1 dir="auto">{{ person.name }}</h1><p>{{ t('plan.setup_help') }}</p></div><div class="actions"><a class="button" href="/plans/{{ plan.id }}">{{ t('plan.preview') }}</a><a href="/library?profile_id={{ person.id }}">{{ t('plan.library') }}</a></div></div>
+{{ m.form_error(error) }}
+<nav class="settings-tabs" aria-label="{{ t('plan.edit') }}"><a href="#connections">{{ t('plan.connections') }}</a><a href="#source">{{ t('plan.folder') }}</a><a href="#targets">{{ t('plan.targets') }}</a><a href="#schedule">{{ t('plan.schedule') }}</a></nav>
+<div class="plan-setup">
+<section class="card" id="connections"><h2>{{ t('plan.connections') }}</h2><p class="muted">{{ t('plan.connect_help') }}</p><div class="actions">
+{% for purpose, configured in connections %}
+{% set label = 'Facebook / Instagram' if purpose == 'meta' else platform_name(purpose) %}
+{% if configured %}<a class="button secondary" href="/connect/{{ purpose }}?return_to=/plans/{{ plan.id }}/edit">{{ label }}</a>{% else %}<span class="muted">{{ label }} · {{ t('plan.unavailable') }}</span>{% endif %}
+{% endfor %}</div></section>
+<section class="card" id="source"><h2>{{ t('plan.folder') }}</h2><p class="muted">{{ t('plan.folder_help') }}</p>
+<form method="post" action="/plans/{{ plan.id }}/source" class="stack">{{ revision() }}
+<label>{{ t('plan.drive') }}<select name="drive_id" required><option value="">{{ t('plan.pick_drive') }}</option>{% for a in drives %}<option value="{{ a.id }}"{% if (submitted.get('drive_id')|int == a.id) or (not submitted.get('drive_id') and source and source.connected_account_id == a.id) or folder_drive_id == a.id %} selected{% endif %}>{{ a.display_name }}</option>{% endfor %}</select></label>
+<button class="button secondary" type="submit" formaction="/plans/{{ plan.id }}/folders" formnovalidate>{{ t('plan.browse') }}</button>
+<label>{{ t('plan.folder_link') }}<input type="text" name="folder" dir="ltr" maxlength="1000" value="{{ submitted.get('folder', source.config.get('folder_id', '') if source else '') }}" required></label>
+<label>{{ t('plan.backfill') }}<input type="number" name="backfill" min="0" max="200" value="{{ submitted.get('backfill', source.config.get('backfill_count', 30) if source else 30) }}" required{% if source and source.last_polled_at %} readonly{% endif %}></label><p class="muted small">{{ t('plan.backfill_help') }} {{ t('plan.source_fixed') }}</p>
+<button class="button" type="submit">{{ t('plan.save_folder') }}</button></form>
+{% if source %}<p class="small"><strong dir="auto">{{ source.name }}</strong> · <span>{{ t('plan.import_on') if source.enabled else t('plan.import_off') }}</span></p>{% endif %}
+{% if folders is not none %}<div class="plan-folder-list"><ul class="plain">{% for f in folders %}<li><form method="post" action="/plans/{{ plan.id }}/source" class="plan-folder-row">{{ revision() }}<input type="hidden" name="drive_id" value="{{ folder_drive_id }}"><input type="hidden" name="folder" value="{{ f.id }}"><input type="hidden" name="backfill" value="{{ submitted.get('backfill', source.config.get('backfill_count', 30) if source else 30) }}"><span dir="auto">{{ f.name }}</span><button class="button small secondary" type="submit">{{ t('plan.choose_folder') }}</button></form></li>{% else %}<li>{{ t('plan.no_folders') }}</li>{% endfor %}</ul></div>{% if folder_page %}<form method="post" action="/plans/{{ plan.id }}/folders">{{ m.csrf() }}<input type="hidden" name="drive_id" value="{{ folder_drive_id }}"><input type="hidden" name="page_token" value="{{ folder_page }}"><button class="button secondary">{{ t('plan.next_folders') }}</button></form>{% endif %}{% endif %}
+</section>
+<section class="card" id="targets"><h2>{{ t('plan.targets') }}</h2><p class="muted">{{ t('plan.targets_help') }}</p><p>{{ t('plan.saved_pages', n=selected|length) }}</p>
+<form method="post" action="/plans/{{ plan.id }}/targets" class="stack" data-plan-targets>{{ revision() }}
+{% if accounts %}<label data-filter-control hidden>{{ t('plan.search') }}<input type="search" data-plan-filter autocomplete="off"></label>
+<div class="plan-target-list">{% for a in accounts %}<label class="plan-target" data-plan-account><input type="checkbox" name="targets" value="{{ a.id }}"{% if (a.id|string in submitted.get('targets', [])) or ('targets' not in submitted and a.id in selected) %} checked{% endif %}{% if a.status != 'active' %} disabled{% endif %}><span><bdi>{{ a.display_name or a.external_id }}</bdi><span class="small muted">{{ platform_name(a.platform) }} · {{ t('account_status.' ~ a.status) }}</span></span></label>{% endfor %}</div><p data-plan-no-matches hidden class="muted" role="status">{{ t('plan.no_matches') }}</p>{% else %}<p class="muted">{{ t('plan.no_accounts') }}</p>{% endif %}
+<button type="submit" class="button">{{ t('plan.save_targets') }}</button></form></section>
+<section class="card" id="schedule"><h2>{{ t('plan.schedule') }}</h2><p class="muted">{{ t('plan.schedule_help') }}</p>
+<form method="post" action="/plans/{{ plan.id }}/schedule" class="stack">{{ revision() }}<div class="grid-2"><label>{{ t('plan.start') }}<input type="date" name="start_date" required value="{{ submitted.get('start_date', plan.start_date.isoformat()) }}"></label><label>{{ t('plan.timezone') }}<select name="timezone" required>{% for z in zones %}<option value="{{ z }}"{% if z == submitted.get('timezone', plan.timezone) %} selected{% endif %}>{{ z }}</option>{% endfor %}</select></label></div>
+<fieldset><legend>{{ t('plan.days') }}</legend><div class="plan-days">{% for i in range(7) %}<label><input type="checkbox" name="weekdays" value="{{ i }}"{% if (i|string in submitted.get('weekdays', [])) or ('weekdays' not in submitted and i in plan.weekdays) %} checked{% endif %}>{{ t('plan.day_' ~ i) }}</label>{% endfor %}</div></fieldset>
+<fieldset><legend>{{ t('plan.times') }}</legend><div class="plan-times">{% set times = submitted.get('times', plan.times) %}{% for i in range(5) %}<label>{{ t('plan.time', n=i+1) }}<input type="time" name="times" value="{{ times[i] if i < times|length else '' }}"{% if i == 0 %} required{% endif %}></label>{% endfor %}</div></fieldset>
+<label>{{ t('plan.order') }}<select name="ordering">{% for value in ['oldest', 'newest'] %}<option value="{{ value }}"{% if value == submitted.get('ordering', plan.ordering) %} selected{% endif %}>{{ t('plan.' ~ value) }}</option>{% endfor %}</select></label><button type="submit" class="button">{{ t('plan.save_preview') }}</button></form></section>
+<section class="card" id="imports"><h2>{{ t('plan.imports') }}</h2><p class="muted">{{ t('plan.import_help') }}</p>{% if source %}<form method="post" action="/plans/{{ plan.id }}/imports">{{ revision() }}<button name="action" value="{{ 'pause' if source.enabled else 'start' }}" class="button secondary">{{ t('plan.import_pause') if source.enabled else t('plan.import_start') }}</button></form>{% if source.last_error %}<p role="status">{{ m.error_text(source.last_error, 300, source.last_error_info) }}</p>{% endif %}{% else %}<p><a href="#source">{{ t('plan.source_missing') }}</a></p>{% endif %}</section>
+<details class="card" id="person"><summary>{{ t('plan.person') }}</summary><form method="post" action="/plans/{{ plan.id }}/person" class="stack">{{ revision() }}<label>{{ t('plan.name') }}<input type="text" name="name" maxlength="200" required dir="auto" value="{{ person.name }}"></label><button class="button secondary">{{ t('plan.rename') }}</button></form></details>
+</div>
+{% endblock %}

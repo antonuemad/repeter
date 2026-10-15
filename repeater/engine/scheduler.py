@@ -266,6 +266,7 @@ def _active_rules(session: Session, workspace_id: int) -> list[tuple[RotationRul
             RotationRule.workspace_id == workspace_id,
             RotationRule.enabled.is_(True),
             ConnectedAccount.workspace_id == workspace_id,
+            ConnectedAccount.profile_id.is_(None),
             ConnectedAccount.status == AccountStatus.ACTIVE,
             ConnectedAccount.platform.in_(PUBLISH_PLATFORMS),
         )
@@ -284,6 +285,7 @@ def _load_context(session: Session, workspace: Workspace, now: datetime) -> _Con
             select(Video)
             .where(
                 Video.workspace_id == workspace.id,
+                Video.profile_id.is_(None),
                 Video.status == VideoStatus.READY,
                 Video.encoded_path.isnot(None),
             )

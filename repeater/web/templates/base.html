@@ -28,7 +28,7 @@
     <details class="sidebar-navigation" open data-navigation>
       <summary class="nav-toggle">{{ m.icon('menu') }}<span>{{ t('nav.label') }}</span></summary>
       <nav class="mainnav" aria-label="{{ t('nav.label') }}">
-        {% for key, href in [('overview', '/'), ('library', '/library'), ('schedule', '/schedule'), ('accounts', '/accounts'), ('sources', '/sources'), ('rules', '/rules'), ('activity', '/activity')] %}
+        {% for key, href in [('overview', '/'), ('plans', '/plans'), ('library', '/library'), ('schedule', '/schedule'), ('accounts', '/accounts'), ('sources', '/sources'), ('rules', '/rules'), ('activity', '/activity')] %}
         <a href="{{ href }}"{% if nav == key %} aria-current="page"{% endif %}>{{ m.icon(key, 18) }}<span>{{ t('nav.' ~ key) }}</span>{% if nav == key %}<span class="nav-dot" aria-hidden="true"></span>{% endif %}</a>
         {% endfor %}
         <a href="/settings/workspace" class="settings-link"{% if nav == 'settings' %} aria-current="page"{% endif %}>{{ m.icon('settings', 18) }}<span>{{ t('nav.settings') }}</span></a>

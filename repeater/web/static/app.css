@@ -101,7 +101,7 @@ label.check input { margin-block-start: 5px; flex-shrink: 0; }
 label.is-disabled { color: var(--muted); }
 fieldset { min-width: 0; border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin: 0; display: flex; flex-direction: column; gap: 12px; }
 legend { font-weight: 600; padding-inline: 6px; }
-input[type="text"], input[type="email"], input[type="password"], input[type="url"], input[type="number"], input[type="time"], select, textarea { color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 12px; width: 100%; min-width: 0; min-height: 44px; }
+input[type="text"], input[type="search"], input[type="date"], input[type="email"], input[type="password"], input[type="url"], input[type="number"], input[type="time"], select, textarea { color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 12px; width: 100%; min-width: 0; min-height: 44px; }
 input::placeholder, textarea::placeholder { color: var(--subtle); opacity: 1; }
 input[type="file"] { width: 100%; min-width: 0; padding: 16px; border: 1px dashed var(--border-strong); border-radius: 10px; background: var(--surface-alt); }
 input[type="file"]::file-selector-button { font: inherit; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); border-radius: 6px; padding: 8px 12px; margin-inline-end: 12px; cursor: pointer; }
@@ -379,3 +379,33 @@ th { font-size: 12px; background: var(--surface-alt); }
 .card h2 { overflow-wrap: anywhere; }
 .page-heading { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 20px; margin-block-end: 20px; }
 .page-heading p { max-inline-size: 72ch; }
+
+/* Person setup extends the Magic Lap workspace; status remains explicit text. */
+.plan-measure { max-inline-size: 75ch; }
+.plan-setup { max-inline-size: 960px; }
+.plan-setup section, .plan-setup details { scroll-margin-block-start: 88px; }
+.plan-people, .plan-calendar, .plan-slot-targets { list-style: none; padding: 0; margin: 0; }
+.plan-people > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 20px; padding-block: 20px; border-block-end: 1px solid var(--border); }
+.plan-people > li:last-child { border: 0; }
+.plan-people h2 { margin-block: 0 8px; }
+.plan-days, .plan-times { display: flex; flex-wrap: wrap; gap: 12px 20px; }
+.plan-days label { display: flex; flex-direction: row; align-items: center; gap: 8px; min-block-size: 44px; }
+.plan-times label { flex: 1 1 110px; }
+.plan-target-list, .plan-folder-list { max-block-size: 420px; overflow: auto; overscroll-behavior: contain; border-block: 1px solid var(--border); }
+.plan-target { display: flex; flex-direction: row; align-items: center; gap: 12px; padding: 12px 4px; min-block-size: 60px; border-block-end: 1px solid var(--border); cursor: pointer; }
+.plan-target:has(:checked) { background: var(--primary-bg); }
+.plan-target > span { min-inline-size: 0; overflow-wrap: anywhere; }
+.plan-target .small { display: block; }
+.plan-target[hidden] { display: none; }
+.plan-folder-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-block: 12px; }
+.plan-folder-row > span { overflow-wrap: anywhere; min-inline-size: 0; }
+.plan-calendar > li { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(0, 3fr); gap: 24px; padding: 20px; border-block-end: 1px solid var(--border); background: var(--surface); }
+.plan-slot-date { display: flex; flex-direction: column; gap: 4px; font-weight: 500; }
+.plan-slot-targets > li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; padding-block: 12px; border-block-end: 1px solid var(--border); overflow-wrap: anywhere; }
+.plan-slot-targets > li:last-child { border: 0; }
+@media (max-width: 699px) {
+  .plan-calendar > li { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 16px; }
+  .plan-folder-row { flex-wrap: wrap; }
+  .plan-target-list { max-block-size: 360px; }
+  .plan-people .actions { inline-size: 100%; }
+}

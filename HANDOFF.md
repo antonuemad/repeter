@@ -235,3 +235,28 @@ JSON-formatted IP fields, omits only empty/null fields, and still rejects untrus
 Three regressions exercise real CLI validation through the shell guard for IPv4, IPv6 and an
 untrusted subnet. Bootstrap resumed successfully after this compatibility fix. Keep future
 releases on `claude/saas-video-platform-plan-tfi4ar` unless the owner requests otherwise.
+
+### 2026-10-15 — Person-led draft planning, phase one
+
+- `/plans` is the primary preparation entry: create/rename a person, connect OAuth accounts
+  and return to their plan, browse/paste a Drive folder, select up to 100 destinations,
+  save local start date/weekdays/1–5 times, then inspect 30 days of read-only preview.
+- New migration `0003` adds creator profiles, one content plan per profile, tenant-checked
+  target associations, nullable ownership on accounts/sources/videos, and OAuth return paths.
+  Existing records remain unassigned. Identity/dedup indexes now isolate person libraries.
+  Do not modify 0001/0002. Downgrade refuses conflicting external IDs rather than losing data.
+- Saving/previewing never enqueues publication or import. Explicit start-import creates only
+  a source poll; pause stops future discovery (already queued file preparation can complete).
+  Folder/account identity is fixed after first polling. Source administration redirects to
+  the plan; legacy source mutation endpoints reject person-owned sources.
+- Legacy planner excludes person videos/accounts. Immediate publishing and worker upload/poll
+  paths also block them independently of the global switch. Keep production
+  `REPEATER_PUBLISHING_ENABLED=false`; no real post, private/unlisted test, or live import
+  was authorized for this phase's acceptance testing.
+- Preview does not recycle content: at most 1,000 ready videos in selected order, each once
+  per target, excluding previous/pending uses, origin account, overrides and format limits.
+  Empty slots are explicit. Nonexistent DST times are skipped and folds used once.
+  Platform settings/approvals remain separate launch gates; no execution of draft schedules.
+- Mock tests: `tests/test_content_plans.py`; migration roundtrip in `test_access_migration.py`.
+  Local macOS full-suite limitations include Bash 3.2/no flock and FFmpeg filter availability;
+  Linux GitHub CI and the shipped-image test job are authoritative for those checks.

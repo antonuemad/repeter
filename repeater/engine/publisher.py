@@ -306,6 +306,12 @@ def _publish_target(session: Session, post: ScheduledPost, now: datetime) -> _Ta
     video = session.get(Video, post.video_id)
     if video is None:
         return _cancel(session, post, Message("publish.video_gone", "The video no longer exists.", {}))
+    if video.profile_id is not None or account.profile_id is not None:
+        return _cancel(
+            session,
+            post,
+            Message("plan.draft_only", "Person plans are preview-only; publishing is unavailable.", {}),
+        )
     if video.status in (VideoStatus.IMPORTING, VideoStatus.PROCESSING):
         run_at = now + timedelta(seconds=WAIT_FOR_VIDEO_SECONDS)
         post.scheduled_at = run_at
@@ -671,6 +677,8 @@ def poll_post(session: Session, post_id: int, *, now: datetime | None = None) ->
             session, target, DISCONNECTED_WHILE_PUBLISHING, may_be_live=True, notify=False
         )
     target = _Target(post, video, account, rules.find_rule(session, account), Path())
+    if video.profile_id is not None or account.profile_id is not None:
+        return _wait_while_halted(session, target, now)
     if not get_settings().publishing_enabled or (
         target.platform in PUBLISH_ON_POLL and _publishing_halted(session, target)
     ):

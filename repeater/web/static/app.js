@@ -187,3 +187,20 @@
     setupTikTok();
   });
 })();
+
+// Optional page-name filtering. Native checkboxes remain usable without JavaScript.
+document.querySelectorAll('[data-plan-targets]').forEach((form) => {
+  const input = form.querySelector('[data-plan-filter]');
+  if (!input) return;
+  form.querySelector('[data-filter-control]').hidden = false;
+  const rows = [...form.querySelectorAll('[data-plan-account]')];
+  input.addEventListener('input', () => {
+    const term = input.value.trim().toLocaleLowerCase();
+    let visible = 0;
+    rows.forEach((row) => {
+      row.hidden = !row.textContent.toLocaleLowerCase().includes(term);
+      if (!row.hidden) visible += 1;
+    });
+    form.querySelector('[data-plan-no-matches]').hidden = visible !== 0;
+  });
+});

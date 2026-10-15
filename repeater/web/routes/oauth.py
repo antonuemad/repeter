@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import logging
+import re
 import secrets
 from datetime import timedelta
 
@@ -17,7 +18,7 @@ from repeater.accounts import upsert_connected_accounts
 from repeater.config import get_settings
 from repeater.engine import rules as engine_rules
 from repeater.jobs import kinds
-from repeater.models import ConnectedAccount, OAuthState, Platform, RotationRule
+from repeater.models import ConnectedAccount, ContentPlan, OAuthState, Platform, RotationRule
 from repeater.platforms import get_oauth_provider
 from repeater.platforms.base import ConnectedAccountData, PlatformError
 from repeater.timeutil import ensure_aware, utcnow
@@ -56,14 +57,15 @@ def _purge_expired_states(db: Session) -> None:
 
 
 @router.get("/connect/{purpose}")
-def connect(request: Request, db: DB, ctx: CurrentWorkspace, purpose: str) -> Response:
+def connect(request: Request, db: DB, ctx: CurrentWorkspace, purpose: str, return_to: str = "") -> Response:
+    return_path = _plan_return(db, ctx, return_to)
     provider_name = PURPOSE_PROVIDERS.get(purpose)
     if provider_name is None:
         raise HTTPException(status_code=404)
     settings = get_settings()
     if not settings.platform_configured(provider_name):
         flash(request, "error", "oauth.not_configured", platform=_purpose_label(purpose))
-        return RedirectResponse("/accounts", status_code=303)
+        return RedirectResponse(return_path or "/accounts", status_code=303)
     provider = get_oauth_provider(provider_name)
     verifier, challenge = pkce_pair() if provider.uses_pkce else (None, None)
     state = secrets.token_urlsafe(32)
@@ -77,7 +79,7 @@ def connect(request: Request, db: DB, ctx: CurrentWorkspace, purpose: str) -> Re
     except (PlatformError, ValueError) as exc:
         log.warning("cannot build %s authorize URL: %s", provider_name, type(exc).__name__)
         flash(request, "error", "oauth.start_failed", platform=_purpose_label(purpose))
-        return RedirectResponse("/accounts", status_code=303)
+        return RedirectResponse(return_path or "/accounts", status_code=303)
     _purge_expired_states(db)
     db.add(
         OAuthState(
@@ -87,6 +89,7 @@ def connect(request: Request, db: DB, ctx: CurrentWorkspace, purpose: str) -> Re
             provider=provider_name,
             purpose=purpose,
             code_verifier=verifier,
+            return_path=return_path,
         )
     )
     db.commit()
@@ -101,14 +104,15 @@ def callback(request: Request, db: DB, ctx: CurrentWorkspace, provider: str) -> 
         flash(request, "error", record)
         return RedirectResponse("/accounts", status_code=303)
     purpose = record.purpose
+    return_path = _plan_return(db, ctx, record.return_path or "")
     error = params.get("error")
     if error:
         _flash_provider_error(request, purpose, error, params.get("error_description"))
-        return RedirectResponse("/accounts", status_code=303)
+        return RedirectResponse(return_path or "/accounts", status_code=303)
     code = params.get("code")
     if not code:
         flash(request, "error", "oauth.no_code", platform=_purpose_label(purpose))
-        return RedirectResponse("/accounts", status_code=303)
+        return RedirectResponse(return_path or "/accounts", status_code=303)
     try:
         items = get_oauth_provider(provider).exchange_code(
             code=code,
@@ -125,12 +129,12 @@ def callback(request: Request, db: DB, ctx: CurrentWorkspace, provider: str) -> 
             flash(
                 request, "error", "oauth.exchange_failed", text=exc.message, platform=_purpose_label(purpose)
             )
-        return RedirectResponse("/accounts", status_code=303)
+        return RedirectResponse(return_path or "/accounts", status_code=303)
     except Exception as exc:  # noqa: BLE001 - never show internals; tokens are never in our messages
         log.error("OAuth exchange with %s failed: %s", provider, type(exc).__name__)
         flash(request, "error", "oauth.unexpected", platform=_purpose_label(purpose))
-        return RedirectResponse("/accounts", status_code=303)
-    return _save_accounts(request, db, ctx, items, purpose)
+        return RedirectResponse(return_path or "/accounts", status_code=303)
+    return _save_accounts(request, db, ctx, items, purpose, return_path=return_path)
 
 
 def _consume_state(db: Session, ctx: WorkspaceContext, provider: str, state: str | None) -> OAuthState | str:
@@ -161,7 +165,13 @@ def _flash_provider_error(request: Request, purpose: str, error: str, descriptio
 
 
 def _save_accounts(
-    request: Request, db: Session, ctx: WorkspaceContext, items: list[ConnectedAccountData], purpose: str
+    request: Request,
+    db: Session,
+    ctx: WorkspaceContext,
+    items: list[ConnectedAccountData],
+    purpose: str,
+    *,
+    return_path: str | None = None,
 ) -> Response:
     existing = {
         (p, e)
@@ -180,7 +190,8 @@ def _save_accounts(
         is_new = (account.platform, account.external_id) not in existing
         if rule is not None and _needs_setup(rule, is_new):
             needs_setup.append(account)
-    kinds.enqueue_plan_workspace(db, ctx.workspace.id)
+    if not return_path:
+        kinds.enqueue_plan_workspace(db, ctx.workspace.id)
     db.commit()
     names = ", ".join(a.display_name or a.external_id for a in accounts)
     flash(
@@ -191,6 +202,8 @@ def _save_accounts(
         names=names,
         platform=_purpose_label(purpose),
     )
+    if return_path:
+        return RedirectResponse(return_path, status_code=303)
     if not needs_setup:
         return RedirectResponse("/accounts", status_code=303)
     if purpose == "tiktok":
@@ -222,3 +235,14 @@ def _purpose_label(purpose: str) -> str:
         "gdrive": "Google Drive",
         "meta": "Facebook / Instagram",
     }.get(purpose, purpose)
+
+
+def _plan_return(db: Session, ctx: WorkspaceContext, value: str) -> str | None:
+    match = re.fullmatch(r"/plans/([1-9][0-9]{0,9})/edit", value)
+    if match and db.scalar(
+        select(ContentPlan.id).where(
+            ContentPlan.id == int(match[1]), ContentPlan.workspace_id == ctx.workspace.id
+        )
+    ):
+        return value
+    return None

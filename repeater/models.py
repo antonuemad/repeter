@@ -17,6 +17,7 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -216,6 +217,66 @@ class WorkspaceMember(Base):
     user: Mapped[User] = relationship(back_populates="memberships")
 
 
+class CreatorProfile(TimestampMixin, Base):
+    """One person or brand, with an isolated content library inside a workspace."""
+
+    __tablename__ = "creator_profiles"
+    __table_args__ = (UniqueConstraint("id", "workspace_id", name="uq_profile_workspace"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+
+
+class ContentPlan(TimestampMixin, Base):
+    """Saved planning intent only. Never consumed by the publishing worker."""
+
+    __tablename__ = "content_plans"
+    __table_args__ = (
+        UniqueConstraint("id", "workspace_id", name="uq_plan_workspace"),
+        UniqueConstraint("profile_id", name="uq_plan_profile"),
+        ForeignKeyConstraint(
+            ["profile_id", "workspace_id"],
+            ["creator_profiles.id", "creator_profiles.workspace_id"],
+            name="fk_plan_profile",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    profile_id: Mapped[int] = mapped_column(Integer)
+    source_id: Mapped[int | None] = mapped_column(ForeignKey("sources.id", ondelete="SET NULL"))
+    timezone: Mapped[str] = mapped_column(String(64))
+    start_date: Mapped[date] = mapped_column(Date)
+    weekdays: Mapped[list] = mapped_column(JSONB, default=lambda: list(range(7)))
+    times: Mapped[list] = mapped_column(JSONB, default=lambda: ["10:00"])
+    ordering: Mapped[str] = mapped_column(String(16), default="oldest")
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class PlanTarget(Base):
+    __tablename__ = "plan_targets"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["plan_id", "workspace_id"],
+            ["content_plans.id", "content_plans.workspace_id"],
+            name="fk_target_plan",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["account_id", "workspace_id"],
+            ["connected_accounts.id", "connected_accounts.workspace_id"],
+            name="fk_target_account",
+            ondelete="CASCADE",
+        ),
+    )
+
+    plan_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(Integer)
+
+
 class ConnectedAccount(TimestampMixin, Base):
     """An account on a platform authorized via OAuth (a TikTok creator, a YouTube channel,
     an Instagram professional account, a Facebook Page, or a Google Drive login)."""
@@ -223,10 +284,17 @@ class ConnectedAccount(TimestampMixin, Base):
     __tablename__ = "connected_accounts"
     __table_args__ = (
         UniqueConstraint("workspace_id", "platform", "external_id", name="uq_account_external"),
+        UniqueConstraint("id", "workspace_id", name="uq_account_workspace"),
+        ForeignKeyConstraint(
+            ["profile_id", "workspace_id"],
+            ["creator_profiles.id", "creator_profiles.workspace_id"],
+            name="fk_account_profile",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    profile_id: Mapped[int | None] = mapped_column(Integer, index=True)
     platform: Mapped[Platform] = mapped_column(_enum(Platform, "platform"))
     external_id: Mapped[str] = mapped_column(String(128))
     display_name: Mapped[str] = mapped_column(String(255), default="")
@@ -248,9 +316,17 @@ class Source(TimestampMixin, Base):
     """Where new videos come from."""
 
     __tablename__ = "sources"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["profile_id", "workspace_id"],
+            ["creator_profiles.id", "creator_profiles.workspace_id"],
+            name="fk_source_profile",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    profile_id: Mapped[int | None] = mapped_column(Integer, index=True)
     kind: Mapped[SourceKind] = mapped_column(_enum(SourceKind, "source_kind"))
     # Platform the videos originate from (tiktok/youtube/instagram/facebook/gdrive); None for manual.
     platform: Mapped[Platform | None] = mapped_column(_enum(Platform, "source_platform"))
@@ -276,9 +352,15 @@ class Source(TimestampMixin, Base):
 class Video(TimestampMixin, Base):
     __tablename__ = "videos"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["profile_id", "workspace_id"],
+            ["creator_profiles.id", "creator_profiles.workspace_id"],
+            name="fk_video_profile",
+        ),
         Index(
             "uq_video_source_external",
             "workspace_id",
+            text("COALESCE(profile_id, 0)"),
             "source_platform",
             "external_id",
             unique=True,
@@ -290,6 +372,7 @@ class Video(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"))
+    profile_id: Mapped[int | None] = mapped_column(Integer, index=True)
     source_id: Mapped[int | None] = mapped_column(ForeignKey("sources.id", ondelete="SET NULL"), index=True)
     source_platform: Mapped[Platform | None] = mapped_column(_enum(Platform, "video_source_platform"))
     # The account the video came from (so it is never re-posted to that same account).
@@ -473,6 +556,7 @@ class OAuthState(Base):
     provider: Mapped[str] = mapped_column(String(32))
     # Which platform the user clicked (e.g. "youtube" vs "gdrive" share the Google provider).
     purpose: Mapped[str] = mapped_column(String(32))
+    return_path: Mapped[str | None] = mapped_column(String(200))
     code_verifier: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

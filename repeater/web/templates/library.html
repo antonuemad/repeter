@@ -2,10 +2,11 @@
 {% import "macros.html" as m with context %}
 {% block title %}{{ t('nav.library') }}{% endblock %}
 {% block content %}
-<h1>{{ t('library.title') }}</h1>
+<h1>{{ profile.name if profile else t('library.title') }}</h1>
+<nav class="tabs" aria-label="{{ t('plan.person') }}"><a href="/library"{% if not profile %} aria-current="page"{% endif %}>{{ t('plan.unassigned') }}</a>{% for person in profiles %}<a href="/library?profile_id={{ person.id }}"{% if profile_id == person.id %} aria-current="page"{% endif %} dir="auto">{{ person.name }}</a>{% endfor %}<a href="/plans">{{ t('nav.plans') }}</a></nav>
 <p class="muted">{{ t('library.intro') }}</p>
 
-<details id="upload" class="card upload"{% if not videos or request.query_params.get('upload') == '1' %} open{% endif %}>
+{% if not profile %}<details id="upload" class="card upload"{% if not videos or request.query_params.get('upload') == '1' %} open{% endif %}>
   <summary><strong>{{ t('library.upload_title') }}</strong></summary>
   <p class="muted">{{ t('library.upload_help', max_mb=max_upload_mb) }}</p>
   <form method="post" action="/library/upload" enctype="multipart/form-data" class="stack" data-upload data-max-bytes="{{ max_upload_mb * 1024 * 1024 }}" data-too-large="{{ t('library.upload_too_large', max_mb=max_upload_mb) }}" data-uploading="{{ t('library.uploading') }}">
@@ -23,11 +24,11 @@
     <p class="muted small">{{ t('library.upload_watermark') }}</p>
     <button type="submit" class="button">{{ t('library.upload_submit') }}</button>
   </form>
-</details>
+</details>{% else %}<p><a href="/plans">{{ t('plan.imports') }}</a></p>{% endif %}
 
 <nav class="tabs" aria-label="{{ t('library.filter') }}">
   {% for f in status_filters %}
-  <a href="/library?status={{ f }}"{% if f == status_filter %} aria-current="page"{% endif %}>{{ t('library.filter_' ~ f) }}</a>
+  <a href="/library?status={{ f }}{{ "&profile_id=" ~ profile_id if profile_id else "" }}"{% if f == status_filter %} aria-current="page"{% endif %}>{{ t('library.filter_' ~ f) }}</a>
   {% endfor %}
 </nav>
 
@@ -66,7 +67,7 @@
         {% if v.status == 'ready' and accounts %}
         <form method="post" action="/library/{{ v.id }}/publish-now" class="inline publish-now" data-confirm="{{ t('library.publish_now_confirm') }}">
           {{ m.csrf() }}
-          <input type="hidden" name="next" value="/library?status={{ status_filter }}&page={{ pager.number }}">
+          <input type="hidden" name="next" value="/library?status={{ status_filter }}&page={{ pager.number }}{{ "&profile_id=" ~ profile_id if profile_id else "" }}">
           <label class="visually-hidden" for="acc-{{ v.id }}">{{ t('library.publish_to') }}</label>
           <select name="account_id" id="acc-{{ v.id }}" required>
             <option value="">{{ t('library.publish_to') }}</option>
@@ -79,12 +80,12 @@
         {% endif %}
         {% if v.status == 'archived' %}
         <form method="post" action="/library/{{ v.id }}/restore" class="inline">
-          {{ m.csrf() }}<input type="hidden" name="next" value="/library?status={{ status_filter }}&page={{ pager.number }}">
+          {{ m.csrf() }}<input type="hidden" name="next" value="/library?status={{ status_filter }}&page={{ pager.number }}{{ "&profile_id=" ~ profile_id if profile_id else "" }}">
           <button type="submit" class="button small secondary">{{ t('library.restore') }}</button>
         </form>
         {% elif v.status not in ['importing', 'duplicate'] %}
         <form method="post" action="/library/{{ v.id }}/archive" class="inline" data-confirm="{{ t('library.archive_confirm') }}">
-          {{ m.csrf() }}<input type="hidden" name="next" value="/library?status={{ status_filter }}&page={{ pager.number }}">
+          {{ m.csrf() }}<input type="hidden" name="next" value="/library?status={{ status_filter }}&page={{ pager.number }}{{ "&profile_id=" ~ profile_id if profile_id else "" }}">
           <button type="submit" class="button small secondary">{{ t('library.archive') }}</button>
         </form>
         {% endif %}
@@ -93,8 +94,8 @@
   </article>
   {% endfor %}
 </div>
-{{ m.pager(pager, '/library', {'status': status_filter}) }}
+{{ m.pager(pager, '/library', {'status': status_filter, 'profile_id': profile_id|string if profile_id else none}) }}
 {% else %}
-<section class="card"><div class="empty-state">{{ m.icon('library', 32) }}<h3>{{ t('library.empty_title') }}</h3><p>{{ t('library.empty_help') }}</p><a href="/sources">{{ t('nav.sources') }}</a></div></section>
+<section class="card"><div class="empty-state">{{ m.icon('library', 32) }}<h3>{{ t('library.empty_title') }}</h3><p>{{ t('library.empty_help') }}</p><a href="{{ '/plans' if profile else '/sources' }}">{{ t('nav.plans') if profile else t('nav.sources') }}</a></div></section>
 {% endif %}
 {% endblock %}

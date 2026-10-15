@@ -320,3 +320,43 @@ def _parse_time(value: Any) -> datetime | None:
 
 
 lister = DriveLister()
+
+
+def folder_details(account: AccountContext, folder_id: str) -> dict:
+    """Read folder metadata only; used by explicit folder selection, never downloads media."""
+    folder_id = parse_folder_id(folder_id)
+    with http.client(timeout=API_TIMEOUT) as c:
+        meta = _get_json(
+            c,
+            f"{API_BASE}/files/{quote(folder_id, safe='')}",
+            {"fields": FOLDER_FIELDS, "supportsAllDrives": "true"},
+            _auth(account),
+            "folder lookup",
+        )
+    if meta.get("mimeType") != FOLDER_MIME or meta.get("trashed"):
+        raise PermanentError("Select an available Google Drive folder.", code="notAFolder")
+    return {"id": folder_id, "name": str(meta.get("name") or folder_id)[:200]}
+
+
+def browse_folders(account: AccountContext, *, page_token: str = "") -> tuple[list[dict], str]:
+    """One bounded page of accessible folders, including shared Drives; caller controls pagination."""
+    params = {
+        "q": f"mimeType = '{FOLDER_MIME}' and trashed = false",
+        "pageSize": 100,
+        "fields": "nextPageToken,files(id,name)",
+        "orderBy": "name",
+        "supportsAllDrives": "true",
+        "includeItemsFromAllDrives": "true",
+    }
+    if page_token:
+        params["pageToken"] = page_token
+    with http.client(timeout=API_TIMEOUT) as c:
+        data = _get_json(c, f"{API_BASE}/files", params, _auth(account), "folder listing")
+    return (
+        [
+            {"id": str(f["id"]), "name": str(f.get("name") or f["id"])[:200]}
+            for f in (data.get("files") or [])[:100]
+            if isinstance(f, dict) and f.get("id")
+        ],
+        str(data.get("nextPageToken") or "")[:2000],
+    )

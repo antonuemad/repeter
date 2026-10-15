@@ -14,7 +14,15 @@ from starlette.datastructures import FormData
 
 from repeater.activity import log_activity
 from repeater.jobs import kinds
-from repeater.models import AccountStatus, ActivityLevel, ConnectedAccount, Platform, Source, SourceKind
+from repeater.models import (
+    AccountStatus,
+    ActivityLevel,
+    ConnectedAccount,
+    ContentPlan,
+    Platform,
+    Source,
+    SourceKind,
+)
 from repeater.platforms.base import PlatformError
 from repeater.sources.drive import parse_folder_id
 from repeater.timeutil import utcnow
@@ -74,7 +82,12 @@ def _accounts_for(db: Session, workspace_id: int, kind: SourceKind) -> list[Conn
 
 def _get_source(db: Session, ctx: WorkspaceContext, source_id: int) -> Source:
     source = db.get(Source, source_id)
-    if source is None or source.workspace_id != ctx.workspace.id or source.kind not in EDITABLE_KINDS:
+    if (
+        source is None
+        or source.workspace_id != ctx.workspace.id
+        or source.kind not in EDITABLE_KINDS
+        or source.profile_id is not None
+    ):
         raise HTTPException(status_code=404)
     return source
 
@@ -95,7 +108,18 @@ def sources_page(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
     return render(
         request,
         "sources.html",
-        {"nav": "sources", "sources": sources, "kinds": [k.value for k in EDITABLE_KINDS]},
+        {
+            "nav": "sources",
+            "sources": sources,
+            "kinds": [k.value for k in EDITABLE_KINDS],
+            "source_plans": dict(
+                db.execute(
+                    select(ContentPlan.source_id, ContentPlan.id).where(
+                        ContentPlan.workspace_id == ctx.workspace.id
+                    )
+                ).all()
+            ),
+        },
     )
 
 
@@ -115,6 +139,13 @@ def new_source(request: Request, db: DB, ctx: CurrentWorkspace, kind: str = "pla
 
 @router.get("/sources/{source_id}/edit")
 def edit_source(request: Request, db: DB, ctx: CurrentWorkspace, source_id: int) -> Response:
+    plan_id = db.scalar(
+        select(ContentPlan.id).where(
+            ContentPlan.source_id == source_id, ContentPlan.workspace_id == ctx.workspace.id
+        )
+    )
+    if plan_id:
+        return RedirectResponse(f"/plans/{plan_id}/edit#source", 303)
     return _form_page(request, db, ctx, _get_source(db, ctx, source_id), is_new=False)
 
 
