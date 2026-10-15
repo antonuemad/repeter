@@ -188,7 +188,7 @@ def folders(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, form:
 
 @router.post("/plans/{plan_id}/{section}")
 def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section: str, form: Form) -> Response:
-    if section not in {"person", "source", "targets", "schedule", "imports"}:
+    if section not in {"person", "source", "targets", "schedule", "rotation", "imports"}:
         raise HTTPException(404)
     plan = get_plan(db, ctx, plan_id, lock=True)
     try:
@@ -282,6 +282,15 @@ def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section:
                 raise FormError("plan.schedule_invalid")
             plan.timezone, plan.start_date = zone, start
             plan.weekdays, plan.times, plan.ordering = sorted({int(d) for d in days}), sorted(times), ordering
+        elif section == "rotation":
+            mode = form_str(form, "rotation_mode", max_len=16, required=True)
+            if mode not in {"once", "repeat"}:
+                raise FormError("plan.rotation_invalid")
+            try:
+                days = form_int(form, "repeat_after_days", minimum=1, maximum=365)
+            except FormError:
+                raise FormError("plan.rotation_invalid") from None
+            plan.rotation_mode, plan.repeat_after_days = mode, days
         elif section == "imports":
             source = _source(db, plan)
             if source is None:
@@ -316,7 +325,10 @@ def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section:
         db.commit()
         flash(request, "success", "plan.saved")
         return RedirectResponse(
-            f"/plans/{plan.id}" if section == "schedule" else f"/plans/{plan.id}/edit#{section}", 303
+            f"/plans/{plan.id}"
+            if section in {"schedule", "rotation"}
+            else f"/plans/{plan.id}/edit#{section}",
+            303,
         )
     except (PlatformError, AccountUnavailable):
         # Only credential refresh can have changed persistent state before Drive lookup fails.

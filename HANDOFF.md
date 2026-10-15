@@ -260,3 +260,30 @@ releases on `claude/saas-video-platform-plan-tfi4ar` unless the owner requests o
 - Mock tests: `tests/test_content_plans.py`; migration roundtrip in `test_access_migration.py`.
   Local macOS full-suite limitations include Bash 3.2/no flock and FFmpeg filter availability;
   Linux GitHub CI and the shipped-image test job are authoritative for those checks.
+
+### 2026-10-15 — Per-person rotation engine and preview, phase two
+
+- Migration `0004` adds `rotation_mode` (`once` or `repeat`) and `repeat_after_days`
+  (1–365; default 30) with DB constraints and defaults preserving existing plans. All
+  previously installed migrations remain immutable. Model/schema roundtrip is tested.
+- The separate rotation form saves atomically with CSRF, workspace authorization and
+  stale-revision protection; it does not reset folder, pages or schedule choices.
+- `content_plans.simulate` now uses one least-recently-used heap per selected active page.
+  Never-used videos precede reused ones; the saved library ordering resolves equal usage.
+  Cooldown uses elapsed UTC time, not local calendar-day subtraction; DST cannot shorten it.
+  Actual `published_at` (falling back to scheduled time for legacy records) takes precedence,
+  and the maximum actual timestamp wins regardless of a row's cycle number.
+- Pending, failed/retrying, needs-attention and possibly-live canceled/skipped rows block
+  their video/page pair. A known unsent cancellation does not consume content. All history
+  reads are workspace scoped, with person/account ownership and content eligibility retained.
+- The rolling 30-day preview is recalculated from current ready content/history, limited to
+  the first 1,000 ready videos in saved library order. It reports repeat counts, cooldown
+  gaps and the earliest next eligibility, distinguishing prior actual use from simulated use.
+  It is not a durable execution queue: refresh does not consume content; future rows assume
+  success of previous simulated rows. No background rotation job is created in this phase.
+- Both the global publishing lock and independent person-plan upload/poll/manual guards
+  stay in place. Do not enable publication or run live provider acceptance. TikTok remains
+  deferred. All new rotation tests use synthetic history and mocked HTTP.
+- Tests: `tests/test_plan_rotation.py`, expanded legacy safety tests in
+  `tests/test_content_plans.py`, and installed-0003 plan upgrade defaults in
+  `tests/test_access_migration.py`. 248 focused regression tests passed locally before finish review.

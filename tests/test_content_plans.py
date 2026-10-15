@@ -390,12 +390,14 @@ def test_import_inherits_profile_and_dedup_does_not_cross_people(web_owner, db):
     assert importer.find_duplicate(db, clone, 10, []).id == items[0].id
 
 
+@pytest.mark.parametrize("mode", ["once", "repeat"])
 def test_legacy_paths_cannot_publish_person_media_even_with_server_enabled(
-    web_owner, db, make_account, web_make_rule
+    web_owner, db, make_account, web_make_rule, mode
 ):
     from repeater.engine import actions, publisher, scheduler
 
     p = create_plan(web_owner, db)
+    p.rotation_mode = mode
     a = make_account(Platform.FACEBOOK)
     web_make_rule(a, enabled=True)
     assert save(web_owner, db, p, "targets", {"targets": [str(a.id)]}).status_code == 303
@@ -472,13 +474,15 @@ def test_preview_excludes_used_overridden_and_wrong_format_content(web_owner, db
     assert result["rows"][0].entries[0].video.id == valid.id
 
 
+@pytest.mark.parametrize("mode", ["once", "repeat"])
 def test_profile_poll_cannot_reach_provider_even_when_global_enabled(
-    web_owner, db, make_account, monkeypatch
+    web_owner, db, make_account, monkeypatch, mode
 ):
     from repeater.engine import publisher
     from repeater.models import PostStatus
 
     p = create_plan(web_owner, db)
+    p.rotation_mode = mode
     a = make_account(Platform.INSTAGRAM)
     assert save(web_owner, db, p, "targets", {"targets": [str(a.id)]}).status_code == 303
     v = video(db, p, "Never poll this")

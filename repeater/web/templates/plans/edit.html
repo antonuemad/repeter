@@ -7,7 +7,7 @@
 A saved draft is the truth. Preview is read-only and import is an independent action. -->
 <div class="page-heading"><div><h1 dir="auto">{{ person.name }}</h1><p>{{ t('plan.setup_help') }}</p></div><div class="actions"><a class="button" href="/plans/{{ plan.id }}">{{ t('plan.preview') }}</a><a href="/library?profile_id={{ person.id }}">{{ t('plan.library') }}</a></div></div>
 {{ m.form_error(error) }}
-<nav class="settings-tabs" aria-label="{{ t('plan.edit') }}"><a href="#connections">{{ t('plan.connections') }}</a><a href="#source">{{ t('plan.folder') }}</a><a href="#targets">{{ t('plan.targets') }}</a><a href="#schedule">{{ t('plan.schedule') }}</a></nav>
+<nav class="settings-tabs" aria-label="{{ t('plan.edit') }}"><a href="#connections">{{ t('plan.connections') }}</a><a href="#source">{{ t('plan.folder') }}</a><a href="#targets">{{ t('plan.targets') }}</a><a href="#schedule">{{ t('plan.schedule') }}</a><a href="#rotation">{{ t('plan.rotation') }}</a></nav>
 <div class="plan-setup">
 <section class="card" id="connections"><h2>{{ t('plan.connections') }}</h2><p class="muted">{{ t('plan.connect_help') }}</p><div class="actions">
 {% for purpose, configured in connections %}
@@ -34,6 +34,12 @@ A saved draft is the truth. Preview is read-only and import is an independent ac
 <fieldset><legend>{{ t('plan.days') }}</legend><div class="plan-days">{% for i in range(7) %}<label><input type="checkbox" name="weekdays" value="{{ i }}"{% if (i|string in submitted.get('weekdays', [])) or ('weekdays' not in submitted and i in plan.weekdays) %} checked{% endif %}>{{ t('plan.day_' ~ i) }}</label>{% endfor %}</div></fieldset>
 <fieldset><legend>{{ t('plan.times') }}</legend><div class="plan-times">{% set times = submitted.get('times', plan.times) %}{% for i in range(5) %}<label>{{ t('plan.time', n=i+1) }}<input type="time" name="times" value="{{ times[i] if i < times|length else '' }}"{% if i == 0 %} required{% endif %}></label>{% endfor %}</div></fieldset>
 <label>{{ t('plan.order') }}<select name="ordering">{% for value in ['oldest', 'newest'] %}<option value="{{ value }}"{% if value == submitted.get('ordering', plan.ordering) %} selected{% endif %}>{{ t('plan.' ~ value) }}</option>{% endfor %}</select></label><button type="submit" class="button">{{ t('plan.save_preview') }}</button></form></section>
+<section class="card" id="rotation"><h2>{{ t('plan.rotation') }}</h2><p class="muted plan-measure">{{ t('plan.rotation_help') }}</p>
+<form method="post" action="/plans/{{ plan.id }}/rotation" class="stack">{{ revision() }}
+<label>{{ t('plan.rotation_mode') }}<select name="rotation_mode" required>{% for mode in ['once', 'repeat'] %}<option value="{{ mode }}"{% if mode == submitted.get('rotation_mode', plan.rotation_mode) %} selected{% endif %}>{{ t('plan.mode_' ~ mode) }}</option>{% endfor %}</select></label>
+<label>{{ t('plan.repeat_days') }}<input type="number" name="repeat_after_days" min="1" max="365" required aria-describedby="repeat-help" value="{{ submitted.get('repeat_after_days', plan.repeat_after_days) }}"></label>
+<p class="muted small plan-measure" id="repeat-help">{{ t('plan.repeat_help') }}</p><p class="plan-measure">{{ t('plan.rotation_safe') }}</p>
+<button type="submit" class="button">{{ t('plan.save_preview') }}</button></form></section>
 <section class="card" id="imports"><h2>{{ t('plan.imports') }}</h2><p class="muted">{{ t('plan.import_help') }}</p>{% if source %}<form method="post" action="/plans/{{ plan.id }}/imports">{{ revision() }}<button name="action" value="{{ 'pause' if source.enabled else 'start' }}" class="button secondary">{{ t('plan.import_pause') if source.enabled else t('plan.import_start') }}</button></form>{% if source.last_error %}<p role="status">{{ m.error_text(source.last_error, 300, source.last_error_info) }}</p>{% endif %}{% else %}<p><a href="#source">{{ t('plan.source_missing') }}</a></p>{% endif %}</section>
 <details class="card" id="person"><summary>{{ t('plan.person') }}</summary><form method="post" action="/plans/{{ plan.id }}/person" class="stack">{{ revision() }}<label>{{ t('plan.name') }}<input type="text" name="name" maxlength="200" required dir="auto" value="{{ person.name }}"></label><button class="button secondary">{{ t('plan.rename') }}</button></form></details>
 </div>

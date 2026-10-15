@@ -1,16 +1,24 @@
-"""Read-only draft simulation. No queue, provider or publication calls belong here."""
+"""Deterministic per-person rotation, simulated without queue or provider calls.
+
+Each page has its own least-recently-used queue. Unused videos come first, then the
+oldest actual/simulated use. A repeat needs a full N * 24 hours since that use. Draft
+choices never become publication history; reopening a preview cannot consume content.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
+from heapq import heappop, heappush
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from repeater.engine.publisher import reached_platform
 from repeater.engine.scheduler import limits_problem
 from repeater.models import (
+    ACTIVE_POST_STATUSES,
     AccountStatus,
     ConnectedAccount,
     ContentPlan,
@@ -27,6 +35,14 @@ from repeater.timeutil import ensure_aware, utcnow
 class PreviewEntry:
     account: ConnectedAccount
     video: Video | None
+    previous_at: datetime | None = None
+    previous_is_preview: bool = False
+    reason: str | None = None
+    available_at: datetime | None = None
+
+    @property
+    def repeated(self) -> bool:
+        return self.previous_at is not None
 
 
 @dataclass(frozen=True)
@@ -77,6 +93,47 @@ def slots(plan: ContentPlan, *, now: datetime) -> list[datetime]:
     return result
 
 
+def _history(db, plan, accounts, videos):
+    """Confirmed publication timestamps and unsafe pairs, in one tenant-scoped read.
+
+    Pending/retrying/uncertain work cannot be treated as a successful old publication
+    or silently recycled. In particular canceling a possibly-live upload is not a reset.
+    """
+    latest: dict[tuple[int, int], datetime] = {}
+    blocked: set[tuple[int, int]] = set()
+    if not accounts or not videos:
+        return latest, blocked
+    rows = db.execute(
+        select(
+            ScheduledPost.video_id,
+            ScheduledPost.connected_account_id,
+            ScheduledPost.status,
+            ScheduledPost.scheduled_at,
+            ScheduledPost.published_at,
+            ScheduledPost.platform_post_id,
+            ScheduledPost.publish_state,
+        ).where(
+            ScheduledPost.workspace_id == plan.workspace_id,
+            ScheduledPost.connected_account_id.in_([a.id for a in accounts]),
+            ScheduledPost.video_id.in_([v.id for v in videos]),
+        )
+    )
+    for row in rows:
+        pair = (row.video_id, row.connected_account_id)
+        if row.status == PostStatus.PUBLISHED:
+            at = ensure_aware(row.published_at or row.scheduled_at)
+            latest[pair] = max(at, latest.get(pair, at))
+        elif (
+            row.status in ACTIVE_POST_STATUSES
+            or row.status == PostStatus.NEEDS_ATTENTION
+            or reached_platform(
+                row.platform_post_id, row.publish_state if isinstance(row.publish_state, dict) else {}
+            )
+        ):
+            blocked.add(pair)
+    return latest, blocked
+
+
 def simulate(db: Session, plan: ContentPlan, *, now: datetime | None = None) -> dict:
     now = ensure_aware(now or utcnow())
     accounts = targets(db, plan)
@@ -98,49 +155,65 @@ def simulate(db: Session, plan: ContentPlan, *, now: datetime | None = None) -> 
     )
     truncated = len(videos) > 1000
     videos = videos[:1000]
-    used = set(
-        db.execute(
-            select(ScheduledPost.video_id, ScheduledPost.connected_account_id).where(
-                ScheduledPost.workspace_id == plan.workspace_id,
-                ScheduledPost.connected_account_id.in_([a.id for a in accounts]),
-                ScheduledPost.video_id.in_([v.id for v in videos]),
-                ScheduledPost.status.in_(
-                    [
-                        PostStatus.PUBLISHED,
-                        PostStatus.SCHEDULED,
-                        PostStatus.UPLOADING,
-                        PostStatus.PROCESSING,
-                        PostStatus.FAILED,
-                    ]
-                ),
-            )
-        ).all()
-    )
-    queues: dict[int, list[Video]] = {}
+    latest, blocked = _history(db, plan, accounts, videos)
+    repeating = plan.rotation_mode == "repeat"
+    cooldown = timedelta(days=plan.repeat_after_days)
+    queues: dict[int, list] = {}
+    empty_reasons: dict[int, str] = {}
     excluded = 0
+    blocked_count = 0
     for account in accounts:
         choices = []
+        blocked_here = 0
         if account.status == AccountStatus.ACTIVE and account.profile_id == plan.profile_id:
-            for video in videos:
+            for rank, video in enumerate(videos):
+                pair = (video.id, account.id)
+                last = latest.get(pair)
                 if (
-                    (video.id, account.id) in used
-                    or video.source_account_id == account.id
+                    video.source_account_id == account.id
                     or account.platform.value in (video.overrides or {}).get("exclude_platforms", [])
                     or limits_problem(video, account.platform)
                 ):
                     excluded += 1
                     continue
-                choices.append(video)
+                if pair in blocked:
+                    blocked_here += 1
+                    excluded += 1
+                    continue
+                if last is not None and not repeating:
+                    excluded += 1
+                    continue
+                # Rank breaks ties using the saved library order; unused always wins.
+                heappush(choices, (last.timestamp() if last else float("-inf"), rank, video, last, False))
+            empty_reasons[account.id] = (
+                "pending" if blocked_here else "exhausted" if choices else "no_eligible"
+            )
+        else:
+            empty_reasons[account.id] = "account_unavailable"
+        blocked_count += blocked_here
         queues[account.id] = choices
     rows = []
     filled = 0
-    for index, at in enumerate(slots(plan, now=now)):
+    repeated = 0
+    waiting = 0
+    for at in slots(plan, now=now):
         entries = []
         for account in accounts:
             queue = queues[account.id]
-            video = queue[index] if index < len(queue) else None
-            filled += int(video is not None)
-            entries.append(PreviewEntry(account, video))
+            if not queue:
+                entries.append(PreviewEntry(account, None, reason=empty_reasons[account.id]))
+                continue
+            _, rank, video, last, simulated = queue[0]
+            if last is not None and at < last + cooldown:
+                waiting += 1
+                entries.append(PreviewEntry(account, None, reason="cooldown", available_at=last + cooldown))
+                continue
+            heappop(queue)
+            filled += 1
+            repeated += int(last is not None)
+            entries.append(PreviewEntry(account, video, previous_at=last, previous_is_preview=simulated))
+            if repeating:
+                heappush(queue, (at.timestamp(), rank, video, at, True))
         rows.append(PreviewSlot(at, entries))
     return {
         "rows": rows,
@@ -149,5 +222,8 @@ def simulate(db: Session, plan: ContentPlan, *, now: datetime | None = None) -> 
         "filled": filled,
         "empty": len(rows) * len(accounts) - filled,
         "excluded": excluded,
+        "blocked": blocked_count,
+        "repeated": repeated,
+        "waiting": waiting,
         "truncated": truncated,
     }

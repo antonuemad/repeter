@@ -5,7 +5,7 @@
 <div class="page-heading"><div><h1>{{ t('nav.plans') }}</h1><p>{{ t('plan.intro') }}</p></div><a class="button" href="#new">{{ t('plan.new') }}</a></div>
 <p class="muted plan-measure">{{ t('plan.scope') }}</p>
 {% if people %}<section class="card"><ul class="plan-people">
-{% for person, plan in people %}<li><div><h2 dir="auto">{{ person.name }}</h2><span class="badge">{{ t('plan.draft') }}</span></div><div class="actions"><a class="button" href="/plans/{{ plan.id }}/edit">{{ t('plan.edit') }}</a><a href="/plans/{{ plan.id }}">{{ t('plan.preview') }}</a><a href="/library?profile_id={{ person.id }}">{{ t('plan.library') }}</a></div></li>{% endfor %}
+{% for person, plan in people %}<li><div><h2 dir="auto">{{ person.name }}</h2><span class="badge">{{ t('plan.draft') }}</span> <span class="small muted">{{ t('plan.mode_' ~ plan.rotation_mode) }}</span></div><div class="actions"><a class="button" href="/plans/{{ plan.id }}/edit">{{ t('plan.edit') }}</a><a href="/plans/{{ plan.id }}">{{ t('plan.preview') }}</a><a href="/library?profile_id={{ person.id }}">{{ t('plan.library') }}</a></div></li>{% endfor %}
 </ul></section>{% endif %}
 <section class="card plan-measure" id="new"><h2>{{ t('plan.new') }}</h2><form method="post" action="/plans" class="stack">{{ m.csrf() }}<label>{{ t('plan.name') }}<input type="text" name="name" maxlength="200" required dir="auto" autocomplete="off"></label><button class="button" type="submit">{{ t('plan.create') }}</button></form></section>
 {% endblock %}

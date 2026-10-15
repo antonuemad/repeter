@@ -403,6 +403,7 @@ th { font-size: 12px; background: var(--surface-alt); }
 .plan-slot-date { display: flex; flex-direction: column; gap: 4px; font-weight: 500; }
 .plan-slot-targets > li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; padding-block: 12px; border-block-end: 1px solid var(--border); overflow-wrap: anywhere; }
 .plan-slot-targets > li:last-child { border: 0; }
+.plan-entry-content { display: flex; flex-direction: column; gap: 4px; max-inline-size: 65ch; }
 @media (max-width: 699px) {
   .plan-calendar > li { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 16px; }
   .plan-folder-row { flex-wrap: wrap; }

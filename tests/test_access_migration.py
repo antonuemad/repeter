@@ -40,8 +40,21 @@ def test_access_migration_roundtrip_preserves_existing_accounts():
                 text("INSERT INTO workspace_members (workspace_id,user_id,role) VALUES (1,1,'owner')")
             )
         for _ in range(2):
+            command.upgrade(cfg, "0003")
+            with engine.begin() as conn:
+                conn.execute(
+                    text("INSERT INTO creator_profiles (id,workspace_id,name) VALUES (1,1,'Existing person')")
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO content_plans (id,workspace_id,profile_id,timezone,start_date,weekdays,times,ordering,revision) VALUES (1,1,1,'UTC','2027-01-01','[0,1,2,3,4,5,6]','[\"10:00\"]','oldest',3)"
+                    )
+                )
             command.upgrade(cfg, "head")
             with engine.connect() as conn:
+                assert conn.execute(
+                    text("SELECT rotation_mode,repeat_after_days,revision FROM content_plans WHERE id=1")
+                ).one() == ("once", 30, 3)
                 assert conn.execute(
                     text("SELECT password_hash,is_platform_admin FROM users WHERE id=1")
                 ).one() == ("unchanged-hash", False)

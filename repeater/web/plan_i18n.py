@@ -20,8 +20,8 @@ COPY = {
         "خطط الأشخاص للمعاينة فقط؛ النشر غير متاح.",
     ),
     "plan.scope": (
-        "This phase supports video files from Drive. Photos, stories, archive imports and automatic rotation come later.",
-        "المرحلة دي لفيديوهات Drive. الصور والستوريز واستيراد أرشيف المنصات والروتيشن التلقائي في مراحل لاحقة.",
+        "Plan automatic rotation from each person’s Drive video library. Photos, stories and social-platform archive imports come later. Publishing stays locked during testing.",
+        "خطّط للروتيشن التلقائي من مكتبة فيديوهات Drive لكل شخص. الصور والستوريز واستيراد أرشيف المنصات في مراحل لاحقة. النشر مقفول أثناء الاختبار.",
     ),
     "plan.setup_help": (
         "Save each step before moving on. Connecting an account returns you here; it does not publish or import anything.",
@@ -72,8 +72,8 @@ COPY = {
     "plan.save_targets": ("Save selected pages", "حفظ الصفحات المختارة"),
     "plan.schedule": ("Set the publishing schedule", "تحديد جدول النشر"),
     "plan.schedule_help": (
-        "One video per selected time, for each page. The preview uses each available video once per page; it never repeats an empty library.",
-        "فيديو واحد في كل موعد لكل صفحة. المعاينة بتستخدم كل فيديو متاح مرة واحدة لكل صفحة؛ المواعيد اللي مفيش محتوى ليها بتفضل فاضية.",
+        "One video per selected time, for each page. Rotation settings decide when a video can return; a slot stays empty if no video is eligible.",
+        "فيديو واحد في كل موعد لكل صفحة. إعدادات الروتيشن بتحدد إمتى الفيديو ممكن يرجع؛ الموعد بيفضل فاضي لو مفيش فيديو مناسب.",
     ),
     "plan.timezone": ("Time zone", "المنطقة الزمنية"),
     "plan.start": ("Start date", "تاريخ البداية"),
@@ -84,6 +84,55 @@ COPY = {
     "plan.oldest": ("Oldest first", "الأقدم أولًا"),
     "plan.newest": ("Newest first", "الأحدث أولًا"),
     "plan.save_preview": ("Save & preview schedule", "حفظ ومعاينة الجدول"),
+    "plan.rotation": ("Automatic rotation", "الروتيشن التلقائي"),
+    "plan.rotation_mode": ("How to use the library", "طريقة استخدام المكتبة"),
+    "plan.mode_once": ("Once per page", "مرة واحدة لكل صفحة"),
+    "plan.mode_repeat": ("Keep rotating the library", "تدوير المكتبة باستمرار"),
+    "plan.rotation_help": (
+        "Choose unused videos first, then the least recently used on each page. Library order breaks ties. The plan automatically includes newly ready videos whenever you preview it.",
+        "الأولوية للفيديوهات اللي ما اتستخدمتش على الصفحة، وبعدها الأقدم استخدامًا عليها. ترتيب المكتبة بيفصل بين المتساويين. أي فيديو جديد جاهز بيدخل في الحساب تلقائيًا عند المعاينة.",
+    ),
+    "plan.repeat_days": (
+        "Minimum days before repeating on the same page",
+        "أقل عدد أيام قبل إعادة نفس الفيديو على نفس الصفحة",
+    ),
+    "plan.repeat_help": (
+        "1–365 days; each day means 24 full hours. Applies when rotation is selected, separately for each page. A small library leaves gaps rather than shortening this wait.",
+        "من يوم لـ٣٦٥ يوم؛ اليوم يعني ٢٤ ساعة كاملة. يُطبّق عند اختيار التدوير، بشكل مستقل لكل صفحة. لو المكتبة صغيرة، بنسيب مواعيد فاضية بدل تقصير الفاصل.",
+    ),
+    "plan.rotation_safe": (
+        "Saving calculates a draft only. It does not start publishing, import files or consume videos from the library.",
+        "الحفظ بيحسب مسودة فقط. ما بيشغّلش النشر، وما بيستوردش ملفات، وما بيسجّلش الفيديوهات كمحتوى مستخدم.",
+    ),
+    "plan.rotation_invalid": (
+        "Choose once per page or automatic rotation, and a repeat interval from 1 to 365 days.",
+        "اختار مرة واحدة لكل صفحة أو تدوير المكتبة، وفاصل إعادة من يوم لـ٣٦٥ يوم.",
+    ),
+    "plan.rotation_summary": ("Repeat interval: {days} days per page", "فاصل الإعادة: {days} يوم لكل صفحة"),
+    "plan.rotation_counts": (
+        "{repeated} repeated page slots · {waiting} slots waiting for the repeat interval",
+        "{repeated} موعد صفحة لإعادة محتوى · {waiting} موعد في انتظار انتهاء الفاصل",
+    ),
+    "plan.first_use": ("First use in this page’s recorded history", "أول استخدام في سجل الصفحة المتاح"),
+    "plan.repeat_use": ("Repeat", "إعادة محتوى"),
+    "plan.previous_preview": ("Previous planned use: {at}", "الاستخدام السابق في المعاينة: {at}"),
+    "plan.previous_actual": ("Last recorded publication: {at}", "آخر نشر مسجّل: {at}"),
+    "plan.reason_cooldown": ("Waiting for the repeat interval", "في انتظار انتهاء فاصل الإعادة"),
+    "plan.eligible_after": ("Eligible again from {at}", "متاح للإعادة بدايةً من {at}"),
+    "plan.reason_exhausted": ("All eligible videos used once", "كل الفيديوهات المناسبة اتستخدمت مرة"),
+    "plan.reason_no_eligible": ("No eligible video in this library", "مفيش فيديو مناسب في المكتبة"),
+    "plan.reason_pending": (
+        "Remaining videos have pending or unresolved publications",
+        "الفيديوهات المتبقية عليها نشر معلّق أو نتيجة غير محسومة",
+    ),
+    "plan.reason_account_unavailable": (
+        "Reconnect or check this page’s ownership",
+        "أعد ربط الصفحة أو راجع تخصيصها للشخص",
+    ),
+    "plan.pending_uses": (
+        "{n} video/page pairs are held until pending or uncertain publications are resolved. Rotation never bypasses them.",
+        "تم تعليق {n} حالة فيديو/صفحة لحين حسم النشر المعلّق أو غير المؤكد. الروتيشن ما بيتخطّاش الحالات دي.",
+    ),
     "plan.imports": ("Bring videos into their library", "إضافة الفيديوهات لمكتبته"),
     "plan.import_help": (
         "Importing downloads and prepares videos only. Start it separately when you are ready. The publishing lock stays on.",
@@ -135,8 +184,8 @@ COPY = {
         "اختار تاريخ بداية من النهارده وحتى سنة قادمة.",
     ),
     "plan.preview_help": (
-        "A simulation of saved choices, not a live publishing queue. No posts or jobs are created. Platform approval and publishing settings are still required before a future launch.",
-        "محاكاة للاختيارات المحفوظة، وليست قائمة نشر فعلية. لا تنشئ منشورات أو مهام. إطلاق النشر لاحقًا ما زال محتاج موافقات المنصات وإعداداتها.",
+        "A fresh simulation from the current library and recorded publication history. Later slots assume earlier draft slots succeed. Viewing it never records a use or creates publishing jobs. Platform approvals and publishing settings are still required before launch.",
+        "محاكاة جديدة من المكتبة الحالية وسجل النشر المتاح. المواعيد اللاحقة بتفترض نجاح المواعيد السابقة في المسودة. فتحها ما بيسجّلش استخدامًا وما بينشئش مهام نشر. الإطلاق ما زال محتاج موافقات المنصات وإعداداتها.",
     ),
     "plan.coverage": (
         "{ready} ready videos · {filled} filled page slots · {empty} empty page slots",

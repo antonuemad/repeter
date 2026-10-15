@@ -92,3 +92,21 @@ content remains available as an explicitly labeled library.
 Phase one does not activate publishing, import the latest 30 videos from social platforms,
 add photos/stories, or provide automatic rotation. TikTok setup remains deferred. All
 acceptance tests for this phase use synthetic accounts and mock platform requests.
+
+## Person-led phase two (2026-10-15)
+
+Saved plans can now rotate their own ready video library in the 30-day draft preview.
+Each page has an independent least-recently-used sequence: unseen videos first, then the
+oldest recorded or simulated use; library order breaks ties. A repeat waits 1–365 elapsed
+24-hour days (default 30). Existing plans retain once-per-page behavior until changed.
+Newly ready content is included when the preview is recalculated. Insufficient content
+leaves explicit gaps with the earliest eligible time; it never shortens the repeat interval.
+
+Confirmed publication history establishes the last actual use. Pending, retrying and
+unresolved/possibly-live publications block that video/page pair until resolved. Preview
+rows label first use, repetition, and whether a previous use is actual history or an earlier
+simulated slot. Later simulated slots assume earlier draft slots succeed. Opening a preview
+does not consume content, record a publication, run a background scheduler or contact a
+provider. Saving rotation settings never starts imports or publishing; both the global lock
+and independent person-plan publishing guards remain in place. Live execution is still a
+separate launch gate, as explicitly required during the customer test period.

@@ -12,6 +12,7 @@ from datetime import date, datetime, time
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Enum,
@@ -235,6 +236,8 @@ class ContentPlan(TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("id", "workspace_id", name="uq_plan_workspace"),
         UniqueConstraint("profile_id", name="uq_plan_profile"),
+        CheckConstraint("rotation_mode IN ('once', 'repeat')", name="ck_plan_rotation_mode"),
+        CheckConstraint("repeat_after_days BETWEEN 1 AND 365", name="ck_plan_repeat_days"),
         ForeignKeyConstraint(
             ["profile_id", "workspace_id"],
             ["creator_profiles.id", "creator_profiles.workspace_id"],
@@ -252,6 +255,8 @@ class ContentPlan(TimestampMixin, Base):
     weekdays: Mapped[list] = mapped_column(JSONB, default=lambda: list(range(7)))
     times: Mapped[list] = mapped_column(JSONB, default=lambda: ["10:00"])
     ordering: Mapped[str] = mapped_column(String(16), default="oldest")
+    rotation_mode: Mapped[str] = mapped_column(String(16), default="once", server_default="once")
+    repeat_after_days: Mapped[int] = mapped_column(Integer, default=30, server_default="30")
     revision: Mapped[int] = mapped_column(Integer, default=1)
 
 
