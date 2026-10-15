@@ -249,7 +249,8 @@ prune_keep() {
 # True when the remote path holds at least one file (any depth).
 remote_has_files() {
     local first
-    first="$(rclone lsf "$1" --files-only -R "${RCLONE_TIMEOUTS[@]}" 2>/dev/null | head -n 1 || true)"
+    first="$(rclone lsf "$1" --files-only -R "${RCLONE_TIMEOUTS[@]}" 2>/dev/null)" ||
+        die "the off-site media inventory could not be verified; not syncing"
     [[ -n "$first" ]]
 }
 
@@ -289,6 +290,7 @@ offsite_media() {
     [[ -d "$media_dir" ]] || die "the media directory $media_dir does not exist; media not copied off-site"
     max_delete="$(env_days RCLONE_MAX_DELETE 500)"
     trash_days="$(env_days RCLONE_TRASH_DAYS 7)"
+    rclone mkdir "$remote/media" "${RCLONE_TIMEOUTS[@]}" || die "the off-site media directory is not accessible"
     if [[ -z "$(find "$media_dir" -type f ! -path "$media_dir/uploads/*" ! -path "$media_dir/.cookies/*" -print -quit)" ]] &&
         remote_has_files "$remote/media"; then
         die "the local media directory is empty but $remote/media is not: not syncing (restore with: rclone copy $remote/media $media_dir)"

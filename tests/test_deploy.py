@@ -1661,6 +1661,17 @@ def test_backup_never_syncs_an_empty_media_dir_over_a_full_remote(sandbox: dict)
     assert not any(c.startswith("sync ") for c in rclone_calls(sandbox))
 
 
+def test_empty_library_requires_a_successful_remote_inventory(sandbox: dict) -> None:
+    make_env(sandbox, RCLONE_REMOTE="crypt:x", RCLONE_MEDIA_SYNC="daily")
+    (sandbox["root"] / "media").mkdir()
+    result = backup(sandbox, STUB_RCLONE_FAIL_ON="lsf")
+    assert result.returncode != 0 and "inventory could not be verified" in result.stderr
+    assert not any(c.startswith("sync ") for c in rclone_calls(sandbox))
+    folder = Path(sandbox["env"]["REPEATER_BACKUP_DIR"]) / "status"
+    assert (folder / "last_offsite_db_success").exists()
+    assert not (folder / "last_offsite_media_success").exists()
+
+
 # ----- the same off-site rules against rclone itself (its local backend; skipped without rclone)
 
 
