@@ -101,7 +101,12 @@ def media(request: Request, db: DB, video_id: str, expires: str, sig: str) -> Re
 
 
 def _encoded_file(video: Video | None) -> Path | None:
-    if video is None or not video.encoded_path:
+    if (
+        video is None
+        or not video.encoded_path
+        or video.media_kind != "video"
+        or video.content_format != "reel"
+    ):
         return None
     try:
         path = storage.abs_path(video.encoded_path)

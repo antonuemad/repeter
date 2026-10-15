@@ -364,6 +364,13 @@ class Source(TimestampMixin, Base):
 class Video(TimestampMixin, Base):
     __tablename__ = "videos"
     __table_args__ = (
+        CheckConstraint(
+            "(media_kind = 'video' AND content_format IN ('reel', 'story')) OR "
+            "(media_kind = 'image' AND content_format IN ('post', 'story')) OR "
+            "(media_kind = 'text' AND content_format = 'post')",
+            name="ck_library_media_format",
+        ),
+        CheckConstraint("media_kind = 'video' OR profile_id IS NOT NULL", name="ck_rich_media_person"),
         ForeignKeyConstraint(
             ["profile_id", "workspace_id"],
             ["creator_profiles.id", "creator_profiles.workspace_id"],
@@ -398,6 +405,8 @@ class Video(TimestampMixin, Base):
     permalink: Mapped[str | None] = mapped_column(Text)
     title: Mapped[str] = mapped_column(Text, default="")
     caption: Mapped[str] = mapped_column(Text, default="")
+    media_kind: Mapped[str] = mapped_column(String(12), default="video", server_default="video")
+    content_format: Mapped[str] = mapped_column(String(12), default="reel", server_default="reel")
     source_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     duration_s: Mapped[float | None] = mapped_column(Float)

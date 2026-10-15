@@ -313,3 +313,35 @@ releases on `claude/saas-video-platform-plan-tfi4ar` unless the owner requests o
   mock listers/HTTP/media exercise latest30, a 60-video burst, resume, new-only, pagination,
   auth/rate/permission failures, preparation-to-ready-to-preview, tenancy, CSRF and dedup.
   UI supports Arabic/English and both themes with source counts and recovery guidance.
+
+### 2026-10-15 — Mixed person library and format-aware preview, phase four
+
+User requested image/text posts and stories in person libraries, rotation and schedule previews,
+with mock-only testing and the publishing lock preserved. Migration **0006** adds `media_kind`
+(video/image/text) and `content_format` (reel/post/story) to the existing `Video` library model.
+Database checks validate combinations and require a person for image/text rows. Legacy videos
+remain video/reel. Downgrade archives rich formats before dropping columns.
+
+Person libraries accept streamed video/image uploads plus CSRF-protected text composition. Static
+JPEG/PNG/WebP inputs are bounded to 20 MB / 24 MP, decoded and normalized to metadata-free RGB JPEG,
+without cropping. The worker handles image preparation and per-person exact decoded-image dedup.
+The original file is never used as an inline image preview. Text has no media file and supports
+archive/restore. Photo uploads use the existing bounded streaming/CSRF path; tenant ownership is
+checked before creating library records. `include_images` is opt-in on person Drive folders, part
+of stale-poll identity, and the image download bound also survives missing retry hints.
+
+`media/content.py` centralizes conservative eligibility. Facebook: text/image posts and vertical
+image/video stories. Instagram: image posts with ratio/caption checks, and vertical stories only
+for a known `BUSINESS` type. Meta OAuth now records `account_type`; unknown existing accounts need
+reconnection before a story can enter the preview. No reconnect is performed by this deployment.
+YouTube/TikTok rich types remain excluded; existing short videos remain supported in simulation.
+Person source monitoring on Facebook/Instagram still imports videos/reels only; no new social
+photo/story scraping. Story captions stay library notes, with no overlays/music/links/stickers.
+
+Mixed items use the existing LRU/cooldown/history rules. Placement edits preserve item identity;
+compatibility reasons appear in library details and preview exclusions. Independent guards reject
+rich formats in legacy planner/manual upload/publisher/poll paths and the signed-video endpoint.
+Global publishing stays false. The implementation prepares and simulates rich formats; provider
+publishing adapters and live person-plan execution remain future work, not claimed as complete.
+See `docs/ar/11-mixed-library.md` for operator scope and acceptance rules. Acceptance uses synthetic
+local media and mocked HTTP only; never create demo media or activate sources in production.

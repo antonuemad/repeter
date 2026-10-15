@@ -1,5 +1,7 @@
 """Copy for the person-led draft planning flow; kept together in both supported languages."""
 
+from repeater.web.media_i18n import COPY as MEDIA_COPY
+
 COPY = {
     "plan.latest30_option": ("Latest 30 + new videos", "آخر ٣٠ فيديو والجديد"),
     "plan.new_option": ("New videos only", "الفيديوهات الجديدة فقط"),
@@ -43,7 +45,7 @@ COPY = {
         "{total} imported · {ready} ready · {pending} preparing · {failed} failed · {duplicate} duplicates",
         "{total} مستورد · {ready} جاهز · {pending} قيد التجهيز · {failed} فاشل · {duplicate} مكرر",
     ),
-    "plan.sources_summary": ("{n} saved video sources", "{n} مصادر فيديوهات محفوظة"),
+    "plan.sources_summary": ("{n} saved sources", "{n} مصادر محفوظة"),
     "plan.platform_invalid": (
         "Choose an active Instagram or Facebook account belonging to this person. Reconnect it if needed; start monitoring before checking now.",
         "اختار حساب Instagram أو Facebook متصل وتابع للشخص ده. أعد ربطه لو محتاج؛ ابدأ المتابعة قبل الفحص الآن.",
@@ -95,13 +97,13 @@ COPY = {
     "plan.browse": ("Browse folders", "عرض الفولدرات"),
     "plan.folder_link": ("Folder link or ID", "رابط الفولدر أو معرّفه"),
     "plan.folder_help": (
-        "Only videos directly inside this folder are imported. Subfolders and photos are excluded. Saving checks access but does not download files.",
-        "بنستورد الفيديوهات الموجودة داخل الفولدر مباشرةً، من غير الفولدرات الفرعية أو الصور. الحفظ بيتحقق من الوصول فقط، من غير تنزيل ملفات.",
+        "Import videos directly inside this folder; optionally include images below. Subfolders are excluded. Saving checks access only; it does not download files.",
+        "بنستورد الفيديوهات الموجودة داخل الفولدر مباشرةً، وتقدر تضم الصور بالاختيار اللي تحت. الفولدرات الفرعية مش ضمن الاستيراد. الحفظ بيتحقق من الوصول فقط، من غير تنزيل ملفات.",
     ),
-    "plan.backfill": ("Existing videos to import (0–200)", "عدد الفيديوهات الحالية للاستيراد (٠–٢٠٠)"),
+    "plan.backfill": ("Existing files to import (0–200)", "عدد الملفات الحالية للاستيراد (٠–٢٠٠)"),
     "plan.backfill_help": (
-        "The newest videos up to this count on the first import, then newly added files. 0 starts with future additions only.",
-        "أحدث فيديوهات بحد أقصى العدد ده في أول استيراد، وبعدها الملفات المضافة حديثًا. صفر يعني الإضافات القادمة فقط.",
+        "The newest matching files up to this count on the first import, then newly added files. 0 starts with future additions only.",
+        "أحدث ملفات مطابقة بحد أقصى العدد ده في أول استيراد، وبعدها الملفات المضافة حديثًا. صفر يعني الإضافات القادمة فقط.",
     ),
     "plan.save_folder": ("Check & save folder", "التحقق من الفولدر وحفظه"),
     "plan.choose_folder": ("Use this folder", "اختيار الفولدر"),
@@ -186,7 +188,7 @@ COPY = {
     ),
     "plan.pending_uses": (
         "{n} video/page pairs are held until pending or uncertain publications are resolved. Rotation never bypasses them.",
-        "تم تعليق {n} حالة فيديو/صفحة لحين حسم النشر المعلّق أو غير المؤكد. الروتيشن ما بيتخطّاش الحالات دي.",
+        "تم تعليق {n} حالة محتوى/صفحة لحين حسم النشر المعلّق أو غير المؤكد. الروتيشن ما بيتخطّاش الحالات دي.",
     ),
     "plan.imports": ("Bring videos into their library", "إضافة الفيديوهات لمكتبته"),
     "plan.import_help": (
@@ -243,17 +245,17 @@ COPY = {
         "محاكاة جديدة من المكتبة الحالية وسجل النشر المتاح. المواعيد اللاحقة بتفترض نجاح المواعيد السابقة في المسودة. فتحها ما بيسجّلش استخدامًا وما بينشئش مهام نشر. الإطلاق ما زال محتاج موافقات المنصات وإعداداتها.",
     ),
     "plan.coverage": (
-        "{ready} ready videos · {filled} filled page slots · {empty} empty page slots",
-        "{ready} فيديو جاهز · {filled} موعد صفحة بمحتوى · {empty} موعد صفحة فاضي",
+        "{ready} ready items · {filled} filled page slots · {empty} empty page slots",
+        "{ready} عنصر جاهز · {filled} موعد صفحة بمحتوى · {empty} موعد صفحة فاضي",
     ),
-    "plan.empty_slot": ("Waiting for an eligible video", "بانتظار فيديو مناسب"),
+    "plan.empty_slot": ("Waiting for eligible content", "بانتظار محتوى مناسب"),
     "plan.no_targets": (
-        "Select pages to see where each video would go.",
-        "اختار الصفحات عشان تشوف كل فيديو هيروح فين.",
+        "Select pages to see where each item would go.",
+        "اختار الصفحات عشان تشوف كل محتوى هيروح فين.",
     ),
     "plan.no_videos": (
-        "The library is empty. Your times appear below; import videos separately to preview actual content.",
-        "المكتبة فاضية. المواعيد ظاهرة بالأسفل؛ استورد الفيديوهات بشكل منفصل لمعاينة محتوى فعلي.",
+        "The library is empty. Your times appear below; add content to preview actual items.",
+        "المكتبة فاضية. المواعيد ظاهرة بالأسفل؛ أضف محتوى للمكتبة لمعاينته.",
     ),
     "plan.no_slots": (
         "No future slots in this 30-day window. Adjust the days or times.",
@@ -261,16 +263,16 @@ COPY = {
     ),
     "plan.slot_count": ("{n} page destinations", "{n} وجهة نشر"),
     "plan.excluded": (
-        "{n} video/page combinations excluded by format, previous use or content overrides.",
-        "استُبعدت {n} حالة فيديو/صفحة بسبب التنسيق أو الاستخدام السابق أو استثناءات المحتوى.",
+        "{n} item/page combinations excluded by format, previous use or content overrides.",
+        "استُبعدت {n} حالة محتوى/صفحة بسبب التنسيق أو الاستخدام السابق أو استثناءات المحتوى.",
     ),
     "plan.warnings": (
         "Accounts needing attention before any future publishing",
         "حسابات محتاجة مراجعة قبل أي نشر لاحق",
     ),
     "plan.truncated": (
-        "Preview uses the first 1,000 ready videos in your selected order.",
-        "المعاينة بتستخدم أول ١٠٠٠ فيديو جاهز حسب الترتيب المختار.",
+        "Preview uses the first 1,000 ready items in your selected order.",
+        "المعاينة بتستخدم أول ١٠٠٠ عنصر جاهز حسب الترتيب المختار.",
     ),
     "plan.preview_limits": (
         "Times use this plan’s zone. Nonexistent daylight-saving times are skipped; repeated times occur once. Legacy rotation rules do not control this draft.",
@@ -287,5 +289,7 @@ for i, (en, ar) in enumerate(
     )
 ):
     COPY[f"plan.day_{i}"] = (en, ar)
+
+COPY.update(MEDIA_COPY)
 EN = {k: v[0] for k, v in COPY.items()}
 AR = {k: v[1] for k, v in COPY.items()}

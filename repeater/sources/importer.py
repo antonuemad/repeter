@@ -208,6 +208,7 @@ def _watched(source: Source) -> tuple[Any, ...]:
         config.get("control_revision"),
         config.get("backfill_count"),
         config.get("watch_from"),
+        config.get("include_images"),
         tuple(str(config.get(key) or "") for key in IDENTITY_KEYS),
         str(config.get("proxy") or ""),
         "baseline_at" in config,
@@ -337,7 +338,21 @@ def _source_account(source: Source, platform: Platform) -> ConnectedAccount:
 
 def _ingest(session: Session, source: Source, remotes: list[RemoteVideo], now: datetime) -> int:
     config = dict(source.config or {})
-    remotes = [r for r in remotes if r.is_video and r.external_id and len(str(r.external_id)) <= 128]
+    remotes = [
+        r
+        for r in remotes
+        if (
+            r.is_video
+            or (
+                source.profile_id is not None
+                and source.kind == SourceKind.DRIVE
+                and source.config.get("include_images")
+                and r.extra.get("media_kind") == "image"
+            )
+        )
+        and r.external_id
+        and len(str(r.external_id)) <= 128
+    ]
     seen = [str(x) for x in config.get("seen_ids") or []]
     # What Repeater itself published to this platform comes back through the listing of an
     # account that is both source and target: never import it again, just remember it.
@@ -468,6 +483,8 @@ def _create_videos(session: Session, source: Source, items: list[RemoteVideo]) -
             .values(
                 workspace_id=source.workspace_id,
                 profile_id=source.profile_id,
+                media_kind="video" if remote.is_video else "image",
+                content_format="reel" if remote.is_video else "post",
                 source_id=source.id,
                 source_platform=platform,
                 source_account_id=account_id,
@@ -687,6 +704,8 @@ def _download_original(session: Session, video: Video, payload: dict[str, Any]) 
         download_url=payload.get("download_url"),
         extra=dict(payload.get("remote_extra") or {}),
     )
+    if video.media_kind == "image":
+        remote.extra["media_kind"] = "image"
     dest = dest_dir / f"original.{_guess_ext(remote)}"
     return get_lister(platform).download(ctx, remote, dest)
 
@@ -776,6 +795,34 @@ def process_video(session: Session, video_id: int, payload: dict[str, Any] | Non
 def _process(session: Session, video: Video, original: Path, payload: dict[str, Any]) -> None:
     video_id = video.id
     try:
+        if video.media_kind == "image":
+            from repeater.media import images
+
+            image = images.decode(original)
+            _lock_duplicate_check(session, video.workspace_id)
+            if _lock_status(session, video_id) != VideoStatus.PROCESSING:
+                image.close()
+                session.rollback()
+                return
+            images.prepare(video, original, image)
+            image.close()
+            duplicate = session.scalar(
+                select(Video)
+                .where(
+                    Video.workspace_id == video.workspace_id,
+                    Video.profile_id.is_not_distinct_from(video.profile_id),
+                    Video.id != video.id,
+                    Video.media_kind == "image",
+                    Video.sha256 == video.sha256,
+                    Video.status.in_((VideoStatus.READY, VideoStatus.ARCHIVED)),
+                )
+                .order_by(Video.id)
+                .limit(1)
+            )
+            if duplicate is not None and not payload.get("skip_duplicate_check"):
+                _mark_duplicate(session, video, duplicate)
+            session.commit()
+            return
         info = probe(original)
         problem = _duration_problem(info.duration_s)
         if problem:

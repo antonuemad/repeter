@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 
 from repeater.activity import log_activity
 from repeater.jobs import kinds
-from repeater.media import storage
+from repeater.media import images, storage
+from repeater.media.content import FORMATS
 from repeater.media.probe import ProbeResult, probe
 from repeater.messages import Message, UserError
 from repeater.models import ActivityLevel, Source, SourceKind, Video, VideoStatus
@@ -42,16 +43,31 @@ def create_video_from_upload(
     caption: str = "",
     title: str = "",
     actor: str = "user",
+    profile_id: int | None = None,
+    media_kind: str = "video",
+    content_format: str = "reel",
 ) -> Video:
     """Move an uploaded temp file (under storage.uploads_dir()) into the library as a new
     Video (source_platform None, source kind manual), and enqueue process_video. Validates the
     file with ffprobe first; raises ValueError with a user-facing message if it is not a video
     (the rejected temp file is deleted). The caller commits."""
     upload = _checked_upload(upload_path)
+    if (
+        content_format not in FORMATS.get(media_kind, ())
+        or media_kind == "text"
+        or (media_kind != "video" and profile_id is None)
+    ):
+        raise UserError("media.invalid_format", "Choose a supported content type and placement.")
     try:
-        info = probe(upload)
+        if media_kind == "image":
+            images.decode(upload).close()
+            info = None
+        else:
+            info = probe(upload)
     except ValueError as exc:
         upload.unlink(missing_ok=True)
+        if isinstance(exc, UserError):
+            raise
         raise UserError(
             "err.upload_unsupported",
             "'{filename}' is {detail}",
@@ -62,23 +78,27 @@ def create_video_from_upload(
     source = manual_source(session, workspace_id)
     video = Video(
         workspace_id=workspace_id,
+        profile_id=profile_id,
+        media_kind=media_kind,
+        content_format=content_format,
         source_id=source.id,
         source_platform=None,
         external_id=None,
         title=(title or "").strip() or _display_name(original_filename, stem=True),
         caption=(caption or "").strip(),
         status=VideoStatus.PROCESSING,
-        duration_s=info.duration_s,
-        width=info.width,
-        height=info.height,
-        fps=info.fps,
+        duration_s=info.duration_s if info else None,
+        width=info.width if info else None,
+        height=info.height if info else None,
+        fps=info.fps if info else None,
         overrides={},
     )
     session.add(video)
     session.flush()
 
     dest = (
-        storage.ensure_video_dir(workspace_id, video.id) / f"original.{_extension(original_filename, info)}"
+        storage.ensure_video_dir(workspace_id, video.id)
+        / f"original.{_extension(original_filename, info) if info else 'image'}"
     )
     _move(upload, dest)
     video.original_path = storage.rel_path(dest)

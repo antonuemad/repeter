@@ -2,7 +2,7 @@
 version: 1
 slug: repeater-web-templates-plans
 primary_target: repeater/web/templates/plans/edit.html
-related_targets: [repeater/web/templates/plans/index.html, repeater/web/templates/plans/preview.html, repeater/web/templates/plans/platform_sources.html, repeater/web/templates/library.html, repeater/web/templates/sources.html, repeater/web/plan_i18n.py, repeater/web/static/app.css, repeater/web/static/app.js]
+related_targets: [repeater/web/templates/plans/index.html, repeater/web/templates/plans/preview.html, repeater/web/templates/plans/platform_sources.html, repeater/web/templates/library.html, repeater/web/templates/library_detail.html, repeater/web/templates/sources.html, repeater/web/plan_i18n.py, repeater/web/media_i18n.py, repeater/web/static/app.css, repeater/web/static/app.js]
 ---
 
 # People and draft content plans
@@ -204,3 +204,86 @@ The existing Inter detector warning remains intentional under the user's pinned 
 the new partial's hook check was clean. This documentation handoff records the accepted review
 and source evidence without rerunning the detector or browser. All acceptance data and tests are
 synthetic or mocked, and publishing remains locked.
+
+## Phase four: mixed person library (implemented 2026-10-16)
+
+Direction contract: Operate within the user-pinned Sentinel Eye / Magic Lap family. The achieved
+surface keeps the logical-start rail, utility chrome, semantic colors, Inter and IBM Plex Sans
+Arabic, quiet task cards, and native forms and disclosures. This is a local extension of the
+existing world; no rebrand, generated comp, or separate quality-bar artifact was needed.
+
+The person's library now has an Add content disclosure for uploaded videos and static images,
+plus a separate Write a text post disclosure. The upload form selects one placement: video
+reel/short video, video story, image post, or image story. Text is a post. Item details expose
+the same editable placement and allowed-platform controls; changing placement retains the item
+and its rotation history. Content-format text accompanies status in the library and assignments
+in the plan preview. The unassigned legacy library retains its existing video flow.
+
+Static JPEG, PNG and WebP uploads are bounded to 20 MB and 24 megapixels, normalized to
+metadata-free JPEG without cropping, and deduplicated within the person. Text posts accept up
+to 5,000 characters. Image details preserve the full image with contain sizing on the existing
+canvas color. Text details use the existing body-font caption treatment; library thumbnails
+show a bounded excerpt with preserved line breaks and wrapping. These surface-specific styles
+reuse existing tokens and do not establish a new shared component.
+
+The compatibility section names each destination and explains why the item fits or is excluded.
+The preview adds a native Format exclusions disclosure showing up to 100 item/page pairs while
+retaining the total count. Ready, compatible items join the same per-page least-recently-used
+simulation, saved repeat gap, first/repeat labels, explicit empty slots, and preview pagination.
+Neither format changes nor excluded pairs reset or silently shorten that rotation policy.
+
+The displayed pilot scope permits image posts/stories on Facebook and Instagram, text posts on
+Facebook, and the existing short-video formats. Instagram Stories require a known Business
+account type; unknown and Creator types receive reconnect guidance. Stories require a 9:16
+original, with video stories limited to 3–60 seconds and 100 MB. Instagram image posts require
+a 4:5–1.91:1 ratio and captions up to 2,200 characters. Copy presents these as conservative pilot
+rules, not universal platform maxima. Story captions remain library notes; they are not rendered
+overlays. There is no automatic cropping, music, stickers, links, carousel, or text-to-image flow.
+YouTube image/text posts and TikTok photos remain unavailable.
+
+The Drive folder section adds an explicit image opt-in. Images enter as posts and can be changed
+to stories in item details. The initial limit covers matching videos and images together; enabling
+images on an existing source imports matching unseen images at its next check without resetting
+the video baseline. Disabling images stops new image discovery without removing existing library
+items; already queued preparation may finish. Social-platform sources remain video/reel-only.
+The same submitted image-consent state is preserved through folder browse, pagination, and choice,
+including a newly checked opt-in and an existing source's newly unchecked opt-out.
+
+Saving and previewing remain preparation and simulation only. Real publishing and person-plan
+execution stay locked behind the global switch and independent person/rich-format guards,
+including the legacy signed-video endpoint. No live import or publication acceptance is claimed.
+PRODUCT.md and `docs/ar/11-mixed-library.md` own the detailed product and operational scope.
+
+Implemented surface sources: `repeater/web/templates/library.html`, `library_detail.html`,
+`plans/edit.html`, and `plans/preview.html`; `repeater/web/media_i18n.py` and `plan_i18n.py`; and
+`repeater/web/static/app.css`. No new durable global design decision was introduced, so DESIGN.md
+and `.impeccable/design.json` remain unchanged.
+
+Accepted phase-four screenshot evidence under `/Users/mac/dev/repeter-preview/`:
+
+- `media-final-library-desktop.jpg`
+- `media-final-library-mobile.jpg`
+- `media-final-upload-mobile.jpg`
+- `media-final-story-mobile.jpg`
+- `media-final-story-desktop.jpg`
+- `media-final-edit-desktop.jpg`
+- `media-final-plan-desktop.jpg`
+- `media-final-exclusions-mobile.jpg`
+- `media-review-drive-desktop.jpg`
+- `media-review-drive-mobile.jpg`
+
+All captures use synthetic local fixtures. The mobile Drive capture does not include the image
+checkbox, so its appearance at that viewport remains visually unverified. The evidence establishes
+the reviewed interface only, not live integration or platform publishing readiness.
+
+Fresh independent phase-four finish reviewer disposition: SHIP.
+
+| Finding | Final status | Resolution evidence |
+| --- | --- | --- |
+| F1 — Preserve Drive image consent | Resolved | One `images_selected` state drives the checkbox and folder forms; both mocked browse → next → choose paths preserve new checked and existing unchecked choices. |
+
+Remaining review criteria: Clear. No regressions identified. The final focused verification
+reported 78 passing tests after the consent fix. The Inter hook warning is intentional under
+the user's pinned font identity; hooks remained active and no standalone detector was run.
+This documentation handoff records the accepted review and its limitations without rerunning
+the browser, detector, or tests.

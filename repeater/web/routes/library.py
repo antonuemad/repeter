@@ -24,7 +24,7 @@ from repeater.config import get_settings
 from repeater.engine import actions, captions
 from repeater.engine import rules as engine_rules
 from repeater.jobs import kinds
-from repeater.media import storage
+from repeater.media import content, storage
 from repeater.messages import Message
 from repeater.models import (
     PUBLISH_PLATFORMS,
@@ -212,6 +212,22 @@ def video_detail(request: Request, db: DB, ctx: CurrentWorkspace, video_id: int)
     )
     accounts = [] if video.profile_id is not None else target_accounts(db, ctx.workspace.id)
     context = {
+        "formats": content.FORMATS[video.media_kind],
+        "content_caption": content.caption(video),
+        "compatibility": [
+            {"account": a, "reason": content.problem(video, a)}
+            for a in db.scalars(
+                select(ConnectedAccount)
+                .where(
+                    ConnectedAccount.workspace_id == ctx.workspace.id,
+                    ConnectedAccount.profile_id == video.profile_id,
+                    ConnectedAccount.platform.in_(PUBLISH_PLATFORMS),
+                )
+                .order_by(ConnectedAccount.platform, ConnectedAccount.display_name)
+            )
+        ]
+        if video.profile_id
+        else [],
         "nav": "library",
         "video": video,
         "posts": posts,
@@ -258,6 +274,10 @@ def _file(rel: str | None) -> Path | None:
 
 
 def _preview_file(video: Video) -> Path | None:
+    if video.media_kind == "text":
+        return None
+    if video.media_kind == "image":
+        return _file(video.encoded_path)  # Never serve the untrusted original raster inline.
     return _file(video.encoded_path) or _file(video.original_path)
 
 
@@ -276,7 +296,11 @@ def preview(db: DB, ctx: CurrentWorkspace, video_id: int) -> Response:
     if path is None:
         raise HTTPException(status_code=404)
     media_type = "video/mp4" if path.suffix == ".mp4" else (mimetypes.guess_type(path.name)[0] or "video/mp4")
-    return FileResponse(path, media_type=media_type, headers={"Cache-Control": "private, max-age=300"})
+    return FileResponse(
+        path,
+        media_type=media_type,
+        headers={"Cache-Control": "private, max-age=300", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 # --------------------------------------------------------------------------- actions
@@ -433,6 +457,11 @@ def edit_video(request: Request, db: DB, ctx: CurrentWorkspace, form: Form, vide
     try:
         title = form_str(form, "title", max_len=MAX_TITLE_CHARS)
         caption = form_text(form, "caption", max_len=MAX_CAPTION_CHARS)
+        placement = form.get("content_format", video.content_format)
+        if placement not in content.FORMATS[video.media_kind] or (
+            video.profile_id is None and placement != "reel"
+        ):
+            raise FormError("media.invalid_format")
     except FormError as exc:
         flash(request, "error", exc.key, **exc.params)
         return RedirectResponse(f"/library/{video.id}", status_code=303)
@@ -447,6 +476,7 @@ def edit_video(request: Request, db: DB, ctx: CurrentWorkspace, form: Form, vide
     if excluded:
         overrides["exclude_platforms"] = excluded
     video.overrides = overrides
+    video.content_format = placement
     canceled = _cancel_excluded_posts(db, video, excluded)
     log_activity(
         db,
@@ -489,7 +519,13 @@ def _cancel_excluded_posts(db: Session, video: Video, excluded: list[str]) -> in
 
 UPLOAD_PATH = "/library/upload"
 FILE_FIELD = "file"
-TEXT_FIELD_LIMITS = {csrf.FORM_FIELD: 256, "title": MAX_TITLE_CHARS * 4, "caption": MAX_CAPTION_CHARS * 4}
+TEXT_FIELD_LIMITS = {
+    csrf.FORM_FIELD: 256,
+    "title": MAX_TITLE_CHARS * 4,
+    "caption": MAX_CAPTION_CHARS * 4,
+    "profile_id": 12,
+    "format": 32,
+}
 MAX_PARTS = 16
 MULTIPART_OVERHEAD = 1024 * 1024
 
@@ -561,6 +597,10 @@ class UploadSink:
         if self.csrf_required and not csrf.token_matches(self.session, self.fields.get(csrf.FORM_FIELD)):
             raise csrf.CSRFError()
         self._is_file = True
+        if self.fields.get("format", "").startswith("image_"):
+            from repeater.media.images import MAX_IMAGE_BYTES
+
+            self.max_file_bytes = min(self.max_file_bytes, MAX_IMAGE_BYTES)
         self.filename = Path(options[b"filename"].decode("utf-8", "replace").replace("\\", "/")).name[:255]
         self.path = storage.uploads_dir() / f"{secrets.token_hex(16)}.part"
         self._fh = open(self.path, "wb")  # noqa: SIM115 - closed in finish()/discard()
@@ -654,6 +694,13 @@ async def upload(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
 def _import_upload(request: Request, db: Session, ctx: WorkspaceContext, sink: UploadSink) -> Response:
     assert sink.path is not None
     try:
+        profile = _upload_profile(db, ctx, sink.fields.get("profile_id"))
+        selection = sink.fields.get("format", "video_reel")
+        if selection not in {"video_reel", "video_story", "image_post", "image_story"} or (
+            profile is None and selection != "video_reel"
+        ):
+            raise FormError("media.invalid_format")
+        kind, placement = selection.split("_")
         video = manual.create_video_from_upload(
             db,
             workspace_id=ctx.workspace.id,
@@ -662,8 +709,15 @@ def _import_upload(request: Request, db: Session, ctx: WorkspaceContext, sink: U
             caption=sink.fields.get("caption", "")[:MAX_CAPTION_CHARS],
             title=sink.fields.get("title", "")[:MAX_TITLE_CHARS],
             actor=ctx.actor,
+            profile_id=profile.id if profile else None,
+            media_kind=kind,
+            content_format=placement,
         )
         db.commit()
+    except FormError as exc:
+        db.rollback()
+        flash(request, "error", exc.key, **exc.params)
+        return RedirectResponse("/library", status_code=303)
     except ValueError as exc:
         db.rollback()
         messages.flash_error(request, exc)
@@ -673,3 +727,58 @@ def _import_upload(request: Request, db: Session, ctx: WorkspaceContext, sink: U
             sink.path.unlink(missing_ok=True)
     flash(request, "success", "library.uploaded", title=video.title)
     return RedirectResponse(f"/library/{video.id}", status_code=303)
+
+
+def _upload_profile(db: Session, ctx: WorkspaceContext, value: str | None) -> CreatorProfile | None:
+    if not value:
+        return None
+    if not value.isascii() or not value.isdecimal() or len(value) > 10 or not 1 <= int(value) <= 2147483647:
+        raise FormError("media.person_required")
+    person = db.scalar(
+        select(CreatorProfile).where(
+            CreatorProfile.id == int(value), CreatorProfile.workspace_id == ctx.workspace.id
+        )
+    )
+    if person is None:
+        raise FormError("media.person_required")
+    return person
+
+
+@router.post("/library/text")
+def create_text(request: Request, db: DB, ctx: CurrentWorkspace, form: Form) -> Response:
+    try:
+        person = _upload_profile(db, ctx, form_str(form, "profile_id", max_len=10, required=True))
+        if person is None:
+            raise FormError("media.person_required")
+        body = form_text(form, "caption", max_len=MAX_CAPTION_CHARS)
+        if not body.strip():
+            raise FormError("media.empty_text")
+        title = form_str(form, "title", max_len=MAX_TITLE_CHARS, required=True)
+        item = Video(
+            workspace_id=ctx.workspace.id,
+            profile_id=person.id,
+            media_kind="text",
+            content_format="post",
+            title=title,
+            caption=body,
+            status=VideoStatus.READY,
+            overrides={},
+        )
+        db.add(item)
+        db.flush()
+        log_activity(
+            db,
+            ctx.workspace.id,
+            ActivityLevel.INFO,
+            "import",
+            "Added a text post to a person's library.",
+            actor=ctx.actor,
+            video_id=item.id,
+            msg_key="media.text_added",
+        )
+        db.commit()
+    except FormError as exc:
+        db.rollback()
+        flash(request, "error", exc.key, **exc.params)
+        return RedirectResponse("/library", status_code=303)
+    return RedirectResponse(f"/library/{item.id}", status_code=303)

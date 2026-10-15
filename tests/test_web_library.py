@@ -27,7 +27,17 @@ def fake_create(monkeypatch, db, workspace):
     """Replace create_video_from_upload: records the call and the uploaded bytes."""
     seen: dict = {}
 
-    def create(session, *, workspace_id, upload_path, original_filename, caption="", title="", actor="user"):
+    def create(
+        session,
+        *,
+        workspace_id,
+        upload_path,
+        original_filename,
+        caption="",
+        title="",
+        actor="user",
+        **options,
+    ):
         seen.update(
             workspace_id=workspace_id,
             path=Path(upload_path),

@@ -35,7 +35,7 @@ from repeater.platforms.base import PlatformError
 from repeater.sources.drive import browse_folders, folder_details, parse_folder_id
 from repeater.timeutil import utcnow
 from repeater.web.auth import CurrentWorkspace
-from repeater.web.deps import DB, Form, FormError, Page, form_int, form_str, query_int
+from repeater.web.deps import DB, Form, FormError, Page, form_bool, form_int, form_str, query_int
 from repeater.web.templating import flash, render
 
 router = APIRouter()
@@ -236,6 +236,10 @@ def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section:
             folder_id = parse_folder_id(form_str(form, "folder", max_len=1000, required=True))
             backfill = form_int(form, "backfill", minimum=0, maximum=200, default=30)
             source = _source(db, plan)
+            if source is not None:
+                # A worker may have advanced seen IDs/baseline while this form was open.
+                # Keep those checkpoints when changing the image discovery option.
+                db.refresh(source, with_for_update=True)
             if source and (source.enabled or source.last_polled_at):
                 if source.connected_account_id != account.id or source.config.get("folder_id") != folder_id:
                     raise FormError("plan.source_locked")
@@ -257,6 +261,7 @@ def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section:
             source.name = details["name"]
             if not source.last_polled_at and not source.enabled:
                 source.config = {**source.config, "folder_id": folder_id, "backfill_count": backfill}
+            source.config = {**source.config, "include_images": form_bool(form, "include_images")}
         elif section == "targets":
             raw = form.getlist("targets")
             if len(raw) > 100 or any(

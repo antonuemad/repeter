@@ -127,3 +127,28 @@ copyright/download restrictions. No photos, stories or carousel albums. YouTube 
 can come through Drive; unofficial scraping is not added to the person flow. TikTok remains
 deferred. This phase's verification uses mock APIs and synthetic media only. Production
 sources are not started by deployment; publishing and execution of person plans remain locked.
+
+## Person-led phase four (2026-10-15)
+
+Person libraries now accept uploaded videos, static images and text posts. Each item has one
+editable placement: reel/short video or story for videos, post or story for images, and post
+for text. Changing placement keeps the same item and rotation history. Optional JPEG/PNG/WebP
+imports extend the person's Drive folder; social-platform sources remain video/reel-only.
+Images are validated, bounded to 20 MB/24 megapixels, normalized to metadata-free JPEG without
+cropping and deduplicated within the person. Text posts are limited to 5,000 characters.
+
+The mixed library feeds the same per-page rotation simulation and repeat gap. Preview capability
+rules permit image posts/stories on Facebook and Instagram, text on Facebook, and existing short
+videos. Instagram Stories require a known Business account type captured when reconnecting;
+unknown/Creator account types are excluded. Pilot stories require 9:16 media, with video stories
+limited to 3–60 seconds and 100 MB. Instagram image posts require a 4:5–1.91:1 ratio and captions
+up to 2,200 characters. These conservative pilot rules do not claim universal platform maxima.
+
+Compatibility and exclusions appear in item details and schedule previews. Story captions are
+library notes, not rendered overlays; no automatic cropping, stickers, music, links, carousel
+albums or text-to-image generation is included. YouTube image/text posts and TikTok photos are
+not enabled. Rich-content provider publishing adapters and execution of person plans remain a
+future gate; this phase implements preparation and simulation only. Both the global publishing
+lock and independent rich-format/person guards stay in force, including the legacy signed-video
+endpoint. No live import or publication acceptance is performed. Migration 0006 preserves existing
+video defaults; rollback archives rich formats before removing their type columns.

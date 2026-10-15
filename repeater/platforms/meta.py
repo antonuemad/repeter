@@ -113,9 +113,7 @@ PUBLISH_TASK = "CREATE_CONTENT"
 # Listing a Page's videos (GET /{page-id}/videos) needs a Page token requested by a person who can
 # perform the MANAGE task (https://developers.facebook.com/docs/video-api/guides/get-videos).
 MANAGE_TASK = "MANAGE"
-PAGE_FIELDS = (
-    "id,name,access_token,tasks,picture{url},instagram_business_account{id,username,name,profile_picture_url}"
-)
+PAGE_FIELDS = "id,name,access_token,tasks,picture{url},instagram_business_account{id,username,name,profile_picture_url,account_type}"
 
 API_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 DEFAULT_PAGE_SIZE = 50
@@ -749,6 +747,7 @@ def _instagram_account(
         avatar_url=avatar if isinstance(avatar, str) and avatar else None,
         extra={
             "ig_user_id": ig_user_id,
+            **({"account_type": ig["account_type"]} if ig.get("account_type") else {}),
             "page_id": str(page["id"]),
             "username": username,
             "fb_user_id": fb_user_id,

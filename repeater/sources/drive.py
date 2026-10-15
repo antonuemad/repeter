@@ -102,10 +102,18 @@ class DriveLister:
         folder_id = parse_folder_id((config or {}).get("folder_id"))
         headers = _auth(account)
         with http.client(timeout=API_TIMEOUT) as c:
-            files = _list_folder(c, headers, folder_id, limit)
+            files = _list_folder(
+                c, headers, folder_id, limit, include_images=bool((config or {}).get("include_images"))
+            )
             if not files:
                 _check_folder(c, headers, folder_id)
-        return [rv for rv in (_remote_video(f) for f in files) if rv is not None][:limit]
+        return [
+            rv
+            for rv in (
+                _remote_video(f, include_images=bool((config or {}).get("include_images"))) for f in files
+            )
+            if rv is not None
+        ][:limit]
 
     def download(self, account: AccountContext, remote: RemoteVideo, dest: Path) -> Path:
         headers = _auth(account)
@@ -120,7 +128,16 @@ class DriveLister:
         if not url.startswith(f"{API_BASE}/files/"):
             raise PermanentError("Refusing to download a Google Drive file from an unexpected address.")
         try:
-            return http.stream_download(url, dest, headers=headers, max_bytes=MAX_DOWNLOAD_BYTES)
+            from repeater.media.images import MAX_IMAGE_BYTES
+
+            return http.stream_download(
+                url,
+                dest,
+                headers=headers,
+                max_bytes=MAX_IMAGE_BYTES
+                if remote.extra.get("media_kind") == "image"
+                else MAX_DOWNLOAD_BYTES,
+            )
         except AuthError as exc:
             raise AuthError(
                 f"Google Drive refused the download. {RECONNECT_HINT}", status=exc.status
@@ -153,12 +170,18 @@ def _auth(account: AccountContext) -> dict[str, str]:
 
 
 def _list_folder(
-    c: httpx.Client, headers: dict[str, str], folder_id: str, limit: int
+    c: httpx.Client, headers: dict[str, str], folder_id: str, limit: int, *, include_images: bool = False
 ) -> list[dict[str, Any]]:
     params: dict[str, Any] = {
         "q": (
             f"'{folder_id}' in parents and trashed = false and "
-            f"(mimeType contains 'video/' or mimeType = '{SHORTCUT_MIME}')"
+            f"(mimeType contains 'video/' or mimeType = '{SHORTCUT_MIME}'"
+            + (
+                " or mimeType = 'image/jpeg' or mimeType = 'image/png' or mimeType = 'image/webp'"
+                if include_images
+                else ""
+            )
+            + ")"
         ),
         "orderBy": "createdTime desc",
         "fields": LIST_FIELDS,
@@ -263,23 +286,29 @@ def _download_error(exc: PermanentError) -> PlatformError:
     return exc
 
 
-def _video_target(item: dict[str, Any]) -> tuple[str, str, str | None] | None:
+def _video_target(
+    item: dict[str, Any], *, include_images: bool = False
+) -> tuple[str, str, str | None] | None:
     """(file id to download, its mime type, resource key) for a video file or a shortcut to one."""
     file_id, mime = item.get("id"), str(item.get("mimeType") or "")
     if not file_id:
         return None
-    if mime.startswith("video/"):
+    from repeater.media.images import IMAGE_MIMES
+
+    if mime.startswith("video/") or (include_images and mime in IMAGE_MIMES):
         return str(file_id), mime, None
     details = item.get("shortcutDetails")
     if mime == SHORTCUT_MIME and isinstance(details, dict):
         target_id, target_mime = details.get("targetId"), str(details.get("targetMimeType") or "")
-        if target_id and target_mime.startswith("video/"):
+        if target_id and (
+            target_mime.startswith("video/") or (include_images and target_mime in IMAGE_MIMES)
+        ):
             return str(target_id), target_mime, details.get("targetResourceKey") or None
     return None
 
 
-def _remote_video(item: dict[str, Any]) -> RemoteVideo | None:
-    target = _video_target(item)
+def _remote_video(item: dict[str, Any], *, include_images: bool = False) -> RemoteVideo | None:
+    target = _video_target(item, include_images=include_images)
     if target is None:
         return None
     file_id = item["id"]
@@ -289,6 +318,9 @@ def _remote_video(item: dict[str, Any]) -> RemoteVideo | None:
     description = str(item.get("description") or "").strip()
     ext = Path(name).suffix.lower().lstrip(".")
     extra: dict[str, Any] = {"name": name, "mime_type": mime_type}
+    is_image = mime_type.startswith("image/")
+    if is_image:
+        extra["media_kind"] = "image"
     if download_id != str(file_id):
         extra["download_id"] = download_id  # a shortcut: the bytes live in its target
     if resource_key:
@@ -306,6 +338,7 @@ def _remote_video(item: dict[str, Any]) -> RemoteVideo | None:
         caption=description or stem,
         permalink=item.get("webViewLink") or None,
         download_url=file_download_url(download_id),
+        is_video=not is_image,
         extra=extra,
     )
 

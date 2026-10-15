@@ -7,7 +7,9 @@
 
 <div class="grid-2">
   <section class="card">
-    {% if has_preview %}
+    {% if video.media_kind == 'text' %}<pre class="caption" dir="auto">{{ content_caption }}</pre>
+    {% elif video.media_kind == 'image' and has_preview %}<img class="preview media-image" src="/library/{{ video.id }}/preview" alt="{{ video.title }}">
+    {% elif has_preview %}
     <video class="preview" controls preload="metadata" src="/library/{{ video.id }}/preview"{% if video.thumbnail_path %} poster="/library/{{ video.id }}/thumb.jpg"{% endif %}></video>
     {% else %}
     <p class="thumb-placeholder">{{ t('library.no_preview') }}</p>
@@ -17,6 +19,7 @@
   <section class="card">
     <h2>{{ t('library.details') }}</h2>
     <dl class="details">
+      {% if video.profile_id %}<dt>{{ t('media.format') }}</dt><dd>{{ t('media.' ~ video.media_kind ~ '_' ~ video.content_format) }}</dd>{% endif %}
       <dt>{{ t('library.status') }}</dt><dd>{{ m.badge('video_status', video.status) }}</dd>
       {% if video.error %}<dt>{{ t('library.error') }}</dt><dd dir="auto">{{ t.error(video.error, video.error_info) }}</dd>{% endif %}
       {% if video.duplicate_of_id %}<dt>{{ t('library.duplicate_of') }}</dt><dd><a href="/library/{{ video.duplicate_of_id }}">#{{ video.duplicate_of_id }}</a></dd>{% endif %}
@@ -25,7 +28,7 @@
         {% if video.permalink and video.permalink.startswith('https://') %} · <a href="{{ video.permalink }}" rel="noopener noreferrer" target="_blank">{{ t('library.original_link') }}</a>{% endif %}</dd>
       <dt>{{ t('library.imported') }}</dt><dd>{{ fmt_dt(video.created_at, zone) }}</dd>
       {% if video.source_published_at %}<dt>{{ t('library.published_at_source') }}</dt><dd>{{ fmt_dt(video.source_published_at, zone) }}</dd>{% endif %}
-      <dt>{{ t('library.duration') }}</dt><dd>{{ fmt_duration(video.duration_s) }}</dd>
+      {% if video.media_kind == 'video' %}<dt>{{ t('library.duration') }}</dt><dd>{{ fmt_duration(video.duration_s) }}</dd>{% endif %}
       {% if video.width and video.height %}<dt>{{ t('library.dimensions') }}</dt><dd dir="ltr">{{ video.width }}×{{ video.height }}</dd>{% endif %}
       <dt>{{ t('library.size') }}</dt><dd>{{ fmt_bytes(video.encoded_size_bytes or video.size_bytes) }}</dd>
     </dl>
@@ -54,7 +57,7 @@
       </form>
       {% endif %}
     </div>
-    {% if can_delete %}<p class="muted small">{{ t('library.delete_help') }}</p>{% endif %}
+    {% if can_delete %}<p class="muted small">{{ t('media.delete_help') if video.profile_id else t('library.delete_help') }}</p>{% endif %}
     {% if video.status == 'ready' and accounts %}
     <form method="post" action="/library/{{ video.id }}/publish-now" class="stack" data-confirm="{{ t('library.publish_now_confirm') }}">
       {{ m.csrf() }}
@@ -80,9 +83,10 @@
 
 <section class="card">
   <h2>{{ t('library.edit_title') }}</h2>
-  <p class="muted">{{ t('library.edit_help') }}</p>
+  <p class="muted">{{ t('media.edit_help') if video.profile_id else t('library.edit_help') }}</p>
   <form method="post" action="/library/{{ video.id }}/edit" class="stack">
     {{ m.csrf() }}
+    {% if video.profile_id %}<label>{{ t('media.format') }}<select name="content_format">{% for format in formats %}<option value="{{ format }}"{% if format == video.content_format %} selected{% endif %}>{{ t('media.' ~ video.media_kind ~ '_' ~ format) }}</option>{% endfor %}</select></label>{% endif %}
     <label>{{ t('field.title') }}
       <input type="text" name="title" maxlength="300" value="{{ overrides.get('title', '') }}" placeholder="{{ video.title }}" dir="auto">
     </label>
@@ -90,7 +94,7 @@
       <textarea name="caption" rows="4" maxlength="5000" placeholder="{{ video.caption }}" dir="auto">{{ overrides.get('caption', '') }}</textarea>
     </label>
     <fieldset>
-      <legend>{{ t('library.platforms') }}</legend>
+      <legend>{{ t('media.platforms') if video.profile_id else t('library.platforms') }}</legend>
       {% for p in publish_platforms %}
       <label class="check"><input type="checkbox" name="platform_{{ p }}" value="1"{% if p not in excluded %} checked{% endif %}> {{ platform_name(p) }}</label>
       {% endfor %}
@@ -99,6 +103,7 @@
   </form>
 </section>
 
+{% if video.profile_id %}<section class="card"><h2>{{ t('media.compatibility') }}</h2><p class="plan-measure muted">{{ t('media.scope') }}</p>{% if video.content_format == 'story' %}<p>{{ t('media.story_caption') }}</p>{% endif %}<ul class="plain">{% for c in compatibility %}<li class="caption-preview"><strong><bdi>{{ c.account.display_name }}</bdi> {{ m.platform(c.account.platform) }}</strong><p>{{ t('media.' ~ c.reason) if c.reason else t('media.eligible') }}</p></li>{% endfor %}</ul></section>{% endif %}
 {% if previews %}
 <section class="card">
   <h2>{{ t('library.preview_title') }}</h2>

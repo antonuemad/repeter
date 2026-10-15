@@ -238,6 +238,8 @@ def duplicate_origins(
 
 def limits_problem(video: Video, platform: Platform | str) -> str | None:
     """Why the platform cannot take the video (duration/size), or None."""
+    if video.media_kind not in (None, "video") or video.content_format not in (None, "reel"):
+        return "this content format is preview-only"
     platform = Platform(platform)
     lim = LIMITS[platform]
     name = captions.platform_name(platform)
@@ -286,6 +288,8 @@ def _load_context(session: Session, workspace: Workspace, now: datetime) -> _Con
             .where(
                 Video.workspace_id == workspace.id,
                 Video.profile_id.is_(None),
+                Video.media_kind == "video",
+                Video.content_format == "reel",
                 Video.status == VideoStatus.READY,
                 Video.encoded_path.isnot(None),
             )

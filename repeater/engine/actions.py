@@ -117,7 +117,12 @@ def schedule_video_now(
     bypassing windows/caps but not platform validation. Enqueue publish_post."""
     if video.workspace_id != account.workspace_id:
         raise UserError("err.workspace_mismatch", "The video and the account belong to different workspaces.")
-    if video.profile_id is not None or account.profile_id is not None:
+    if (
+        video.profile_id is not None
+        or account.profile_id is not None
+        or video.media_kind != "video"
+        or video.content_format != "reel"
+    ):
         raise UserError("plan.draft_only", "Person plans are preview-only; publishing is unavailable.")
     platform = Platform(account.platform)
     if platform not in PUBLISH_PLATFORMS:
@@ -337,7 +342,9 @@ def restore_video(session: Session, video: Video, *, actor: str) -> None:
             "err.duplicate_video",
             "This video is a duplicate of another video in the library and stays out of rotation.",
         )
-    if _file_exists(video.encoded_path):
+    if _file_exists(video.encoded_path) or (
+        video.media_kind == "text" and video.profile_id is not None and video.caption.strip()
+    ):
         video.status = VideoStatus.READY
         video.error = None
         kinds.enqueue_plan_workspace(session, video.workspace_id)

@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from repeater.engine.publisher import reached_platform
-from repeater.engine.scheduler import limits_problem
+from repeater.media.content import problem
 from repeater.models import (
     ACTIVE_POST_STATUSES,
     AccountStatus,
@@ -147,7 +147,7 @@ def simulate(db: Session, plan: ContentPlan, *, now: datetime | None = None) -> 
                 Video.workspace_id == plan.workspace_id,
                 Video.profile_id == plan.profile_id,
                 Video.status == VideoStatus.READY,
-                Video.encoded_path.isnot(None),
+                (Video.encoded_path.isnot(None) | (Video.media_kind == "text")),
             )
             .order_by(*order)
             .limit(1001)
@@ -162,6 +162,7 @@ def simulate(db: Session, plan: ContentPlan, *, now: datetime | None = None) -> 
     empty_reasons: dict[int, str] = {}
     excluded = 0
     blocked_count = 0
+    incompatibilities = []
     for account in accounts:
         choices = []
         blocked_here = 0
@@ -169,10 +170,13 @@ def simulate(db: Session, plan: ContentPlan, *, now: datetime | None = None) -> 
             for rank, video in enumerate(videos):
                 pair = (video.id, account.id)
                 last = latest.get(pair)
+                issue = problem(video, account)
+                if issue:
+                    incompatibilities.append({"video": video, "account": account, "reason": issue})
                 if (
                     video.source_account_id == account.id
                     or account.platform.value in (video.overrides or {}).get("exclude_platforms", [])
-                    or limits_problem(video, account.platform)
+                    or issue
                 ):
                     excluded += 1
                     continue
@@ -226,4 +230,6 @@ def simulate(db: Session, plan: ContentPlan, *, now: datetime | None = None) -> 
         "repeated": repeated,
         "waiting": waiting,
         "truncated": truncated,
+        "incompatibilities": incompatibilities[:100],
+        "incompatibilities_total": len(incompatibilities),
     }
