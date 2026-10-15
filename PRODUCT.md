@@ -41,7 +41,7 @@ different capabilities; not every platform is an official download source.
 - Preserve owner/editor authorization, tenant isolation, CSRF, explicit consent,
   platform-required settings and unknown-outcome publication safeguards.
 - User restriction, 2026-10-15: no real publication to any page or account during testing,
-  including private/unlisted test posts. Keep the server publishing lock disabled until
+  including private/unlisted test posts. Keep publishing disabled on the server until
   the user explicitly ends the restriction; publication tests use mocks and synthetic accounts.
 - The installed database migration is immutable. Any later schema change needs
   a new Alembic revision.
