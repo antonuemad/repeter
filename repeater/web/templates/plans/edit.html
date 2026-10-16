@@ -7,6 +7,7 @@
 A saved draft is the truth. Preview is read-only and import is an independent action. -->
 <div class="page-heading"><div><h1 dir="auto">{{ person.name }}</h1><p>{{ t('plan.setup_help') }}</p></div><div class="actions"><a class="button" href="/plans/{{ plan.id }}">{{ t('plan.preview') }}</a><a href="/library?profile_id={{ person.id }}">{{ t('plan.library') }}</a></div></div>
 {{ m.form_error(error) }}
+{% include "plans/execution.html" %}
 <nav class="settings-tabs" aria-label="{{ t('plan.edit') }}"><a href="#connections">{{ t('plan.connections') }}</a><a href="#source">{{ t('plan.folder') }}</a><a href="#platforms">{{ t('plan.platforms') }}</a><a href="#targets">{{ t('plan.targets') }}</a><a href="#schedule">{{ t('plan.schedule') }}</a><a href="#rotation">{{ t('plan.rotation') }}</a></nav>
 <div class="plan-setup">
 <section class="card" id="connections"><h2>{{ t('plan.connections') }}</h2><p class="muted">{{ t('plan.connect_help') }}</p><div class="actions">

@@ -320,6 +320,8 @@ class PublishRequest:
     # Called before EACH YouTube videos.insert HTTP attempt, including internal retries.
     # The engine owns durable quota accounting; adapters remain database-independent.
     on_session_start: Callable[[], None] | None = None
+    media_kind: str = "video"
+    content_format: str = "reel"
 
 
 class PublishOutcome(enum.StrEnum):

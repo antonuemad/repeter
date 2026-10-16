@@ -59,8 +59,10 @@ def test_access_migration_roundtrip_preserves_existing_accounts():
             command.upgrade(cfg, "head")
             with engine.connect() as conn:
                 assert conn.execute(
-                    text("SELECT rotation_mode,repeat_after_days,revision FROM content_plans WHERE id=1")
-                ).one() == ("once", 30, 3)
+                    text(
+                        "SELECT rotation_mode,repeat_after_days,revision,enabled FROM content_plans WHERE id=1"
+                    )
+                ).one() == ("once", 30, 3, False)
                 assert conn.execute(
                     text("SELECT password_hash,is_platform_admin FROM users WHERE id=1")
                 ).one() == ("unchanged-hash", False)

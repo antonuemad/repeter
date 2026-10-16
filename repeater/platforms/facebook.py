@@ -301,8 +301,10 @@ def _bytes_received(graph: meta.Graph, video_id: str, size: int) -> int:
     return 0
 
 
-def _upload(graph: meta.Graph, video_id: str, path: Path, size: int, token: str) -> None:
-    url = RUPLOAD_URL.format(version=meta.graph_version(), video_id=meta.node(video_id))
+def _upload(
+    graph: meta.Graph, video_id: str, path: Path, size: int, token: str, *, upload_url: str | None = None
+) -> None:
+    url = upload_url or RUPLOAD_URL.format(version=meta.graph_version(), video_id=meta.node(video_id))
     offset = 0
     error: PlatformError = RetryableError("The upload to Facebook did not complete.")
     with client(timeout=UPLOAD_TIMEOUT) as http:
@@ -569,6 +571,10 @@ class FacebookPublisher:
     limits = LIMITS[Platform.FACEBOOK]
 
     def validate(self, account: AccountContext, req: PublishRequest) -> list[str]:
+        if (req.media_kind, req.content_format) != ("video", "reel"):
+            from repeater.platforms.facebook_content import validate
+
+            return validate(account, req)
         problems = _size_problems(req)
         problems.extend(_picture_problems(req))
         if not (account.extra.get("page_id") or account.external_id):
@@ -576,6 +582,13 @@ class FacebookPublisher:
         return problems
 
     def publish(self, account: AccountContext, req: PublishRequest) -> PublishResult:
+        from repeater.platforms.rich_media import require_publishing
+
+        require_publishing()
+        if (req.media_kind, req.content_format) != ("video", "reel"):
+            from repeater.platforms.facebook_content import publish
+
+            return publish(account, req)
         if req.state.get("video_id"):
             # An earlier attempt already started (and may have finished) this reel: never upload it
             # again. poll() finds out what became of it, or restarts when it is gone.
@@ -613,6 +626,13 @@ class FacebookPublisher:
         """Resolve a PROCESSING reel. State from an UnknownOutcomeError carries `finish_unconfirmed`:
         see `_settle_unconfirmed_finish`. RestartPublish (expired or failed upload) is the only way
         a new upload starts."""
+        from repeater.platforms.rich_media import require_publishing
+
+        require_publishing()
+        if state.get("rich_kind"):
+            from repeater.platforms.facebook_content import poll
+
+            return poll(account, state)
         video_id = state.get("video_id")
         if not video_id:
             raise PermanentError(

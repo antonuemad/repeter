@@ -1,0 +1,14 @@
+<section class="card" id="execution" aria-labelledby="execution-title">
+  <h2 id="execution-title">{{ t('plan.execution') }}</h2>
+  <p><strong>{{ t('plan.running') if plan.enabled else t('plan.stopped') }}</strong></p>
+  <p class="plan-measure">{{ t('plan.execution_help') }}</p>
+  {% if not publishing_enabled %}<p id="execution-lock" role="status">{{ t('plan.execution_locked') }}</p>{% elif workspace.paused %}<p id="execution-lock" role="status">{{ t('plan.workspace_paused') }}</p>{% endif %}
+  {% if role == 'owner' %}
+  <form method="post" action="/plans/{{ plan.id }}/execution" class="actions">
+    {{ m.csrf() }}<input type="hidden" name="revision" value="{{ plan.revision }}">
+    {% if plan.enabled %}<button class="button secondary" name="action" value="pause">{{ t('plan.pause') }}</button>
+    {% else %}<button class="button" name="action" value="start"{% if not publishing_enabled or workspace.paused %} disabled aria-describedby="execution-lock"{% endif %}>{{ t('plan.start_execution') }}</button>{% endif %}
+    <a href="/schedule">{{ t('plan.actual_schedule') }}</a>
+  </form>
+  {% else %}<p class="muted">{{ t('plan.owner_execution') }}</p>{% endif %}
+</section>

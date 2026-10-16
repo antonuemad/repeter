@@ -37,7 +37,11 @@ Allow: /privacy
 Allow: /terms
 Disallow: /
 """
-MEDIA_HEADERS = {"Cache-Control": "private, max-age=3600", "X-Robots-Tag": "noindex, nofollow"}
+MEDIA_HEADERS = {
+    "Cache-Control": "private, max-age=3600",
+    "X-Robots-Tag": "noindex, nofollow",
+    "X-Content-Type-Options": "nosniff",
+}
 # base64url(HMAC-SHA256) without padding is 43 characters; anything else is not a signature.
 _SIGNATURE_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
@@ -67,8 +71,10 @@ def favicon() -> FileResponse:
     return FileResponse(STATIC_DIR / "favicon.svg", media_type="image/svg+xml")
 
 
-@router.api_route("/m/{video_id}/{expires}/{sig}.mp4", methods=["GET", "HEAD"], include_in_schema=False)
-def media(request: Request, db: DB, video_id: str, expires: str, sig: str) -> Response:
+@router.api_route(
+    "/m/{video_id}/{expires}/{sig}.{extension}", methods=["GET", "HEAD"], include_in_schema=False
+)
+def media(request: Request, db: DB, video_id: str, expires: str, sig: str, extension: str) -> Response:
     """Signed, expiring link to an encoded video, fetched by the platforms (PLAN.md 5.5, 7.4).
     No session: the HMAC signature over (video id, expiry) is the authorization."""
     if (
@@ -85,6 +91,8 @@ def media(request: Request, db: DB, video_id: str, expires: str, sig: str) -> Re
     if verdict == "expired":
         return PlainTextResponse("This link has expired.", status_code=410, headers=MEDIA_HEADERS)
     video = db.get(Video, vid)
+    if video is None or extension != ("jpg" if video.media_kind == "image" else "mp4"):
+        return PlainTextResponse("Not found", status_code=404, headers=MEDIA_HEADERS)
     path = _encoded_file(video)
     if path is None:
         return PlainTextResponse("Not found", status_code=404, headers=MEDIA_HEADERS)
@@ -97,15 +105,20 @@ def media(request: Request, db: DB, video_id: str, expires: str, sig: str) -> Re
         request.client.host if request.client else "-",
         request.headers.get("user-agent", "-")[:120],
     )
-    return FileResponse(path, media_type="video/mp4", headers=MEDIA_HEADERS)
+    return FileResponse(
+        path, media_type="image/jpeg" if video.media_kind == "image" else "video/mp4", headers=MEDIA_HEADERS
+    )
 
 
 def _encoded_file(video: Video | None) -> Path | None:
     if (
         video is None
         or not video.encoded_path
-        or video.media_kind != "video"
-        or video.content_format != "reel"
+        or video.media_kind not in ("video", "image")
+        or (
+            (video.profile_id is not None or video.media_kind != "video" or video.content_format != "reel")
+            and not get_settings().publishing_enabled
+        )
     ):
         return None
     try:

@@ -299,7 +299,7 @@ def _publish_target(session: Session, post: ScheduledPost, now: datetime) -> _Ta
             ),
         )
     rule = rules.find_rule(session, account)
-    if post.created_by != "user" and (rule is None or not rule.enabled):
+    if post.created_by not in ("user", "plan") and (rule is None or not rule.enabled):
         return _cancel(
             session, post, Message("publish.rotation_off", "Rotation is turned off for this account.", {})
         )
@@ -307,16 +307,17 @@ def _publish_target(session: Session, post: ScheduledPost, now: datetime) -> _Ta
     if video is None:
         return _cancel(session, post, Message("publish.video_gone", "The video no longer exists.", {}))
     if (
-        video.profile_id is not None
+        post.created_by == "plan"
+        or video.profile_id is not None
         or account.profile_id is not None
         or video.media_kind != "video"
         or video.content_format != "reel"
     ):
-        return _cancel(
-            session,
-            post,
-            Message("plan.draft_only", "Person plans are preview-only; publishing is unavailable.", {}),
-        )
+        from repeater.engine.people import eligibility_problem
+
+        issue = eligibility_problem(session, post, video, account, now=now)
+        if issue:
+            return _cancel(session, post, diagnostic(issue, "publish.validation"))
     if video.status in (VideoStatus.IMPORTING, VideoStatus.PROCESSING):
         run_at = now + timedelta(seconds=WAIT_FOR_VIDEO_SECONDS)
         post.scheduled_at = run_at
@@ -353,6 +354,8 @@ def _publish_target(session: Session, post: ScheduledPost, now: datetime) -> _Ta
             Message("publish.missed_slot", "The post missed its time slot; it will be re-planned.", {}),
         )
     target = _Target(post, video, account, rule, Path())
+    if video.media_kind == "text":
+        return target
     path = _encoded_file(video)
     if path is None:
         return _needs_attention(
@@ -405,8 +408,18 @@ def _build_request(target: _Target) -> PublishRequest:
     return PublishRequest(
         post_id=target.post.id,
         video_path=target.path,
-        public_url=signed_media_url(video.id, ttl_seconds=MEDIA_URL_TTL_SECONDS),
-        size_bytes=int(video.encoded_size_bytes or target.path.stat().st_size),
+        public_url=(
+            signed_media_url(
+                video.id,
+                ttl_seconds=MEDIA_URL_TTL_SECONDS,
+                extension="jpg" if video.media_kind == "image" else "mp4",
+            )
+            if video.media_kind != "text"
+            else ""
+        ),
+        size_bytes=(
+            int(video.encoded_size_bytes or target.path.stat().st_size) if video.media_kind != "text" else 0
+        ),
         duration_s=float(video.duration_s or 0.0),
         width=int(video.width or 0),
         height=int(video.height or 0),
@@ -417,6 +430,8 @@ def _build_request(target: _Target) -> PublishRequest:
         fps=float(video.fps) if video.fps else None,
         state=copy.deepcopy(adapter_state(target.post.publish_state)),
         on_session_start=((lambda: reserve_start(target.post.id)) if platform == Platform.YOUTUBE else None),
+        media_kind=video.media_kind,
+        content_format=video.content_format,
     )
 
 
@@ -580,7 +595,8 @@ def _rate_limited(session: Session, target: _Target, exc: RateLimitedError, now:
 def _keep_min_gap(session: Session, target: _Target, t: datetime) -> datetime:
     """Move `t` later until it is at least the rule's min gap away from the account's other posts."""
     rule = target.rule
-    gap = timedelta(minutes=max(int(rule.min_gap_minutes or 0), 0)) if rule is not None else timedelta(0)
+    minimum = 1 if target.post.created_by == "plan" else 0
+    gap = timedelta(minutes=max(int(rule.min_gap_minutes or 0) if rule else 0, minimum))
     if gap <= timedelta(0):
         return t
     at = func.coalesce(ScheduledPost.published_at, ScheduledPost.scheduled_at)
@@ -620,6 +636,9 @@ def _retry_or_give_up(
     backoff = RETRY_BACKOFF_MINUTES[post.attempts - 1] * 60
     delay = max(float(backoff), min(float(retry_after or 0), MAX_RETRY_AFTER_SECONDS))
     run_at = now + timedelta(seconds=delay)
+    if post.created_by == "plan":
+        run_at = _keep_min_gap(session, target, run_at)
+        delay = (run_at - now).total_seconds()
     post.status = PostStatus.FAILED
     post.scheduled_at = run_at
     post.error = Message(
@@ -683,12 +702,16 @@ def poll_post(session: Session, post_id: int, *, now: datetime | None = None) ->
         )
     target = _Target(post, video, account, rules.find_rule(session, account), Path())
     if (
-        video.profile_id is not None
+        post.created_by == "plan"
+        or video.profile_id is not None
         or account.profile_id is not None
         or video.media_kind != "video"
         or video.content_format != "reel"
     ):
-        return _wait_while_halted(session, target, now)
+        from repeater.engine.people import binding_problem
+
+        if binding_problem(session, post, video, account, polling=True):
+            return _wait_while_halted(session, target, now)
     if not get_settings().publishing_enabled or (
         target.platform in PUBLISH_ON_POLL and _publishing_halted(session, target)
     ):
@@ -715,6 +738,10 @@ def _publishing_halted(session: Session, target: _Target) -> bool:
     workspace = session.get(Workspace, target.post.workspace_id)
     if workspace is None or workspace.paused:
         return True
+    if target.post.created_by == "plan":
+        from repeater.engine.people import binding_problem
+
+        return binding_problem(session, target.post, target.video, target.account, polling=True) is not None
     rule = target.rule
     return target.post.created_by != "user" and (rule is None or not rule.enabled)
 

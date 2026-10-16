@@ -230,7 +230,7 @@ class CreatorProfile(TimestampMixin, Base):
 
 
 class ContentPlan(TimestampMixin, Base):
-    """Saved planning intent only. Never consumed by the publishing worker."""
+    """Person schedule; explicitly enabled separately from the server publishing lock."""
 
     __tablename__ = "content_plans"
     __table_args__ = (
@@ -258,6 +258,7 @@ class ContentPlan(TimestampMixin, Base):
     rotation_mode: Mapped[str] = mapped_column(String(16), default="once", server_default="once")
     repeat_after_days: Mapped[int] = mapped_column(Integer, default=30, server_default="30")
     revision: Mapped[int] = mapped_column(Integer, default=1)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
 
 class PlanTarget(Base):
@@ -469,6 +470,7 @@ class ScheduledPost(TimestampMixin, Base):
         Index("ix_post_ws_sched", "workspace_id", "scheduled_at"),
         Index("ix_post_account_sched", "connected_account_id", "scheduled_at"),
         Index("ix_post_video", "video_id"),
+        UniqueConstraint("plan_id", "plan_revision", "connected_account_id", "slot_at", name="uq_plan_slot"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -491,7 +493,13 @@ class ScheduledPost(TimestampMixin, Base):
     error: Mapped[str | None] = mapped_column(Text)
     error_info: Mapped[dict | None] = mapped_column(JSONB)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_by: Mapped[str] = mapped_column(String(32), default="scheduler")  # scheduler | user
+    created_by: Mapped[str] = mapped_column(String(32), default="scheduler")  # scheduler | user | plan
+    plan_id: Mapped[int | None] = mapped_column(
+        ForeignKey("content_plans.id", ondelete="SET NULL"), index=True
+    )
+    plan_revision: Mapped[int | None] = mapped_column(Integer)
+    # Immutable intended slot, distinct from scheduled_at which moves during retries.
+    slot_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     video: Mapped[Video] = relationship()
     connected_account: Mapped[ConnectedAccount] = relationship()

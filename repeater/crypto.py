@@ -123,15 +123,19 @@ def media_signature(video_id: int, expires: int) -> str:
     return _b64e(mac)
 
 
-def signed_media_path(video_id: int, ttl_seconds: int | None = None, now: float | None = None) -> str:
+def signed_media_path(
+    video_id: int, ttl_seconds: int | None = None, now: float | None = None, *, extension: str = "mp4"
+) -> str:
+    if extension not in ("mp4", "jpg"):
+        raise ValueError("unsupported encoded media type")
     ttl = ttl_seconds if ttl_seconds is not None else get_settings().media_url_ttl_seconds
     expires = int((now if now is not None else time.time()) + ttl)
-    return f"/m/{video_id}/{expires}/{media_signature(video_id, expires)}.mp4"
+    return f"/m/{video_id}/{expires}/{media_signature(video_id, expires)}.{extension}"
 
 
-def signed_media_url(video_id: int, ttl_seconds: int | None = None) -> str:
+def signed_media_url(video_id: int, ttl_seconds: int | None = None, *, extension: str = "mp4") -> str:
     """Public HTTPS URL that Instagram/Facebook/TikTok fetch the encoded file from."""
-    return get_settings().base_url.rstrip("/") + signed_media_path(video_id, ttl_seconds)
+    return get_settings().base_url.rstrip("/") + signed_media_path(video_id, ttl_seconds, extension=extension)
 
 
 def verify_media_signature(video_id: int, expires: int, sig: str, now: float | None = None) -> str:

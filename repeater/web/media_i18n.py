@@ -1,9 +1,9 @@
-"""Mixed library and preview copy. All rich formats remain simulation-only."""
+"""Mixed library and format capability copy; the independent server lock controls publishing."""
 
 COPY = {
     "media.intro": (
-        "Keep this person’s videos, images and posts together. Ready, compatible items join their rotation preview.",
-        "اجمع فيديوهات الشخص وصوره وبوستاته في مكتبة واحدة. العناصر الجاهزة والمتوافقة بتدخل معاينة الروتيشن.",
+        "Keep this person’s videos, images and posts together. Ready, compatible items join their rotation plan.",
+        "اجمع فيديوهات الشخص وصوره وبوستاته في مكتبة واحدة. العناصر الجاهزة والمتوافقة بتدخل خطة الروتيشن.",
     ),
     "media.file": ("Video or image file", "ملف الفيديو أو الصورة"),
     "media.original": (
@@ -11,10 +11,10 @@ COPY = {
         "استخدم ملفًا أصليًا عندك إذن بإعادة استخدامه.",
     ),
     "media.edit_help": (
-        "Leave a field empty to use its original text. Format and platform choices affect the preview; saving never publishes content.",
-        "سيب الحقل فاضي لاستخدام النص الأصلي. شكل المحتوى واختيار المنصات بيأثروا على المعاينة؛ الحفظ لا ينشر محتوى.",
+        "Leave a field empty to use its original text. Format and platform choices apply to future slots. An active plan can use saved content when publishing is allowed.",
+        "سيب الحقل فاضي لاستخدام النص الأصلي. شكل المحتوى والمنصات بيطبقوا على المواعيد القادمة. الخطة المفعّلة ممكن تستخدم المحتوى المحفوظ لما النشر يكون مسموحًا.",
     ),
-    "media.platforms": ("Allow in these platform previews", "السماح في معاينة المنصات دي"),
+    "media.platforms": ("Allow on these platforms", "السماح على المنصات دي"),
     "media.delete_help": (
         "Only the workspace owner can delete this item and its files from Repeater. This does not remove any existing platform posts.",
         "مالك مساحة العمل فقط يقدر يحذف العنصر وملفاته من Repeater. ده لا يحذف أي منشورات موجودة على المنصات.",
@@ -39,8 +39,8 @@ COPY = {
     "media.story": ("Story", "ستوري"),
     "media.compose": ("Write a text post", "كتابة بوست نصي"),
     "media.compose_help": (
-        "Text-only posts enter Facebook Page previews. This saves to this person’s library only.",
-        "البوستات النصية بتدخل معاينة صفحات Facebook. الحفظ هنا بيضيف لمكتبة الشخص فقط.",
+        "Text-only posts support Facebook Pages. Save to this person’s library; an active plan can use them when publishing is allowed.",
+        "البوستات النصية تدعم صفحات Facebook. احفظها في مكتبة الشخص؛ الخطة المفعّلة ممكن تستخدمها لما النشر يكون مسموحًا.",
     ),
     "media.save": ("Add to library", "إضافة للمكتبة"),
     "media.text_added": ("Added a text post to a person's library.", "تمت إضافة بوست نصي لمكتبة الشخص."),
@@ -97,12 +97,12 @@ COPY = {
         "الفيديو غير متوافق مع حدود المدة أو حجم الملف للمنصة.",
     ),
     "media.scope": (
-        "Preview only: image posts and stories on Facebook / Instagram, text posts on Facebook, and existing short-video formats. Instagram Stories require Business accounts. YouTube image/text posts and TikTok photos are not enabled. No content is published.",
-        "معاينة فقط: بوستات الصور والستوريز على Facebook وInstagram، البوستات النصية على Facebook، وأشكال الفيديو القصير الحالية. ستوريز Instagram تحتاج حساب Business. بوستات الصور والنصوص على YouTube وصور TikTok غير مفعلة. لا يتم نشر أي محتوى.",
+        "Supported formats: image posts and stories on Facebook / Instagram, text posts on Facebook, and existing short-video formats. Instagram Stories require Business accounts. YouTube image/text posts and TikTok photos are not enabled. Publishing requires an enabled plan and the server publishing lock to be lifted.",
+        "الأشكال المدعومة: بوستات الصور والستوريز على Facebook وInstagram، والبوستات النصية على Facebook، وأشكال الفيديو القصير الحالية. ستوريز Instagram تحتاج حساب Business. صور ونصوص YouTube وصور TikTok غير مفعّلة. النشر يحتاج خطة مفعّلة ورفع قفل النشر من السيرفر.",
     ),
     "media.story_caption": (
-        "Story captions are library notes only; this preview does not add text overlays, links, music or stickers.",
-        "وصف الستوري ملاحظة في المكتبة فقط؛ المعاينة مش بتضيف كتابة على الصورة أو روابط أو موسيقى أو ملصقات.",
+        "Story captions are library notes only; Repeater does not add text overlays, links, music or stickers.",
+        "وصف الستوري ملاحظة في المكتبة فقط؛ Repeater مش بيضيف كتابة على الصورة أو روابط أو موسيقى أو ملصقات.",
     ),
     "media.excluded": ("Format exclusions ({n})", "استبعادات بسبب الشكل ({n})"),
     "media.excluded_help": (

@@ -181,15 +181,21 @@ def plan_workspace(session: Session, workspace_id: int, now: datetime | None = N
     if workspace is None or workspace.paused:
         return []
     lock_workspace(session, workspace.id)
+    session.refresh(workspace)
+    if workspace.paused:
+        return []
+    from repeater.engine.people import plan_people
+
+    people_posts = plan_people(session, workspace, now=now)
     pairs = _active_rules(session, workspace.id)
     if not pairs:
-        return []
+        return people_posts
     if any(account.platform == Platform.YOUTUBE for _, account in pairs):
         # All channels share one Google project, including plans from different workspaces.
         session.execute(select(func.pg_advisory_xact_lock(727002, 0)))
     ctx = _load_context(session, workspace, now)
     if ctx is None:
-        return []
+        return people_posts
     for rule, account in pairs:
         _plan_account(ctx, rule, account)
     if ctx.created:
@@ -206,7 +212,7 @@ def plan_workspace(session: Session, workspace_id: int, now: datetime | None = N
             post_ids=[p.id for p in ctx.created],
         )
     session.flush()
-    return ctx.created
+    return people_posts + ctx.created
 
 
 def lock_workspace(session: Session, workspace_id: int) -> None:

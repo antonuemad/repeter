@@ -43,6 +43,10 @@ IMPORT_PLATFORMS = (Platform.FACEBOOK, Platform.INSTAGRAM)
 
 
 def get_plan(db, ctx, plan_id, *, lock=False):
+    if lock:
+        from repeater.engine.scheduler import lock_workspace
+
+        lock_workspace(db, ctx.workspace.id)
     plan = db.scalar(
         select(ContentPlan)
         .where(ContentPlan.id == plan_id, ContentPlan.workspace_id == ctx.workspace.id)
@@ -220,6 +224,48 @@ def folders(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, form:
         return _edit(request, db, ctx, plan, error=exc, submitted=dict(form))
 
 
+@router.post("/plans/{plan_id}/execution")
+def execution(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, form: Form) -> Response:
+    from repeater.engine.people import cancel_pending
+
+    if not ctx.is_owner:
+        raise HTTPException(403)
+    plan = get_plan(db, ctx, plan_id, lock=True)
+    try:
+        _revision(form, plan)
+        action = form_str(form, "action", max_len=12, required=True)
+        if action not in {"start", "pause"}:
+            raise FormError("plan.schedule_invalid")
+        if action == "start":
+            if not get_settings().publishing_enabled:
+                raise FormError("plan.execution_locked")
+            db.refresh(ctx.workspace)
+            if ctx.workspace.paused:
+                raise FormError("plan.workspace_paused")
+            if not targets(db, plan):
+                raise FormError("plan.no_targets")
+        cancel_pending(db, plan)
+        plan.enabled = action == "start"
+        plan.revision += 1
+        if plan.enabled:
+            kinds.enqueue_plan_workspace(db, plan.workspace_id)
+        log_activity(
+            db,
+            plan.workspace_id,
+            "info",
+            "plans",
+            f"Person plan {plan.id}: {action}.",
+            actor=ctx.actor,
+            plan_id=plan.id,
+        )
+        db.commit()
+        flash(request, "success", "plan.started" if plan.enabled else "plan.paused")
+        return RedirectResponse(f"/plans/{plan.id}#execution", 303)
+    except FormError as exc:
+        db.rollback()
+        return _edit(request, db, ctx, get_plan(db, ctx, plan_id), error=exc)
+
+
 @router.post("/plans/{plan_id}/{section}")
 def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section: str, form: Form) -> Response:
     if section not in {"person", "source", "targets", "schedule", "rotation", "imports", "platforms"}:
@@ -362,6 +408,11 @@ def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section:
             profile_id=plan.profile_id,
             section=section,
         )
+        from repeater.engine.people import cancel_pending
+
+        cancel_pending(db, plan)
+        if section in {"targets", "schedule", "rotation"}:
+            plan.enabled = False
         plan.revision += 1
         db.commit()
         flash(request, "success", "plan.saved")
@@ -501,6 +552,9 @@ def control_platform(
             kinds.enqueue_poll_source(db, source.id)
         # Reject a stale in-flight listing even if pause and resume both happen before it returns.
         source.config = {**source.config, "control_revision": plan.revision + 1}
+        from repeater.engine.people import cancel_pending
+
+        cancel_pending(db, plan)
         plan.revision += 1
         log_activity(
             db,

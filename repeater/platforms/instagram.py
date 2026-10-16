@@ -210,12 +210,14 @@ def _check_publishing_quota(graph: meta.Graph, ig_user_id: str) -> None:
 def _create_container(
     graph: meta.Graph, ig_user_id: str, req: PublishRequest, settings: dict[str, Any]
 ) -> str:
-    data: dict[str, Any] = {
-        "media_type": "REELS",
-        "video_url": req.public_url,
-        "share_to_feed": "true" if meta.flag(settings.get("share_to_feed")) else "false",
-    }
-    if req.caption:
+    data: dict[str, Any] = {"image_url" if req.media_kind == "image" else "video_url": req.public_url}
+    if req.content_format == "story":
+        data["media_type"] = "STORIES"
+    elif req.media_kind == "video":
+        data.update(
+            media_type="REELS", share_to_feed="true" if meta.flag(settings.get("share_to_feed")) else "false"
+        )
+    if req.caption and req.content_format != "story":
         data["caption"] = req.caption
     if meta.flag(settings.get("is_ai_generated")):
         data["is_ai_generated"] = "true"
@@ -321,7 +323,7 @@ def _recover_published(graph: meta.Graph, ig_user_id: str, state: dict[str, Any]
     try:
         items = list(
             graph.paginate(
-                f"{meta.node(ig_user_id)}/media",
+                f"{meta.node(ig_user_id)}/{'stories' if state.get('content_format') == 'story' else 'media'}",
                 {"fields": RECOVERY_FIELDS, "limit": RECOVERY_LOOKBACK},
                 action="looking up the published Instagram reel",
                 max_pages=1,
@@ -399,8 +401,15 @@ class InstagramPublisher:
     limits = LIMITS[Platform.INSTAGRAM]
 
     def validate(self, account: AccountContext, req: PublishRequest) -> list[str]:
-        problems = _file_problems(req)
-        problems.extend(_caption_problems(req.caption or ""))
+        from repeater.platforms import rich_media
+
+        problems = (
+            _file_problems(req)
+            if (req.media_kind, req.content_format) == ("video", "reel")
+            else rich_media.problems(account, req)
+        )
+        if req.content_format != "story":
+            problems.extend(_caption_problems(req.caption or ""))
         url_problem = _public_url_problem(req.public_url)
         if url_problem:
             problems.append(url_problem)
@@ -409,6 +418,9 @@ class InstagramPublisher:
         return problems
 
     def publish(self, account: AccountContext, req: PublishRequest) -> PublishResult:
+        from repeater.platforms.rich_media import require_publishing
+
+        require_publishing()
         container_id = req.state.get("container_id")
         if container_id:
             # An earlier attempt already created this post's container (and may have tried to
@@ -435,7 +447,9 @@ class InstagramPublisher:
                 "container_id": container_id,
                 "created_at": created_at.isoformat(),
                 "ig_user_id": ig_user_id,
-                "caption_key": caption_key(req.caption),
+                "caption_key": caption_key(req.caption if req.content_format != "story" else ""),
+                "content_format": req.content_format,
+                "media_kind": req.media_kind,
             },
             poll_after_seconds=FIRST_POLL_SECONDS,
             message="Sent to Instagram; Instagram is downloading and processing the video.",
@@ -446,6 +460,9 @@ class InstagramPublisher:
         place and RestartPublish(code="container_expired") is raised: publish() must run again.
         The same restart happens after MAX_PUBLISH_ATTEMPTS media_publish refusals that all prove
         nothing went live; any unknown outcome among them ends in a PermanentError instead."""
+        from repeater.platforms.rich_media import require_publishing
+
+        require_publishing()
         container_id = state.get("container_id")
         if not container_id:
             raise PermanentError(

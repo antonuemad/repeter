@@ -405,7 +405,7 @@ def test_legacy_paths_cannot_publish_person_media_even_with_server_enabled(
     v = video(db, p, "Preview only")
     db.commit()
     db.refresh(a)
-    with pytest.raises(actions.UserError, match="preview-only"):
+    with pytest.raises(actions.UserError, match="person plan"):
         actions.schedule_video_now(db, v, a, actor="test")
     assert scheduler._active_rules(db, p.workspace_id) == []
     ws = db.get(Workspace, p.workspace_id)

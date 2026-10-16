@@ -3,6 +3,36 @@
 from repeater.web.media_i18n import COPY as MEDIA_COPY
 
 COPY = {
+    "plan.execution": ("Plan execution", "تشغيل الخطة"),
+    "plan.running": ("Plan enabled", "الخطة مفعّلة"),
+    "plan.stopped": ("Plan stopped", "الخطة متوقفة"),
+    "plan.pause": ("Stop this plan", "إيقاف الخطة"),
+    "plan.start_execution": ("Start this plan", "تشغيل الخطة"),
+    "plan.actual_schedule": ("Open the actual queue", "فتح طابور النشر الفعلي"),
+    "plan.owner_execution": (
+        "Only the workspace owner can start or stop this plan.",
+        "مالك مساحة العمل فقط يقدر يشغّل الخطة أو يوقفها.",
+    ),
+    "plan.execution_locked": (
+        "Testing lock: plan activation and all publication requests are blocked on this server. Preview remains available.",
+        "قفل الاختبار: تشغيل الخطط وكل طلبات النشر ممنوعة على السيرفر. المعاينة متاحة.",
+    ),
+    "plan.workspace_paused": (
+        "The workspace is paused. Resume it in Workspace settings before starting a plan.",
+        "مساحة العمل متوقفة. استأنفها من إعدادات مساحة العمل قبل تشغيل الخطة.",
+    ),
+    "plan.execution_help": (
+        "After activation, the worker reserves upcoming slots from this person's library. Confirmed publications determine the repeat gap. Editing pages, times or rotation stops the plan for review. The preview never starts it.",
+        "بعد التشغيل، النظام بيحجز المواعيد القادمة من مكتبة الشخص. النشر المؤكد بيحدد فاصل التكرار. تعديل الصفحات أو المواعيد أو الروتيشن بيوقف الخطة للمراجعة. فتح المعاينة لا يشغّلها.",
+    ),
+    "plan.started": (
+        "Plan enabled. The worker will fill upcoming eligible slots.",
+        "تم تفعيل الخطة. النظام هيملأ المواعيد القادمة المناسبة.",
+    ),
+    "plan.paused": (
+        "Plan stopped; untouched reservations canceled. Already sent content may be live.",
+        "تم إيقاف الخطة وإلغاء الحجوزات التي لم تُرسل. المحتوى الذي أُرسل بالفعل قد يكون منشورًا.",
+    ),
     "plan.latest30_option": ("Latest 30 + new videos", "آخر ٣٠ فيديو والجديد"),
     "plan.new_option": ("New videos only", "الفيديوهات الجديدة فقط"),
     "plan.platforms": ("Import from their platforms", "الاستيراد من منصاته"),
@@ -73,8 +103,8 @@ COPY = {
     "plan.unassigned": ("Unassigned library", "المكتبة غير المخصصة لشخص"),
     "plan.draft": ("Draft · preview only", "مسودة · معاينة فقط"),
     "plan.draft_only": (
-        "Person plans are preview-only; publishing is unavailable.",
-        "خطط الأشخاص للمعاينة فقط؛ النشر غير متاح.",
+        "Use the person's plan to schedule their content; manual publishing is unavailable here.",
+        "استخدم خطة الشخص لجدولة محتواه؛ النشر اليدوي غير متاح هنا.",
     ),
     "plan.scope": (
         "Build each person’s library with videos, images and text posts. Choose post, story or short-video formats and preview rotation on compatible pages. Publishing stays locked during testing.",
@@ -129,8 +159,8 @@ COPY = {
     "plan.save_targets": ("Save selected pages", "حفظ الصفحات المختارة"),
     "plan.schedule": ("Set the publishing schedule", "تحديد جدول النشر"),
     "plan.schedule_help": (
-        "One video per selected time, for each page. Rotation settings decide when a video can return; a slot stays empty if no video is eligible.",
-        "فيديو واحد في كل موعد لكل صفحة. إعدادات الروتيشن بتحدد إمتى الفيديو ممكن يرجع؛ الموعد بيفضل فاضي لو مفيش فيديو مناسب.",
+        "One item per selected time, for each page. Rotation settings decide when content can return; a slot stays empty if no item is eligible.",
+        "عنصر واحد في كل موعد لكل صفحة. إعدادات الروتيشن بتحدد إمتى المحتوى ممكن يرجع؛ الموعد بيفضل فاضي لو مفيش عنصر مناسب.",
     ),
     "plan.timezone": ("Time zone", "المنطقة الزمنية"),
     "plan.start": ("Start date", "تاريخ البداية"),
@@ -158,8 +188,8 @@ COPY = {
         "من يوم لـ٣٦٥ يوم؛ اليوم يعني ٢٤ ساعة كاملة. يُطبّق عند اختيار التدوير، بشكل مستقل لكل صفحة. لو المكتبة صغيرة، بنسيب مواعيد فاضية بدل تقصير الفاصل.",
     ),
     "plan.rotation_safe": (
-        "Saving calculates a draft only. It does not start publishing, import files or consume content from the library.",
-        "الحفظ بيحسب مسودة فقط. ما بيشغّلش النشر، وما بيستوردش ملفات، وما بيسجّلش عناصر المكتبة كمحتوى مستخدم.",
+        "Saving rotation settings stops an active plan for review. Start it separately when publishing is available. Previewing does not consume library content.",
+        "حفظ إعدادات الروتيشن بيوقف الخطة المفعّلة للمراجعة. شغّلها بشكل منفصل لما النشر يبقى متاح. المعاينة ما بتسجّلش عناصر المكتبة كمحتوى مستخدم.",
     ),
     "plan.rotation_invalid": (
         "Choose once per page or automatic rotation, and a repeat interval from 1 to 365 days.",
@@ -275,8 +305,8 @@ COPY = {
         "المعاينة بتستخدم أول ١٠٠٠ عنصر جاهز حسب الترتيب المختار.",
     ),
     "plan.preview_limits": (
-        "Times use this plan’s zone. Nonexistent daylight-saving times are skipped; repeated times occur once. Legacy rotation rules do not control this draft.",
-        "المواعيد حسب المنطقة الزمنية للخطة. مواعيد التوقيت الصيفي غير الموجودة بتتخطى، والمتكررة بتظهر مرة واحدة. قواعد الروتيشن القديمة لا تتحكم في المسودة.",
+        "Times use this plan’s zone. Nonexistent daylight-saving times are skipped; repeated times occur once. Execution also checks destination settings, minimum gaps, pending work and upload quotas. Open the actual queue for committed reservations.",
+        "المواعيد حسب منطقة الخطة. مواعيد التوقيت الصيفي غير الموجودة بتتخطّى والمتكررة بتحصل مرة. التنفيذ بيراجع إعدادات الوجهة وأقل فاصل والعمل المعلّق وحصص الرفع. افتح طابور النشر الفعلي للحجوزات المؤكدة.",
     ),
     "plan.rename": ("Save name", "حفظ الاسم"),
     "plan.saved_pages": ("{n} pages selected", "تم اختيار {n} صفحة"),

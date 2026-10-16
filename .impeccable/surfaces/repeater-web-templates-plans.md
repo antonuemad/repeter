@@ -2,13 +2,23 @@
 version: 1
 slug: repeater-web-templates-plans
 primary_target: repeater/web/templates/plans/edit.html
-related_targets: [repeater/web/templates/plans/index.html, repeater/web/templates/plans/preview.html, repeater/web/templates/plans/platform_sources.html, repeater/web/templates/library.html, repeater/web/templates/library_detail.html, repeater/web/templates/sources.html, repeater/web/plan_i18n.py, repeater/web/media_i18n.py, repeater/web/static/app.css, repeater/web/static/app.js]
+related_targets: [repeater/web/templates/plans/index.html, repeater/web/templates/plans/preview.html, repeater/web/templates/plans/execution.html, repeater/web/templates/plans/platform_sources.html, repeater/web/templates/library.html, repeater/web/templates/library_detail.html, repeater/web/templates/sources.html, repeater/web/plan_i18n.py, repeater/web/media_i18n.py, repeater/web/static/app.css, repeater/web/static/app.js]
 ---
 
-# People and draft content plans
+# People and content plans
 
 Mode: Operate. Ordinary extension of the user-pinned Sentinel Eye / Magic Lap system.
 No new visual world or generated comp. Preserve DESIGN.md and the shared base contract.
+
+Current state, 2026-10-16: the person library supports mixed content, and explicit owner-only
+plan execution and rich publishing routes are implemented behind the server publishing lock.
+The execution section at the end of this brief supersedes the earlier execution-deferred and
+preview-only capability statements. The preview itself remains an independent simulation.
+The phase notes below are historical evidence, not the current capability boundary. PRODUCT.md's
+"Person-plan execution and rich publishing" section owns current product truth; production
+publishing remains disabled and no live publication acceptance is claimed.
+
+## Phase-one foundation (2026-10-15)
 
 Original phase-one request, 2026-10-15: account linking, folder and page selection,
 schedule and its preview, with the person/library foundation. Mock tests only, publication
@@ -314,3 +324,80 @@ Ruff check, format, and diff checks were clean. Fresh independent follow-up disp
 No open material findings remain. These observations preserve the distinction between reviewed
 UI and verified live integrations. This documentation-only follow-up did not rerun the browser,
 detector, or tests.
+
+## Plan execution and publishing copy (2026-10-16)
+
+Direction contract: Operate within the existing Sentinel Eye / Magic Lap blue/slate identity.
+The execution extension retains the logical-start rail, utility chrome, Inter and IBM Plex Sans
+Arabic, native forms, semantic tokens, and responsive Arabic RTL / English LTR layout. It adds
+no visual world, shared component, or design token; DESIGN.md and `.impeccable/design.json`
+remain unchanged.
+
+The shared `plans/execution.html` partial appears directly after the heading on both preview
+and edit pages, before the simulation or setup sections. An incumbent task card groups the
+execution heading, plain-language enabled/stopped state, explanation, lock or workspace-pause
+message, and owner actions. The people index replaces its unconditional draft badge with the
+plan's actual enabled/stopped state. An enabled state describes the saved plan switch; it does
+not assert that publishing gates are open or that content has been published.
+
+Only the workspace owner receives Start this plan or Stop this plan controls. Start uses the
+native disabled state while the server is locked or the workspace is paused, with
+`aria-describedby` pointing to the visible explanation; the server-lock message takes priority
+when both apply. The explanation has status semantics. Stop remains available for an enabled
+plan even while either gate is closed. The native POST form carries CSRF and plan revision
+values. Other members see the owner-only explanation. The owner action row also links directly
+to `/schedule` as Open the actual queue. Existing action wrapping and card spacing carry the
+layout at narrow widths; no new responsive rules were introduced.
+
+The execution copy explains that activation lets the worker reserve upcoming eligible slots
+from the person's library and that confirmed publications control repeat eligibility. The
+adjacent 30-day preview remains a fresh simulation: opening it never starts the plan, consumes
+content, or commits reservations. Its limits copy directs users to the actual queue and explains
+that execution also checks destination settings, minimum gaps, pending work, and upload quotas.
+Editing selected pages, times, or rotation stops the plan for review; person/source changes
+invalidate untouched reservations. The stop confirmation says untouched reservations were
+canceled and already sent content may be live. These states preserve the distinction between
+planned intent, committed work, and uncertain in-flight outcomes.
+
+English and Arabic media copy now says ready, compatible items feed the rotation plan. Format
+and platform edits apply to future slots, and saved content can enter an active plan when
+publishing is allowed. Text posts identify Facebook Page support. Format scope requires an
+enabled plan and the server publishing lock to be lifted; story captions remain library notes
+without text overlays, links, music, or stickers. These statements replace the former
+simulation-only descriptions without claiming live acceptance of the implemented adapters.
+
+Implemented surface sources are `plans/execution.html`, `plans/edit.html`, `plans/preview.html`,
+`plans/index.html`, `repeater/web/plan_i18n.py`, and `repeater/web/media_i18n.py`. Execution routes
+and provider adapters exist, but production remains `REPEATER_PUBLISHING_ENABLED=false`; no
+plan, source, or rule was activated for this release. Publication verification uses synthetic
+accounts and mocked requests only. Platform review, permissions, and live acceptance remain
+launch gates. PRODUCT.md owns the detailed execution and supported-format boundaries.
+
+Accepted execution screenshot evidence under `/Users/mac/dev/repeter-preview/`:
+
+- `execution-ar-desktop.jpg` — Arabic preview, 1440 × 1000.
+- `execution-ar-mobile.jpg` — Arabic preview, 390 × 844.
+- `execution-en-mobile.jpg` — English preview, 390 × 844.
+- `execution-edit-en-desktop.jpg` — English edit page, 1440 × 1000.
+
+All captures use synthetic local fixtures and show the publishing-locked state. Active,
+workspace-paused, non-owner, error, and index states were source-reviewed without dedicated
+captures. The evidence establishes readability of the captured desktop/mobile views, not visual
+coverage of every execution state or live platform readiness. Accessibility has source evidence
+for native controls, labels, status text, and the disabled-action explanation; keyboard and
+assistive-technology interaction were not verified in this review.
+
+Fresh independent execution finish reviewer disposition: SHIP. No material findings remain.
+
+| Review criterion | Verdict |
+| --- | --- |
+| Identity | Pass |
+| Locked explanation | Pass |
+| Preview vs queue | Pass |
+| Captured desktop/mobile | Pass |
+| Bilingual parity | Pass |
+| Accessibility | Source pass / interaction unverified |
+| Open findings | None |
+
+This documentation handoff records the accepted review and source evidence. It did not rerun
+the detector, browser, or tests and does not broaden the reviewed state coverage.

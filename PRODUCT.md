@@ -77,6 +77,9 @@ their impact without inventing pricing, customers or operating guarantees.
 
 ## Person-led phase one (2026-10-15)
 
+The phase notes record the delivery sequence. The execution update below supersedes earlier
+preview-only limitations; the testing lock remains mandatory.
+
 The primary preparation flow is now People & plans: one person/brand, a separate library,
 one Drive folder, selected owned pages, local weekdays/times, and a 30-day draft preview.
 Customers connect through the application's OAuth clients; they do not create developer
@@ -152,3 +155,30 @@ future gate; this phase implements preparation and simulation only. Both the glo
 lock and independent rich-format/person guards stay in force, including the legacy signed-video
 endpoint. No live import or publication acceptance is performed. Migration 0006 preserves existing
 video defaults; rollback archives rich formats before removing their type columns.
+
+## Person-plan execution and rich publishing (2026-10-16)
+
+Plans now have explicit owner-only activation/pause and start disabled, including migrated plans.
+Activation requires the server publishing switch, an unpaused workspace and selected destinations.
+The periodic worker reserves eligible upcoming slots within the workspace horizon through the
+same durable publish queue. The plan's local times replace legacy rotation windows; legacy
+rules still supply platform settings and minimum gaps. Assigned pages never run both planners.
+One pending item/page pair is allowed; confirmed publication time controls repeats. Preview
+remains a fresh 30-day simulation, not the committed queue; a direct link opens actual reservations.
+Editing pages, times or rotation stops the plan for review. Pause cancels only untouched work;
+already sent content may be live. In-flight outcomes retain their state and cannot be resent blindly.
+
+Facebook Page adapters cover text posts, image posts and photo/video Stories. Instagram professional
+accounts support image posts; known Business accounts support photo/video Stories. Existing reels/
+short video adapters remain available. Story descriptions stay library notes, without overlays.
+These routes reuse the format compatibility rules and are verified with denied-unmocked-network tests.
+They have not been accepted against live platform accounts. Platform review, permissions and account
+restrictions remain launch gates. TikTok photos, YouTube image/text posts and carousel albums remain out.
+
+Migration 0007 adds disabled-by-default execution and unique plan/revision/page/slot reservations.
+Retries retain their original slot, pauses/edits invalidate untouched reservations, and worker replay
+cannot publish a completed slot again. YouTube reservations use the shared project quota lock/ledger.
+The worker rechecks ownership, eligibility, actual repeat history and all execution gates before a
+fresh upload. Rich signed-media URLs require publishing enabled; authenticated library previews work
+while locked. Production remains `REPEATER_PUBLISHING_ENABLED=false`, with no plan/rule/source activated
+and no real platform publication test. Enabling the server switch is expressly outside this release.

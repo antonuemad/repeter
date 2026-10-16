@@ -123,7 +123,10 @@ def schedule_video_now(
         or video.media_kind != "video"
         or video.content_format != "reel"
     ):
-        raise UserError("plan.draft_only", "Person plans are preview-only; publishing is unavailable.")
+        raise UserError(
+            "plan.draft_only",
+            "Use the person plan to schedule this content; direct publishing is unavailable.",
+        )
     platform = Platform(account.platform)
     if platform not in PUBLISH_PLATFORMS:
         raise UserError(

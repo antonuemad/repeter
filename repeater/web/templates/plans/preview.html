@@ -3,6 +3,7 @@
 {% block title %}{{ person.name }} · {{ t('plan.preview') }}{% endblock %}
 {% block content %}
 <div class="page-heading"><div><h1 dir="auto">{{ person.name }}</h1><p>{{ t('plan.preview') }} · <bdi>{{ plan.timezone }}</bdi></p></div><div class="actions"><a class="button" href="/plans/{{ plan.id }}/edit">{{ t('plan.edit') }}</a><a href="/library?profile_id={{ person.id }}">{{ t('plan.library') }}</a></div></div>
+{% include "plans/execution.html" %}
 <section class="card"><h2>{{ t('plan.draft') }}</h2><p class="plan-measure">{{ t('plan.preview_help') }}</p><p><strong>{{ t('plan.coverage', ready=preview.ready, filled=preview.filled, empty=preview.empty) }}</strong></p><p class="muted">{{ t('plan.sources_summary', n=social_sources|length + (1 if source else 0)) }} · {{ t('plan.saved_pages', n=preview.accounts|length) }} · {{ t('plan.' ~ plan.ordering) }}</p>
 <p><strong>{{ t('plan.mode_' ~ plan.rotation_mode) }}</strong>{% if plan.rotation_mode == 'repeat' %} · {{ t('plan.rotation_summary', days=plan.repeat_after_days) }}{% endif %} · <a href="/plans/{{ plan.id }}/edit#rotation">{{ t('plan.rotation') }}</a></p>
 {% if plan.rotation_mode == 'repeat' %}<p>{{ t('plan.rotation_counts', repeated=preview.repeated, waiting=preview.waiting) }}</p>{% endif %}
