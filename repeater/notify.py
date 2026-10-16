@@ -1,4 +1,4 @@
-"""Out-of-band notifications (Telegram). OWNER: engine module.
+"""Out-of-band notifications (email outbox and optional Telegram). OWNER: engine module.
 
 Uses the Bot API method sendMessage (https://core.telegram.org/bots/api#sendmessage) with
 parse_mode HTML. In HTML mode every <, > and & that is not markup must be sent as an entity,
@@ -79,16 +79,27 @@ def notify(
     category: str = "alert",
     count: int = 1,
 ) -> bool:
-    """Send a short message to the configured Telegram chat. Never raises; returns success.
+    """Queue a minimal email alert and optionally send Telegram. Never raises.
+
+    True means an email was durably queued or Telegram accepted the message, not email delivery.
 
     `text` is the full human message; it is only sent when details_enabled(). Otherwise a minimal
     message is sent, built from `category` (one of post_needs_attention, uploads_interrupted,
     account_reconnect, source_failing, disk_low; anything else is a generic alert) and `count`."""
     try:
         settings = get_settings()
+        queued_email = False
+        if settings.mail_configured:
+            from repeater.db import get_sessionmaker
+            from repeater.mail import queue_operator_alert
+
+            with get_sessionmaker()() as db:
+                queue_operator_alert(db, category, count, workspace_id)
+                db.commit()
+                queued_email = True
         token, chat_id = settings.telegram_bot_token, settings.telegram_chat_id
         if not token or not chat_id:
-            return False
+            return queued_email
         lang = _workspace_lang(workspace_id)
         if details_enabled():
             message = format_message(
@@ -98,7 +109,7 @@ def notify(
             message = format_minimal(
                 workspace_id=workspace_id, level=level, category=category, count=count, lang=lang
             )
-        return _send(token, chat_id, message)
+        return _send(token, chat_id, message) or queued_email
     except Exception as exc:  # noqa: BLE001 - notifications must never break the caller
         log.warning("Telegram notification failed (%s)", type(exc).__name__)
         return False

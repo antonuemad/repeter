@@ -135,6 +135,19 @@ def upsert_connected_accounts(
     session: Session, workspace_id: int, items: list[ConnectedAccountData], *, actor: str = "user"
 ) -> list[ConnectedAccount]:
     """Create or update accounts returned by an OAuth exchange."""
+    from repeater.commerce import require_capacity, workspace_lock
+
+    workspace_lock(session, workspace_id)
+    identities = set(
+        session.execute(
+            select(ConnectedAccount.platform, ConnectedAccount.external_id).where(
+                ConnectedAccount.workspace_id == workspace_id
+            )
+        ).all()
+    )
+    new_count = len({(Platform(item.platform), item.external_id) for item in items} - identities)
+    if new_count:
+        require_capacity(session, workspace_id, "accounts", new_count)
     out: list[ConnectedAccount] = []
     for item in items:
         acc = session.execute(

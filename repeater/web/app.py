@@ -23,7 +23,9 @@ from repeater.web.routes import (
     access,
     accounts,
     activity,
+    calendar,
     consent,
+    customer_operations,
     library,
     meta,
     oauth,
@@ -50,7 +52,11 @@ ERROR_MESSAGES = {
     429: ("error.429_title", "error.429_body"),
     500: ("error.500_title", "error.500_body"),
 }
-SPECIAL_403 = {"no_workspace": "error.no_workspace", "owner_only": "error.owner_only"}
+SPECIAL_403 = {
+    "no_workspace": "error.no_workspace",
+    "owner_only": "error.owner_only",
+    "workspace_closed": "lifecycle.closed",
+}
 
 
 def create_app() -> FastAPI:
@@ -75,6 +81,8 @@ def create_app() -> FastAPI:
         plans.router,
         library.router,
         schedule.router,
+        calendar.router,
+        customer_operations.router,
         accounts.router,
         sources.router,
         rules.router,
@@ -152,6 +160,14 @@ def error_page(
 
 
 def _add_exception_handlers(app: FastAPI) -> None:
+    from repeater.commerce import LimitError
+    from repeater.web.deps import FormError
+
+    @app.exception_handler(LimitError)
+    @app.exception_handler(FormError)
+    async def _operation_problem(request: Request, exc: LimitError | FormError) -> Response:
+        return error_page(request, 403, exc.key)
+
     @app.exception_handler(auth.LoginRequired)
     async def _login_required(request: Request, exc: auth.LoginRequired) -> Response:
         target = request.url.path

@@ -109,3 +109,23 @@ docker build -t repeater:test .
 docker build --secret id=build_ca,src=/path/to/ca.crt -t repeater:test .
 REPEATER_BUILD_CA_FILE=/path/to/ca.crt bash deploy/deploy.sh
 ```
+
+## Customer operations (2026-10-16)
+
+See [the operator runbook](../docs/ar/13-customer-operations.md) for the unified calendar,
+manual bank-transfer review, quotas, access closure, Hostinger setup and full recovery sequence.
+`configure_mail.py` validates an owner-entered mailbox password without sending mail, then writes
+protected SMTP settings atomically. SMTP configuration alone does not prove message delivery.
+
+`recovery_drill.py --receipt /srv/repeater/backups/status/recovery-drill.json` downloads the configured
+offsite DB/media, restores into a disposable PostgreSQL container with no network and no worker,
+and verifies referenced files before cleaning up. It never restores over production. Its public
+status marker holds only an epoch; the detailed receipt is mode 600. Run after backup changes and
+at least weekly during the pilot. Maintain an independent protected copy of original environment
+and encryption keys: a database/media backup cannot replace lost decryption keys.
+
+`.github/workflows/external-monitor.yml` checks public HTTPS from GitHub every ten minutes on the
+repository default branch (schedules can be delayed by GitHub). Optional independent SMTP secrets
+permit outage/recovery emails; missing secrets mean email delivery is unconfigured. Review Actions
+results and account notification settings. Host-side monitoring remains independent of the worker.
+No monitoring or recovery check calls a platform publication API.

@@ -232,7 +232,7 @@ def forgot(request: Request, db: DB, form: Form) -> Response:
 @router.get("/settings/members")
 def members(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
     people = db.execute(
-        select(User.email, WorkspaceMember.role)
+        select(User.id, User.email, User.is_platform_admin, WorkspaceMember.role)
         .join(WorkspaceMember, User.id == WorkspaceMember.user_id)
         .where(WorkspaceMember.workspace_id == ctx.workspace.id)
         .order_by(User.id)
@@ -344,7 +344,10 @@ def create_customer(request: Request, db: DB, ctx: CurrentWorkspace, form: Form)
         locale = str(form.get("locale", "ar"))
         if locale not in i18n.SUPPORTED:
             raise access.AccessError("access.invalid_locale")
-        workspace = Workspace(name=name, locale=locale, paused=True)
+        from repeater.commerce import catalog
+
+        catalog(db)
+        workspace = Workspace(name=name, locale=locale, paused=True, service_plan="pilot")
         db.add(workspace)
         db.flush()
         row, url = access.issue_invitation(db, workspace.id, str(form.get("email", "")), "owner", ctx.user.id)

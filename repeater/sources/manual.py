@@ -75,6 +75,11 @@ def create_video_from_upload(
             detail=str(exc),
         ) from None
 
+    from repeater.commerce import require_capacity
+    from repeater.config import get_settings
+
+    require_capacity(session, workspace_id, "items")
+    require_capacity(session, workspace_id, "storage_bytes", get_settings().max_upload_mb * 1024**2 * 4)
     source = manual_source(session, workspace_id)
     video = Video(
         workspace_id=workspace_id,

@@ -160,7 +160,9 @@ def client_ip(request: Request) -> str:
 def password_fingerprint(user: User) -> str:
     """Ties a session to the current password hash: changing the password ends old sessions."""
     key = get_settings().secret_key.encode()
-    return hmac.new(key, f"{user.id}:{user.password_hash}".encode(), hashlib.sha256).hexdigest()[:32]
+    return hmac.new(
+        key, f"{user.id}:{user.password_hash}:{user.session_version}".encode(), hashlib.sha256
+    ).hexdigest()[:32]
 
 
 def start_session(request: Request, user: User) -> None:
@@ -265,6 +267,8 @@ def current_workspace(request: Request, user: CurrentUser, db: DB) -> WorkspaceC
     if member is None:
         raise HTTPException(status_code=403, detail="no_workspace")
     ws = member.workspace
+    if ws.closed_at:
+        raise HTTPException(status_code=403, detail="workspace_closed")
     request.state.workspace = WorkspaceView(id=ws.id, name=ws.name, timezone=ws.timezone, paused=ws.paused)
     request.state.role = member.role
     return WorkspaceContext(user=user, workspace=ws, role=member.role)

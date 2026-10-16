@@ -39,6 +39,7 @@ from sqlalchemy.orm import Session
 from repeater import notify as notify_mod
 from repeater.accounts import AccountUnavailable, fresh_context, mark_needs_reconnect
 from repeater.activity import log_activity
+from repeater.config import get_settings
 from repeater.engine import actions as engine_actions
 from repeater.jobs import kinds
 from repeater.media import storage
@@ -164,6 +165,16 @@ def poll_source(session: Session, source_id: int, *, now: datetime | None = None
         return PollOutcome("skipped", message="source not found")
     if not source.enabled or source.kind == SourceKind.MANUAL:
         return PollOutcome("skipped", message="source disabled or manual")
+    from repeater.commerce import work_allowed
+    from repeater.models import Workspace
+
+    if not work_allowed(session.get(Workspace, source.workspace_id)):
+        source.enabled = False
+        source.last_error = Message(
+            "commerce.expired", "The workspace is closed or the subscription expired.", {}
+        )
+        session.commit()
+        return PollOutcome("skipped", message=source.last_error)
     now = now or utcnow()
     source.last_polled_at = now
     if source.kind == SourceKind.YTDLP and source.unofficial_ack_at is None:
@@ -189,7 +200,17 @@ def poll_source(session: Session, source_id: int, *, now: datetime | None = None
         _record_failure(session, source, message)
         session.commit()
         return PollOutcome("failed", message=message)
-    created = _ingest(session, source, remotes, now)
+    from repeater.commerce import LimitError
+
+    try:
+        with session.begin_nested():
+            created = _ingest(session, source, remotes, now)
+    except LimitError as exc:
+        source.enabled = False
+        message = Message(exc.key, str(exc), {})
+        _record_failure(session, source, message)
+        session.commit()
+        return PollOutcome("failed", message=message)
     source.last_success_at = now
     source.last_error = None
     source.consecutive_failures = 0
@@ -478,6 +499,22 @@ def _create_videos(session: Session, source: Source, items: list[RemoteVideo]) -
         account_id = source.connected_account_id
     created = 0
     for remote in _oldest_first(items):
+        from repeater.commerce import require_capacity
+
+        known = session.scalar(
+            select(Video.id).where(
+                Video.workspace_id == source.workspace_id,
+                Video.profile_id == source.profile_id,
+                Video.source_platform == platform,
+                Video.external_id == str(remote.external_id),
+            )
+        )
+        if known:
+            continue
+        require_capacity(session, source.workspace_id, "items")
+        require_capacity(
+            session, source.workspace_id, "storage_bytes", get_settings().max_upload_mb * 1024**2 * 4
+        )
         stmt = (
             pg_insert(Video)
             .values(
@@ -637,6 +674,17 @@ def import_video(session: Session, video_id: int, payload: dict[str, Any] | None
     payload = payload or {}
     video = session.get(Video, video_id)
     if video is None or video.status != VideoStatus.IMPORTING:
+        return
+    from repeater.commerce import work_allowed
+    from repeater.models import Workspace
+
+    if not work_allowed(session.get(Workspace, video.workspace_id)):
+        _fail_video(
+            session,
+            video,
+            Message("commerce.expired", "The workspace is closed or the subscription expired.", {}),
+        )
+        session.commit()
         return
     _require_free_space(session, video, _expected_download_bytes(payload))
     try:

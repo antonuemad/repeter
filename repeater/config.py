@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from functools import lru_cache
 from pathlib import Path
 
@@ -55,6 +56,34 @@ class Settings(BaseSettings):
     # Alerts go to one operator chat for every workspace. By default they carry only the kind of
     # event, a count and a dashboard link; true also sends titles, account names and platform errors.
     telegram_include_details: bool = False
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_password_b64: str = ""
+    smtp_from: str = "info@magic-lap.com"
+    smtp_ssl: bool = False
+    smtp_timeout_seconds: int = 15
+    operator_email: str = "info@magic-lap.com"
+    # Public payment instructions, deliberately empty until supplied by the owner.
+    bank_transfer_details: str = ""
+
+    @property
+    def mail_configured(self) -> bool:
+        return bool(
+            self.smtp_host
+            and self.smtp_username
+            and (self.smtp_password or self.smtp_password_b64)
+            and self.smtp_from
+        )
+
+    @property
+    def smtp_credential(self) -> str:
+        return (
+            base64.b64decode(self.smtp_password_b64, validate=True).decode()
+            if self.smtp_password_b64
+            else self.smtp_password
+        )
 
     # Unofficial import (yt-dlp). Off unless a source opts in.
     ytdlp_proxy: str = ""

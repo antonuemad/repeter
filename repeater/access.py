@@ -135,9 +135,16 @@ def issue_invitation(
         token_hash=digest(token),
         expires_at=now + INVITE_LIFETIME,
     )
+    from repeater.commerce import require_capacity
+
+    require_capacity(db, workspace_id, "members")
     db.add(invitation)
     db.flush()
-    return invitation, link("invite", token)
+    url = link("invite", token)
+    from repeater.mail import queue_link
+
+    queue_link(db, invitation, url, "invite", email, workspace_id)
+    return invitation, url
 
 
 def invitation_for(db: Session, token_hash: str) -> WorkspaceInvitation:
@@ -253,6 +260,14 @@ def redeem_reset(db: Session, token_hash: str, hashed_password: str) -> User:
 
 def purge_access_records(db: Session, now: datetime | None = None) -> int:
     now = now or utcnow()
+    from repeater.models import MailOutbox
+
+    db.execute(
+        update(MailOutbox)
+        .where(MailOutbox.expires_at <= now, MailOutbox.payload_enc.isnot(None))
+        .values(payload_enc=None, status="expired")
+    )
+    db.execute(delete(MailOutbox).where(MailOutbox.expires_at < now - timedelta(days=7)))
     cutoff = now - timedelta(days=7)
     count = 0
     for model, condition in (

@@ -228,7 +228,7 @@ At the task-grid breakpoint (700px), common content grids become two columns. Be
 
 At the rail breakpoint (1000px), the fixed rail and workspace footer appear, summary metrics become four columns, and the account email appears in the utility bar. Below it, the rail becomes a document-flow header with a native navigation disclosure and a two-column navigation grid. JavaScript starts the disclosure closed on these screens; native disclosure remains usable when JavaScript is absent.
 
-Account-connection tiles expand from one column to two at the task-grid breakpoint, then four at the wide breakpoint (1400px). Data tables scroll inside their own wrappers. The public shell has its own utility-bar minimum height (72px; 64px below 700px); it does not reserve rail space.
+Account-connection tiles expand from one column to two at the task-grid breakpoint, then four at the wide breakpoint (1400px). Data tables scroll inside their own wrappers; the activity table instead presents stacked records below 700px. The public shell has its own utility-bar minimum height (72px; 64px below 700px); it does not reserve rail space.
 
 Access-management screens reuse the same shell and cards. Invitation, password setup, recovery, and issued-link forms use a centered card capped at an inline size (620px), with block margins (32px; 16px at 600px and below). Compact invitation, customer-creation, and recovery forms embedded in operational cards cap their inline size (580px). Longer help copy uses a readable measure (72ch). Access lists wrap their content and actions; at 600px and below each row's action form takes the full width.
 
@@ -258,7 +258,7 @@ Compact actions use smaller type (12px) and padding (8px 12px), with a desktop m
 
 ### Inputs / Fields
 
-Text fields, native search, date, and number fields, selects, and textareas use the surface fill, stronger control edge, control corner, full available width, and a minimum height (44px). Labels remain visible above fields with a small gap (7px). Placeholders use quiet slate. Focus uses the shared outline. Textareas resize vertically; checkbox and radio controls retain their native behavior with the primary accent. File upload uses a dashed edge on a quiet surface.
+Text-like native fields, including inputs with no explicit type and local date/time fields (`datetime-local`), selects, and textareas use the surface fill, stronger control edge, control corner, full available width, and a minimum height (44px). Native search, date, time and number controls retain their browser affordances within that treatment. Labels remain visible above fields with a small gap (7px). Placeholders use quiet slate. Focus uses the shared outline. Textareas resize vertically; checkbox and radio controls retain their native behavior with the primary accent. File upload uses a dashed edge on a quiet surface.
 
 Checkbox labels place the native control beside its text, including within stacked forms. Groups wrap as space narrows; longer option names wrap within the text area. Selectable list rows can reuse blue wash to reinforce the checked state while keeping the native checkbox visible.
 
@@ -272,13 +272,19 @@ Navigation items have medium text (13px), a generous hit height (44px), a line i
 
 The mobile disclosure is native `details` and `summary`. The enhancement adapts it at the rail breakpoint; Escape closes it and returns focus to the summary. Its reveal animation lasts (160ms) with easing (`cubic-bezier(.16,1,.3,1)`) only when reduced motion is not requested. Keep navigation and form submissions usable without JavaScript.
 
-Workspace settings and members share a wrapping text subnavigation below the page title. It uses the control corner, compact padding, and blue-wash current-page treatment with semibold text. Native links carry `aria-current="page"`; this local navigation does not add a second rail.
+Secondary route groups also use native disclosures. Their summaries share the navigation's label size, control corner and minimum hit height (44px), with a trailing chevron and an indented child list (18px). A group containing the current route starts open; the group keeps the same grammar for role-specific destinations.
+
+Workspace settings, members and billing share a wrapping text subnavigation below the page title. It uses the control corner, compact padding, and blue-wash current-page treatment with semibold text. Native links carry `aria-current="page"`; this local navigation does not add a second rail.
 
 ### Cards / Containers
 
 Cards use the surface corner, soft edge, ambient shadow, and standard padding. Inside a card, separate repeating records with dividers rather than inventing another level of elevation. Metric cards share that grammar with smaller padding, a muted label, a primary line icon, and a tabular value.
 
 Member, customer, and invitation records use the same flat-list grammar: wrapping rows with moderate gaps (16px), block padding (16px), and a soft divider removed from the last row. Identity and explanatory metadata stay together; row actions wrap alongside them. Customer-owner invitation forms use native disclosures inside these records. Each recovery request occupies a separate task card.
+
+### Data tables
+
+Tables use start-aligned headings and cells, quiet-surface headers, soft row dividers and top-aligned content. The activity table retains its native table structure while changing to stacked records below 700px. Time, message and actor each span the record width; level and category share a two-column line with a gap (8px). Records use block padding (16px), messages retain comfortable line-height (1.75), and long actor identifiers wrap. Column headings remain in the markup and are visually hidden at this breakpoint.
 
 ### Status and platform labels
 

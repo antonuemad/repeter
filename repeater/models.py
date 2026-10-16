@@ -132,6 +132,10 @@ class Workspace(TimestampMixin, Base):
     cross_platform_gap_minutes: Mapped[int] = mapped_column(Integer, default=24 * 60)
     # How far ahead the scheduler fills the calendar.
     horizon_hours: Mapped[int] = mapped_column(Integer, default=48)
+    service_plan: Mapped[str] = mapped_column(String(32), default="legacy", server_default="legacy")
+    entitlement_limits: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    subscription_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     members: Mapped[list[WorkspaceMember]] = relationship(
         back_populates="workspace", cascade="all, delete-orphan"
@@ -147,6 +151,7 @@ class User(TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_platform_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     locale: Mapped[str] = mapped_column(String(8), default="ar")
+    session_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Acceptance of the Terms of Service and Privacy Policy (YouTube Developer Policies III.A.2):
     # when, and which version of the legal texts (repeater.web.consent.LEGAL_VERSION).
@@ -281,6 +286,82 @@ class PlanTarget(Base):
     plan_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     account_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     workspace_id: Mapped[int] = mapped_column(Integer)
+
+
+class PlanSlotOverride(TimestampMixin, Base):
+    """An explicit edit to one destination's original local-schedule slot."""
+
+    __tablename__ = "plan_slot_overrides"
+    __table_args__ = (
+        UniqueConstraint("plan_id", "account_id", "slot_at", name="uq_slot_override"),
+        ForeignKeyConstraint(
+            ["plan_id", "workspace_id"],
+            ["content_plans.id", "content_plans.workspace_id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["account_id", "workspace_id"],
+            ["connected_accounts.id", "connected_accounts.workspace_id"],
+            ondelete="CASCADE",
+        ),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(Integer, index=True)
+    plan_id: Mapped[int] = mapped_column(Integer)
+    account_id: Mapped[int] = mapped_column(Integer)
+    slot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    video_id: Mapped[int | None] = mapped_column(ForeignKey("videos.id", ondelete="SET NULL"))
+    replacement: Mapped[bool] = mapped_column(Boolean, default=False)
+    excluded: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class ServicePlan(TimestampMixin, Base):
+    __tablename__ = "service_plans"
+    code: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100))
+    # Minor currency units; unset prices cannot create invoices.
+    monthly_price: Mapped[int | None] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(String(3), default="EGP")
+    limits: Mapped[dict] = mapped_column(JSONB, default=dict)
+    available: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class BillingInvoice(TimestampMixin, Base):
+    __tablename__ = "billing_invoices"
+    __table_args__ = (CheckConstraint("amount > 0", name="ck_invoice_amount"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    plan_code: Mapped[str] = mapped_column(ForeignKey("service_plans.code"))
+    amount: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(String(3))
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    reference: Mapped[str] = mapped_column(String(200), default="")
+    reviewed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Snapshot the purchased limits; later catalog edits do not rewrite a paid entitlement.
+    limits: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
+class MailOutbox(Base):
+    __tablename__ = "mail_outbox"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int | None] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    invitation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("workspace_invitations.id", ondelete="CASCADE")
+    )
+    reset_id: Mapped[int | None] = mapped_column(ForeignKey("password_resets.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(32))
+    payload_enc: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ConnectedAccount(TimestampMixin, Base):

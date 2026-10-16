@@ -16,6 +16,8 @@ from fastapi import Request
 from starlette.responses import Response
 
 from repeater.config import get_settings
+from repeater.web.operations_i18n import AR as OPERATIONS_AR
+from repeater.web.operations_i18n import EN as OPERATIONS_EN
 from repeater.web.plan_i18n import AR as PLAN_AR
 from repeater.web.plan_i18n import EN as PLAN_EN
 
@@ -1545,5 +1547,8 @@ AR["notify.operator_test"] = "نجح اختبار إرسال التنبيهات 
 
 EN.update(PLAN_EN)
 AR.update(PLAN_AR)
+
+EN.update(OPERATIONS_EN)
+AR.update(OPERATIONS_AR)
 
 MESSAGES: dict[str, dict[str, str]] = {"en": EN, "ar": AR}

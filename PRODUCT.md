@@ -12,8 +12,9 @@ The first trial is for selected customers invited by Magic Lap (confirmed by the
 user, 2026-10-15). Creator and operator workflows already exist in PLAN.md and the
 application. The platform administrator creates separate paused customer workspaces and issues
 private invitation links. Customers set their own passwords and explicitly accept
-the current legal texts. During this pilot the administrator copies and delivers
-links manually; automatic email delivery is not configured.
+the current legal texts. Invitation and password-reset delivery now use an encrypted
+transactional outbox. SMTP delivery still needs the actual mailbox password; no real
+email has been sent. Manual link delivery remains available during setup.
 
 ## Product Purpose
 
@@ -69,11 +70,11 @@ results or publication performance claims have been supplied.
 
 ## Open Decisions
 
-Manual invitation/recovery link delivery is confirmed (2026-10-15). Existing registered
-email addresses cannot be invited into a second workspace in this initial flow.
-Full member removal, workspace closure, commercial packaging, support commitments
-and trial volume remain open. The review should identify
-their impact without inventing pricing, customers or operating guarantees.
+Existing registered email addresses cannot be invited into a second workspace in this
+initial flow. Member access changes, workspace closure and a manual bank-transfer
+billing flow are implemented; their current boundaries are recorded below. Actual
+prices, bank-transfer details, support commitments and trial volume remain unset.
+Do not invent commercial terms, customers or operating guarantees.
 
 ## Person-led phase one (2026-10-15)
 
@@ -216,3 +217,45 @@ The final step uses the same read-only simulation and explains empty slots, inco
 repeat waits. No activation control is included in the wizard, and production publishing stays locked.
 All verification uses synthetic data, fake OAuth and mocked provider HTTP; external provider approval
 and first-customer consent/import acceptance are still required independently.
+
+## Customer operations implementation (2026-10-16)
+
+This update supersedes earlier manual-only access delivery and open lifecycle/packaging
+implementation notes. It records the current code, not a runtime deployment or live acceptance.
+The existing platform scope remains unchanged and production must remain
+`REPEATER_PUBLISHING_ENABLED=false` until the user explicitly ends the testing restriction.
+
+The weekly calendar brings all people's previews and actual reservations into one view,
+with separate labels and a person filter. An eligible destination slot can change its local
+time, exclude that occurrence, select ready compatible content from the same person's
+library, or restore automatic selection. Saving stops the plan, increments its revision
+and cancels untouched pending work. Repeat, compatibility and uncertain-outcome guards
+still apply. A calendar edit never activates a plan or publishes content.
+
+Plan & billing shows usage and manual bank-transfer invoices. Each invoice snapshots its
+amount, currency and limits; later catalog edits do not change it. Submitting a transfer
+reference requests review, not payment confirmation. A platform operator must reauthenticate
+and explicitly confirm that funds reached the bank before approval applies the invoice's
+entitlements. Prices and bank-transfer details are unset and plans remain unavailable;
+the interface requests no payment until these are configured. No payment gateway is included.
+
+Owners can change members between owner, editor and suspended access after reauthentication;
+the affected user's sessions are revoked and the last owner is protected. Members can also
+end their other sessions. Workspace closure requires reauthentication and the workspace name,
+pauses plans/imports/rules, cancels untouched work, disconnects accounts locally and revokes
+member access and outstanding invitations. It neither removes published provider content nor
+erases retained backups. An operator can reopen the workspace paused; disconnected tokens,
+imports and plans are not restored or restarted.
+
+The encrypted outbox supports automatic customer invitation/password-reset messages and
+minimal operator alerts. Configuration code is ready for `info@magic-lap.com` through
+Hostinger SMTP over SSL on port 465, but the actual Hostinger mailbox password is missing.
+No actual emails have been sent; a sender address or queued message does not prove delivery.
+
+The operator's service-health page reports due-job queue age, local/offsite backup receipts
+and an isolated restore-drill receipt. Receipt state and age describe available evidence,
+not a general recovery guarantee. The external availability monitor links to GitHub's
+workflow for its actual latest result; an on-host page cannot establish that external
+monitoring or its separately configured email alerts succeeded. This implementation has
+synthetic and mocked verification; live mail delivery and Linux CI remain separate checks.
+The final independent UI verdict is ship, with all four material findings resolved.

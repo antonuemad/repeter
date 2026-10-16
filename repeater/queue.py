@@ -41,6 +41,7 @@ KIND_PRIORITY: dict[str, int] = {
     "plan_workspace": PRIORITY_ENGINE,
     "refresh_tokens": PRIORITY_ENGINE,
     "maintenance": PRIORITY_ENGINE,
+    "deliver_mail": PRIORITY_ENGINE,
     "delete_user_data": PRIORITY_ENGINE,
     "poll_source": PRIORITY_SOURCE,
     "import_video": PRIORITY_BULK,

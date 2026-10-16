@@ -143,6 +143,13 @@ def tick(session_factory: SessionFactory, now: datetime | None = None) -> dict[s
             lambda s: _enqueue_periodic(s, kinds.MAINTENANCE, next_boundary(now, MAINTENANCE_EVERY)),
         ),
     ]
+    if get_settings().mail_configured:
+        steps.append(
+            (
+                "deliver_mail",
+                lambda s: _enqueue_periodic(s, "deliver_mail", next_boundary(now, timedelta(minutes=1))),
+            )
+        )
     counts: dict[str, int] = {}
     with session_factory() as session:
         for name, step in steps:

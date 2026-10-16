@@ -8,6 +8,7 @@ unchanged delivered states stay quiet. This cannot detect loss of the monitoring
 from __future__ import annotations
 
 import argparse
+import base64
 import fcntl
 import hashlib
 import json
@@ -15,12 +16,15 @@ import math
 import os
 import re
 import shutil
+import smtplib
+import ssl
 import subprocess
 import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from email.message import EmailMessage
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -152,9 +156,10 @@ def collect(env_file: Path, values: dict[str, str], now: float | None = None) ->
 
 
 def send_alert(values: dict[str, str], failures: list[str]) -> bool:
+    email_sent = send_email_alert(values, failures)
     token, chat = values.get("REPEATER_TELEGRAM_BOT_TOKEN", ""), values.get("REPEATER_TELEGRAM_CHAT_ID", "")
     if not re.fullmatch(r"[0-9]+:[A-Za-z0-9_-]+", token) or not re.fullmatch(r"-?[A-Za-z0-9_@]+", chat):
-        return False
+        return email_sent
     text = "Repeater monitor: " + (
         "needs attention: " + ", ".join(failures) if failures else "all monitored services recovered"
     )
@@ -165,9 +170,48 @@ def send_alert(values: dict[str, str], failures: list[str]) -> bool:
     try:
         with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310 - fixed Telegram API
             payload = json.loads(response.read(65536))
-            return response.status == 200 and isinstance(payload, dict) and payload.get("ok") is True
+            return (
+                response.status == 200 and isinstance(payload, dict) and payload.get("ok") is True
+            ) or email_sent
     except (OSError, ValueError):
         # Exception strings and URLs may contain the bot token; never print them.
+        return email_sent
+
+
+def send_email_alert(values: dict[str, str], failures: list[str]) -> bool:
+    host = values.get("REPEATER_SMTP_HOST", "")
+    username = values.get("REPEATER_SMTP_USERNAME", "")
+    try:
+        password = (
+            base64.b64decode(values["REPEATER_SMTP_PASSWORD_B64"], validate=True).decode()
+            if values.get("REPEATER_SMTP_PASSWORD_B64")
+            else values.get("REPEATER_SMTP_PASSWORD", "")
+        )
+    except (ValueError, UnicodeError):
+        return False
+    if not host or not username or not password:
+        return False
+    try:
+        use_ssl = values.get("REPEATER_SMTP_SSL", "").lower() in ("true", "1", "yes")
+        message = EmailMessage()
+        message["From"] = values.get("REPEATER_SMTP_FROM", "info@magic-lap.com")
+        message["To"] = values.get("REPEATER_OPERATOR_EMAIL", "info@magic-lap.com")
+        message["Subject"] = "Repeater monitor: " + ("action needed" if failures else "recovered")
+        message.set_content(
+            "Repeater: " + (", ".join(failures) if failures else "All monitored checks recovered.")
+        )
+        factory = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
+        options = {"timeout": 15}
+        if use_ssl:
+            options["context"] = ssl.create_default_context()
+        with factory(
+            host, int(values.get("REPEATER_SMTP_PORT") or ("465" if use_ssl else "587")), **options
+        ) as client:
+            if not use_ssl:
+                client.starttls(context=ssl.create_default_context())
+            client.login(username, password)
+            return not client.send_message(message)
+    except (OSError, ValueError, smtplib.SMTPException):
         return False
 
 

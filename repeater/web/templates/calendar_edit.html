@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('calendar.edit') }}{% endblock %}
+{% block content %}
+<div class="page-heading"><div><h1>{{ t('calendar.edit') }}</h1><p dir="auto">{{ account.display_name }} · {{ platform_name(account.platform) }}</p></div><a href="/calendar">{{ t('calendar.title') }}</a></div>
+<p class="measure">{{ t('calendar.edit_help') }}</p><form method="post" class="stack card access-form">{{ m.csrf() }}<input type="hidden" name="slot" value="{{ slot }}"><input type="hidden" name="revision" value="{{ plan.revision }}">
+<label>{{ t('calendar.at') }} · {{ plan.timezone }}<input type="datetime-local" name="scheduled_at" value="{{ local_at }}" required></label>
+<label>{{ t('calendar.content') }}<select name="video_id"><option value="0">{{ t('calendar.automatic') }}</option>{% for item in choices %}<option value="{{ item.id }}"{% if edit and edit.video_id == item.id %} selected{% endif %}>{{ item.title or item.caption[:80] or item.id }}</option>{% endfor %}</select></label>
+<div class="actions"><button class="button" name="action" value="save">{{ t('calendar.save') }}</button><button class="button secondary" name="action" value="exclude">{{ t('calendar.exclude') }}</button>{% if edit %}<button class="button secondary" name="action" value="reset">{{ t('calendar.reset') }}</button>{% endif %}</div></form>
+{% endblock %}

@@ -63,6 +63,39 @@ main > h1 + .muted { margin-block-end: 24px; }
 .mainnav a { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 10px 12px; color: var(--muted); border-radius: 10px; font-weight: 500; font-size: 13px; text-decoration: none; }
 .mainnav a:hover { background: var(--surface-alt); color: var(--text); }
 .mainnav a[aria-current="page"] { background: var(--primary-bg); color: var(--primary); }
+.mainnav .nav-section { grid-column: 1 / -1; }
+.nav-section > summary { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 10px 12px; color: var(--muted); font-size: 13px; font-weight: 500; cursor: pointer; border-radius: 10px; }
+.nav-section > summary:hover { background: var(--surface-alt); color: var(--text); }
+.nav-section > summary::after { content: ""; width: 7px; height: 7px; border-inline-end: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); margin-inline-start: auto; margin-inline-end: 3px; }
+.nav-section[open] > summary::after { transform: rotate(225deg); }
+.nav-section > div { padding-inline-start: 18px; }
+.calendar-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-block-end: 20px; }
+.calendar-filters label { flex: 1; min-inline-size: 160px; max-inline-size: 300px; }
+.calendar-navigation { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-block: 20px; }
+.calendar-week { display: grid; grid-template-columns: 1fr; gap: 16px; }
+.calendar-day { min-inline-size: 0; border: 1px solid var(--border); background: var(--surface); border-radius: 14px; overflow: hidden; }
+.calendar-day h2 { font-size: 14px; padding: 14px; background: var(--surface-alt); margin: 0; border-block-end: 1px solid var(--border); }
+.calendar-day h2 span { color: var(--muted); font-weight: 400; }
+.calendar-events { list-style: none; margin: 0; padding: 0; }
+.calendar-event { padding: 14px; border-block-end: 1px solid var(--border); overflow-wrap: anywhere; }
+.calendar-event:last-child { border: 0; }
+.calendar-event strong { display: block; font-size: 13px; }
+.calendar-event p { margin-block: 6px; }
+.calendar-event-time { display: flex; flex-wrap: wrap; gap: 6px; justify-content: space-between; align-items: center; margin-block-end: 10px; font-variant-numeric: tabular-nums; }
+.calendar-edit { display: inline-flex; align-items: center; min-block-size: 44px; font-size: 12px; }
+.calendar-empty { padding: 14px; font-size: 12px; }
+.usage-list { display: grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap: 16px; }
+.usage-list > div { padding-block: 8px; }
+.usage-list dt { color: var(--muted); font-size: 13px; }
+.usage-list dd { margin: 4px 0 0; font-weight: 600; overflow-wrap: anywhere; }
+.billing-plans { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,280px),1fr)); gap: 20px; }
+.invoice-list { list-style: none; padding: 0; }
+.invoice-list > li { padding-block: 20px; border-block-end: 1px solid var(--border); display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: 20px; }
+.invoice-list form { inline-size: min(100%,420px); }
+.operations-form { margin-block-start: 20px; max-inline-size: 720px; }
+.preserve-lines { white-space: pre-line; }
+@media (min-width: 700px) { .calendar-week { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1450px) { .calendar-week { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; } .calendar-event, .calendar-day h2 { padding: 10px; } }
 .nav-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-inline-start: auto; }
 .sidebar-bottom { display: none; }
 .topbar { border-block-end: 1px solid var(--border); background: var(--surface); }
@@ -101,7 +134,7 @@ label.check input { margin-block-start: 5px; flex-shrink: 0; }
 label.is-disabled { color: var(--muted); }
 fieldset { min-width: 0; border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin: 0; display: flex; flex-direction: column; gap: 12px; }
 legend { font-weight: 600; padding-inline: 6px; }
-input[type="text"], input[type="search"], input[type="date"], input[type="email"], input[type="password"], input[type="url"], input[type="number"], input[type="time"], select, textarea { color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 12px; width: 100%; min-width: 0; min-height: 44px; }
+input:not([type]), input[type="datetime-local"], input[type="text"], input[type="search"], input[type="date"], input[type="email"], input[type="password"], input[type="url"], input[type="number"], input[type="time"], select, textarea { color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 12px; width: 100%; min-width: 0; min-height: 44px; }
 input::placeholder, textarea::placeholder { color: var(--subtle); opacity: 1; }
 input[type="file"] { width: 100%; min-width: 0; padding: 16px; border: 1px dashed var(--border-strong); border-radius: 10px; background: var(--surface-alt); }
 input[type="file"]::file-selector-button { font: inherit; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); border-radius: 6px; padding: 8px 12px; margin-inline-end: 12px; cursor: pointer; }
@@ -455,3 +488,13 @@ th { font-size: 12px; background: var(--surface-alt); }
 
 .wizard-preview-notes { margin-block-end: 24px; }
 .wizard-preview-notes p { margin-block-start: 12px; }
+
+@media (max-width: 699px) {
+  .activity-table, .activity-table tbody { display: block; }
+  .activity-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .activity-table tr { display: grid; grid-template-columns: 1fr 1fr; padding-block: 16px; border-block-end: 1px solid var(--border); gap: 8px; }
+  .activity-table td { padding: 0; border: 0; }
+  .activity-table td:first-child, .activity-table td:nth-child(4), .activity-table td:last-child { grid-column: 1 / -1; }
+  .activity-table td:nth-child(4) { line-height: 1.75; }
+  .activity-table td:last-child { overflow-wrap: anywhere; text-align: start; font-size: 12px; }
+}

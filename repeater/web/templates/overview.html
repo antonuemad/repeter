@@ -4,7 +4,7 @@
 {% block content %}
 <div class="page-heading">
   <div><h1>{{ t('nav.overview') }}</h1><p>{{ t('overview.intro') }}</p></div>
-  <div class="actions"><a class="button secondary" href="/plans">{{ t('nav.plans') }}</a><a class="button secondary" href="/schedule">{{ m.icon('schedule', 18) }}{{ t('overview.open_schedule') }}</a></div>
+  <div class="actions"><a class="button secondary" href="/plans">{{ t('nav.plans') }}</a><a class="button secondary" href="/calendar">{{ m.icon('schedule', 18) }}{{ t('overview.open_schedule') }}</a></div>
 </div>
 <section class="stats" aria-label="{{ t('nav.overview') }}">
   {% for key, icon in [('ready', 'video'), ('upcoming', 'clock'), ('published_week', 'send'), ('failed', 'alert')] %}
@@ -89,7 +89,7 @@
       </li>
       {% endfor %}
     </ul>
-    <p><a href="/schedule">{{ t('overview.see_schedule') }}</a></p>
+    <p><a href="/calendar">{{ t('overview.see_schedule') }}</a></p>
     {% else %}
     <div class="empty-state">{{ m.icon('schedule', 32) }}<h3>{{ t('overview.no_upcoming_title') }}</h3><p>{{ t('overview.no_upcoming_help') }}</p><a class="button small secondary" href="{{ setup.next_url }}">{{ t('plan.preview') if setup.done else t('overview.setup_next') }}</a></div>
     {% endif %}

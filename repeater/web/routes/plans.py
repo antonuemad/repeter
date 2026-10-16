@@ -237,6 +237,9 @@ def create(request: Request, db: DB, ctx: CurrentWorkspace, form: Form) -> Respo
             )
         flash(request, "error", exc.key, **exc.params)
         return RedirectResponse("/plans#new", 303)
+    from repeater.commerce import require_capacity
+
+    require_capacity(db, ctx.workspace.id, "people")
     person = CreatorProfile(workspace_id=ctx.workspace.id, name=name)
     db.add(person)
     db.flush()
@@ -297,6 +300,10 @@ def execution(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, for
         if action not in {"start", "pause"}:
             raise FormError("plan.schedule_invalid")
         if action == "start":
+            from repeater.commerce import work_allowed
+
+            if not work_allowed(ctx.workspace):
+                raise FormError("commerce.expired")
             if not get_settings().publishing_enabled:
                 raise FormError("plan.execution_locked")
             db.refresh(ctx.workspace)

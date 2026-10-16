@@ -6,7 +6,7 @@
 {% include "settings_nav.html" %}
 <section class="card">
   <h2>{{ t('access.current_members') }}</h2>
-  <ul class="access-list">{% for person in people %}<li><strong dir="ltr">{{ person.email }}</strong><span class="muted">{{ t('access.role_' ~ person.role) }}</span></li>{% endfor %}</ul>
+  <ul class="access-list">{% for person in people %}<li><div><strong dir="ltr">{{ person.email }}</strong><p class="muted">{{ t('access.role_' ~ person.role) }}</p></div>{% if can_invite and not person.is_platform_admin %}<details><summary>{{ t('lifecycle.role') }}</summary><form method="post" action="/settings/members/{{ person.id }}/access" class="stack">{{ m.csrf() }}<label>{{ t('lifecycle.role') }}<select name="role">{% for value in ['owner','editor','suspended'] %}<option value="{{ value }}"{% if person.role == value %} selected{% endif %}>{{ t('access.role_' ~ value) }}</option>{% endfor %}</select></label><label>{{ t('lifecycle.password') }}<input type="password" name="current_password" autocomplete="current-password" required></label><button class="button secondary">{{ t('lifecycle.role') }}</button></form></details>{% endif %}</li>{% endfor %}</ul>
 </section>
 {% if can_invite %}
 <section class="card">
@@ -22,4 +22,6 @@
   {% else %}<p class="muted">{{ t('access.no_invites') }}</p>{% endif %}
 </section>
 {% else %}<p class="muted">{{ t('access.owner_invites') }}</p>{% endif %}
+<section class="card"><h2>{{ t('lifecycle.sessions') }}</h2><form method="post" action="/settings/sessions/revoke" class="stack access-form">{{ m.csrf() }}<label>{{ t('lifecycle.password') }}<input type="password" name="current_password" autocomplete="current-password" required></label><button class="button secondary">{{ t('lifecycle.sessions') }}</button></form></section>
+{% if can_invite and not user.is_platform_admin %}<details class="card"><summary>{{ t('lifecycle.close') }}</summary><p class="measure">{{ t('lifecycle.close_help') }}</p><form method="post" action="/settings/workspace/close" class="stack access-form">{{ m.csrf() }}<label>{{ t('lifecycle.confirm') }} · {{ workspace.name }}<input name="confirmation" required maxlength="200" autocomplete="off"></label><label>{{ t('lifecycle.password') }}<input type="password" name="current_password" autocomplete="current-password" required></label><button class="button danger">{{ t('lifecycle.close') }}</button></form></details>{% endif %}
 {% endblock %}

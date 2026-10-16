@@ -1,6 +1,11 @@
 """Arabic domain messages. English diagnostics are persisted alongside each key."""
 
 AR = {
+    "lifecycle.audit_member": "تم تحديث وصول عضو.",
+    "lifecycle.audit_closed": "تم إغلاق مساحة العمل.",
+    "lifecycle.audit_reopened": "تمت إعادة فتح المساحة مع إيقاف التشغيل.",
+    "commerce.limit": "وصلت إلى حد الباقة. راجع الاستخدام أو تواصل مع المدير.",
+    "commerce.expired": "انتهى الاشتراك أو أُغلقت المساحة. جدّد الاشتراك أو تواصل مع الدعم.",
     "error.generic": "تعذّر إكمال العملية. راجع إعدادات الحساب والملف قبل المحاولة مجددًا.",
     "platform.AuthError": "انتهت صلاحية الاتصال أو أذونات الحساب. أعد ربط الحساب ثم حاول مجددًا. الرمز: {code}",
     "platform.RateLimitedError": "وصلت المنصة إلى حد الطلبات أو الحصة اليومية. سيحاول النظام بعد انتهاء الانتظار. الرمز: {code}",
@@ -138,3 +143,4 @@ AR.update(
 )
 
 AR["plan.draft_only"] = "خطط الأشخاص للمعاينة فقط؛ النشر غير متاح."
+AR["calendar.audit_saved"] = "تم تعديل خانة بالتقويم وإيقاف الخطة للمراجعة."

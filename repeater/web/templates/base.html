@@ -28,11 +28,15 @@
     <details class="sidebar-navigation" open data-navigation>
       <summary class="nav-toggle">{{ m.icon('menu') }}<span>{{ t('nav.label') }}</span></summary>
       <nav class="mainnav" aria-label="{{ t('nav.label') }}">
-        {% for key, href in [('overview', '/'), ('plans', '/plans'), ('library', '/library'), ('schedule', '/schedule'), ('accounts', '/accounts'), ('sources', '/sources'), ('rules', '/rules'), ('activity', '/activity')] %}
-        <a href="{{ href }}"{% if nav == key %} aria-current="page"{% endif %}>{{ m.icon(key, 18) }}<span>{{ t('nav.' ~ key) }}</span>{% if nav == key %}<span class="nav-dot" aria-hidden="true"></span>{% endif %}</a>
+        {% for key, href, icon in [('overview', '/', 'overview'), ('prepare', '/setup', 'plans'), ('plans', '/plans', 'plans'), ('accounts', '/accounts', 'accounts'), ('library', '/library', 'library'), ('calendar', '/calendar', 'schedule'), ('activity', '/activity', 'activity')] %}
+        {% set selected = current_path == '/setup' if key == 'prepare' else nav == key and current_path != '/setup' %}
+        <a href="{{ href }}"{% if selected %} aria-current="page"{% endif %}>{{ m.icon(icon, 18) }}<span>{{ t('nav.' ~ key) }}</span>{% if selected %}<span class="nav-dot" aria-hidden="true"></span>{% endif %}</a>
         {% endfor %}
+        <details class="nav-section"{% if nav in ['sources','rules','schedule'] %} open{% endif %}><summary>{{ m.icon('settings',18) }}{{ t('nav.advanced') }}</summary><div>
+        {% for key, href in [('sources','/sources'),('rules','/rules'),('schedule','/schedule')] %}<a href="{{ href }}"{% if nav == key %} aria-current="page"{% endif %}>{{ m.icon(key,18) }}<span>{{ t('nav.' ~ key) }}</span></a>{% endfor %}
+        </div></details>
         <a href="/settings/workspace" class="settings-link"{% if nav == 'settings' %} aria-current="page"{% endif %}>{{ m.icon('settings', 18) }}<span>{{ t('nav.settings') }}</span></a>
-        {% if user.is_platform_admin %}<a href="/admin/customers"{% if nav == 'customers' %} aria-current="page"{% endif %}>{{ m.icon('accounts', 18) }}<span>{{ t('access.customers') }}</span></a>{% endif %}
+        {% if user.is_platform_admin %}<details class="nav-section"{% if nav in ['customers','operations'] %} open{% endif %}><summary>{{ m.icon('accounts',18) }}{{ t('nav.administration') }}</summary><div><a href="/admin/customers"{% if nav == 'customers' %} aria-current="page"{% endif %}>{{ t('access.customers') }}</a><a href="/admin/operations"{% if current_path == '/admin/operations' %} aria-current="page"{% endif %}>{{ t('operations.title') }}</a><a href="/admin/billing"{% if current_path == '/admin/billing' %} aria-current="page"{% endif %}>{{ t('commerce.catalog') }}</a></div></details>{% endif %}
       </nav>
     </details>
     <div class="sidebar-bottom">

@@ -1,0 +1,44 @@
+name: External availability monitor
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repeater-external-monitor
+  cancel-in-progress: false
+
+jobs:
+  availability:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Restore notification state
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: external-monitor-state
+          key: external-monitor-${{ github.run_id }}
+          restore-keys: external-monitor-
+      - name: Check HTTPS from outside the server
+        env:
+          REPEATER_SMTP_HOST: ${{ secrets.REPEATER_SMTP_HOST }}
+          REPEATER_SMTP_PORT: ${{ secrets.REPEATER_SMTP_PORT }}
+          REPEATER_SMTP_USERNAME: ${{ secrets.REPEATER_SMTP_USERNAME }}
+          REPEATER_SMTP_PASSWORD: ${{ secrets.REPEATER_SMTP_PASSWORD }}
+          REPEATER_SMTP_FROM: info@magic-lap.com
+          REPEATER_SMTP_SSL: 'true'
+          REPEATER_OPERATOR_EMAIL: info@magic-lap.com
+        run: python3 deploy/external_monitor.py
+      - name: Save notification state
+        if: always()
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: external-monitor-state
+          key: external-monitor-${{ github.run_id }}

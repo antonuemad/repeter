@@ -2,6 +2,22 @@
 
 Written 2026-10-14 from a long Claude Code session. Read this first, then `PLAN.md` (Arabic product and technical plan, the source of truth for intent), then `docs/review/2026-10-14-findings.md` (what the last review found and how it was resolved).
 
+## Customer operations update (2026-10-16)
+
+The user's latest choices supersede earlier manual-only delivery: existing platforms only,
+Hostinger sender info@magic-lap.com, and manual bank transfer with details/prices deferred.
+Migration 0008 adds calendar overrides, encrypted mail outbox, manual subscription invoices,
+workspace closure and session invalidation. Never modify deployed migrations 0001–0007.
+See docs/ar/13-customer-operations.md for current scope, SMTP setup and full recovery runbook.
+Calendar edits stop plans; no activation or live publication is authorized. All publication
+locks remain false. SMTP credentials are still absent, prices/bank details unset. GitHub
+external monitoring is implemented; actual Actions results and separate alert delivery
+must be checked after push. The final independent UI verdict is ship (F1–F4 resolved).
+The offsite dump dated 20261016T031701Z was restored in a disposable no-network PostgreSQL
+container: one workspace, zero library/media files, no application/worker. Synthetic tests
+cover media checksums/missing files; do not claim customer-media restoration evidence yet.
+The protected environment/encryption keys still require independent operator custody.
+
 ## Latest update: platform links and testing restriction (2026-10-15)
 
 The user forbids all real publication to every page/account throughout testing, including

@@ -810,6 +810,9 @@ def create_text(request: Request, db: DB, ctx: CurrentWorkspace, form: Form) -> 
         if not body.strip():
             raise FormError("media.empty_text")
         title = form_str(form, "title", max_len=MAX_TITLE_CHARS, required=True)
+        from repeater.commerce import require_capacity
+
+        require_capacity(db, ctx.workspace.id, "items")
         item = Video(
             workspace_id=ctx.workspace.id,
             profile_id=person.id,

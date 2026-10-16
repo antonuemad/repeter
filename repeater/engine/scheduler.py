@@ -178,11 +178,13 @@ def plan_workspace(session: Session, workspace_id: int, now: datetime | None = N
         return []
     now = ensure_aware(now) or utcnow()
     workspace = session.get(Workspace, workspace_id)
-    if workspace is None or workspace.paused:
+    from repeater.commerce import work_allowed
+
+    if not work_allowed(workspace, now) or workspace.paused:
         return []
     lock_workspace(session, workspace.id)
     session.refresh(workspace)
-    if workspace.paused:
+    if not work_allowed(workspace, now) or workspace.paused:
         return []
     from repeater.engine.people import plan_people
 

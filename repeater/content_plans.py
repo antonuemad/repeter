@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
-from heapq import heappop, heappush
+from heapq import heapify, heappop, heappush
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -22,6 +22,7 @@ from repeater.models import (
     AccountStatus,
     ConnectedAccount,
     ContentPlan,
+    PlanSlotOverride,
     PlanTarget,
     PostStatus,
     ScheduledPost,
@@ -39,6 +40,8 @@ class PreviewEntry:
     previous_is_preview: bool = False
     reason: str | None = None
     available_at: datetime | None = None
+    original_at: datetime | None = None
+    customized: bool = False
 
     @property
     def repeated(self) -> bool:
@@ -200,22 +203,77 @@ def simulate(db: Session, plan: ContentPlan, *, now: datetime | None = None) -> 
     filled = 0
     repeated = 0
     waiting = 0
-    for at in slots(plan, now=now):
-        entries = []
+    overrides = list(
+        db.scalars(
+            select(PlanSlotOverride).where(
+                PlanSlotOverride.plan_id == plan.id, PlanSlotOverride.workspace_id == plan.workspace_id
+            )
+        )
+    )
+    edits = {(o.account_id, ensure_aware(o.slot_at)): o for o in overrides}
+    events = []
+    original_slots = slots(plan, now=now)
+    seen = set()
+    end = now.astimezone(ZoneInfo(plan.timezone)).date() + timedelta(days=30)
+    for original in original_slots:
         for account in accounts:
+            edit = edits.get((account.id, original))
+            at = ensure_aware(edit.scheduled_at) if edit else original
+            seen.add((account.id, original))
+            if at > now:
+                events.append((at, account.id, original, account, edit))
+    # A moved slot must survive passing its original time, without becoming a new automatic slot.
+    for edit in overrides:
+        at, original = ensure_aware(edit.scheduled_at), ensure_aware(edit.slot_at)
+        account = next((a for a in accounts if a.id == edit.account_id), None)
+        local = original.astimezone(ZoneInfo(plan.timezone))
+        if (
+            account
+            and (account.id, original) not in seen
+            and now < at
+            and at.astimezone(ZoneInfo(plan.timezone)).date() < end
+            and local.date() >= plan.start_date
+            and local.weekday() in plan.weekdays
+            and local.strftime("%H:%M") in plan.times
+            and original <= now
+        ):
+            events.append((at, account.id, original, account, edit))
+    from itertools import groupby
+
+    for at, group in groupby(sorted(events, key=lambda e: (e[0], e[1], e[2])), key=lambda e: e[0]):
+        entries = []
+        for _, _, original, account, edit in group:
             queue = queues[account.id]
-            if not queue:
-                entries.append(PreviewEntry(account, None, reason=empty_reasons[account.id]))
+            meta = {"original_at": original, "customized": edit is not None}
+            if edit and edit.excluded:
+                entries.append(PreviewEntry(account, None, reason="excluded", **meta))
                 continue
-            _, rank, video, last, simulated = queue[0]
+            if not queue:
+                entries.append(PreviewEntry(account, None, reason=empty_reasons[account.id], **meta))
+                continue
+            index = 0
+            if edit and edit.replacement:
+                index = next((i for i, choice in enumerate(queue) if choice[2].id == edit.video_id), -1)
+                if index < 0:
+                    entries.append(PreviewEntry(account, None, reason="replacement_unavailable", **meta))
+                    continue
+            _, rank, video, last, simulated = queue[index]
             if last is not None and at < last + cooldown:
                 waiting += 1
-                entries.append(PreviewEntry(account, None, reason="cooldown", available_at=last + cooldown))
+                entries.append(
+                    PreviewEntry(account, None, reason="cooldown", available_at=last + cooldown, **meta)
+                )
                 continue
-            heappop(queue)
+            if index == 0:
+                heappop(queue)
+            else:
+                queue.pop(index)
+                heapify(queue)
             filled += 1
             repeated += int(last is not None)
-            entries.append(PreviewEntry(account, video, previous_at=last, previous_is_preview=simulated))
+            entries.append(
+                PreviewEntry(account, video, previous_at=last, previous_is_preview=simulated, **meta)
+            )
             if repeating:
                 heappush(queue, (at.timestamp(), rank, video, at, True))
         rows.append(PreviewSlot(at, entries))
@@ -224,7 +282,7 @@ def simulate(db: Session, plan: ContentPlan, *, now: datetime | None = None) -> 
         "accounts": accounts,
         "ready": len(videos),
         "filled": filled,
-        "empty": len(rows) * len(accounts) - filled,
+        "empty": sum(len(row.entries) for row in rows) - filled,
         "excluded": excluded,
         "blocked": blocked_count,
         "repeated": repeated,

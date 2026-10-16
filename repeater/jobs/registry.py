@@ -12,6 +12,7 @@ HANDLERS: dict[str, Handler] = {}
 
 # Modules that define handlers; imported by the worker at startup.
 HANDLER_MODULES = (
+    "repeater.mail",
     "repeater.sources.jobs",
     "repeater.engine.jobs",
     "repeater.jobs.maintenance",

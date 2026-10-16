@@ -275,7 +275,9 @@ def _publish_target(session: Session, post: ScheduledPost, now: datetime) -> _Ta
             Message("publish.testing_lock", "Publishing is disabled on this server during testing.", {}),
         )
     workspace = session.get(Workspace, post.workspace_id)
-    if workspace is None or workspace.paused:
+    from repeater.commerce import work_allowed
+
+    if not work_allowed(workspace) or workspace.paused:
         return _cancel(
             session,
             post,
@@ -736,7 +738,9 @@ def poll_post(session: Session, post_id: int, *, now: datetime | None = None) ->
 
 def _publishing_halted(session: Session, target: _Target) -> bool:
     workspace = session.get(Workspace, target.post.workspace_id)
-    if workspace is None or workspace.paused:
+    from repeater.commerce import work_allowed
+
+    if not work_allowed(workspace) or workspace.paused:
         return True
     if target.post.created_by == "plan":
         from repeater.engine.people import binding_problem

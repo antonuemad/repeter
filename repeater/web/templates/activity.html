@@ -21,7 +21,7 @@
 <section class="card">
   {% if entries %}
   <div class="table-wrap">
-    <table>
+    <table class="activity-table">
       <thead><tr><th>{{ t('activity.time') }}</th><th>{{ t('activity.level') }}</th><th>{{ t('activity.category') }}</th><th>{{ t('activity.message') }}</th><th>{{ t('activity.actor') }}</th></tr></thead>
       <tbody>
         {% for e in entries %}
