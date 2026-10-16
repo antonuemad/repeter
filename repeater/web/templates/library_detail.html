@@ -86,7 +86,7 @@
   <p class="muted">{{ t('media.edit_help') if video.profile_id else t('library.edit_help') }}</p>
   <form method="post" action="/library/{{ video.id }}/edit" class="stack">
     {{ m.csrf() }}
-    {% if video.profile_id %}<label>{{ t('media.format') }}<select name="content_format">{% for format in formats %}<option value="{{ format }}"{% if format == video.content_format %} selected{% endif %}>{{ t('media.' ~ video.media_kind ~ '_' ~ format) }}</option>{% endfor %}</select></label>{% endif %}
+    {% if video.profile_id %}<label>{{ t('media.format') }}<select name="content_format">{% for format in formats %}<option value="{{ format }}"{% if format == draft.get('content_format', video.content_format) %} selected{% endif %}>{{ t('media.' ~ video.media_kind ~ '_' ~ format) }}</option>{% endfor %}</select></label>{% endif %}
     <label>{{ t('field.title') }}
       <input type="text" name="title" maxlength="300" value="{{ overrides.get('title', '') }}" placeholder="{{ video.title }}" dir="auto">
     </label>

@@ -182,3 +182,19 @@ The worker rechecks ownership, eligibility, actual repeat history and all execut
 fresh upload. Rich signed-media URLs require publishing enabled; authenticated library previews work
 while locked. Production remains `REPEATER_PUBLISHING_ENABLED=false`, with no plan/rule/source activated
 and no real platform publication test. Enabling the server switch is expressly outside this release.
+
+## Invited-customer journey review (2026-10-16)
+
+The overview now guides the newest person's preparation: create the person, connect and save their
+selected pages, and add ready content to their own library. It names the person and links to that
+plan's preview when all three preparation steps are complete. Readiness does not certify platform
+compatibility or enable publishing; the preview explains exclusions and empty slots. Unassigned
+content, other people's libraries, processing files and unselected accounts do not complete these steps.
+
+Person libraries link directly to their preview and setup. Drive is explicitly optional. Authorized
+person uploads and text creation retain the person and bounded title/caption drafts on validation
+errors; files must be selected again. Item edits also retain text, format and platform choices after
+validation errors. These drafts are rendered in the response, not stored in session cookies.
+Existing plans can change their times/days while keeping a start date that has already passed.
+Invitations default the password setup page to the invited workspace's language, preserving an
+explicit browser language choice. All verification is synthetic; the production publishing lock remains.

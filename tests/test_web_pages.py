@@ -354,13 +354,17 @@ def test_legal_pages_are_public(web_app):
             assert resp.status_code == 200, path
 
 
-def test_overview_upload_action_opens_form_even_with_existing_videos(web_owner, web_make_video):
+def test_overview_upload_action_opens_person_form_even_with_existing_videos(web_owner, db, web_make_video):
     """A primary upload action must reach the form, including a populated library."""
     from html import unescape
 
+    from tests.test_content_plans import create_plan
+
+    plan = create_plan(web_owner, db)
     web_make_video(title="Already in the library")
     overview = web_owner.get("/").text
     target = unescape(re.search(r'href="([^"]*#upload)"', overview).group(1))
+    assert f"profile_id={plan.profile_id}" in target
     page = web_owner.get(target)
     assert page.status_code == 200
     disclosure = re.search(r'<details\b[^>]*\bid="upload"[^>]*>', page.text).group(0)

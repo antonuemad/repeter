@@ -2,23 +2,24 @@
 {% import "macros.html" as m with context %}
 {% block title %}{{ t('nav.library') }}{% endblock %}
 {% block content %}
-<h1>{{ profile.name if profile else t('library.title') }}</h1>
+<div class="page-heading"><h1 dir="auto">{{ profile.name if profile else t('library.title') }}</h1>{% if plan %}<div class="actions"><a class="button" href="/plans/{{ plan.id }}">{{ t('plan.preview') }}</a><a class="button secondary" href="/plans/{{ plan.id }}/edit">{{ t('plan.edit') }}</a></div>{% endif %}</div>
 <nav class="tabs" aria-label="{{ t('plan.person') }}"><a href="/library"{% if not profile %} aria-current="page"{% endif %}>{{ t('plan.unassigned') }}</a>{% for person in profiles %}<a href="/library?profile_id={{ person.id }}"{% if profile_id == person.id %} aria-current="page"{% endif %} dir="auto">{{ person.name }}</a>{% endfor %}<a href="/plans">{{ t('nav.plans') }}</a></nav>
 <p class="muted">{{ t('media.intro') if profile else t('library.intro') }}</p>
 
-<details id="upload" class="card upload"{% if not videos or request.query_params.get('upload') == '1' %} open{% endif %}>
+<details id="upload" class="card upload"{% if draft.get('form') == 'upload' or (not draft and (not videos or request.query_params.get('upload') == '1')) %} open{% endif %}>
   <summary><strong>{{ t('media.add') if profile else t('library.upload_title') }}</strong></summary>
   <p class="muted">{{ t('media.add_help') if profile else t('library.upload_help', max_mb=max_upload_mb) }}</p>
+  {% if draft.get('form') == 'upload' %}<p>{{ t('library.reselect_file') }}</p>{% endif %}
   <form method="post" action="/library/upload" enctype="multipart/form-data" class="stack" data-upload data-max-bytes="{{ max_upload_mb * 1024 * 1024 }}" data-too-large="{{ t('library.upload_too_large', max_mb=max_upload_mb) }}" data-uploading="{{ t('library.uploading') }}">
     {# The CSRF field must come before the file: the server checks it before storing any byte. #}
     {{ m.csrf() }}
     {% if profile %}<input type="hidden" name="profile_id" value="{{ profile.id }}">
-    <label>{{ t('media.format') }}<select name="format">{% for format in ['video_reel', 'image_post', 'image_story', 'video_story'] %}<option value="{{ format }}">{{ t('media.' ~ format) }}</option>{% endfor %}</select></label>{% endif %}
+    <label>{{ t('media.format') }}<select name="format">{% for format in ['video_reel', 'image_post', 'image_story', 'video_story'] %}<option value="{{ format }}"{% if draft.get('form') == 'upload' and draft.get('format') == format %} selected{% endif %}>{{ t('media.' ~ format) }}</option>{% endfor %}</select></label>{% endif %}
     <label>{{ t('field.title') }}
-      <input type="text" name="title" maxlength="300" dir="auto">
+      <input type="text" name="title" maxlength="300" dir="auto" value="{{ draft.get('title', '') if draft.get('form') == 'upload' else '' }}">
     </label>
     <label>{{ t('field.caption') }}
-      <textarea name="caption" rows="3" maxlength="5000" dir="auto"></textarea>
+      <textarea name="caption" rows="3" maxlength="5000" dir="auto">{{ draft.get('caption', '') if draft.get('form') == 'upload' else '' }}</textarea>
     </label>
     <label>{{ t('media.file') if profile else t('field.file') }}
       <input type="file" name="file" accept="{{ 'video/*,image/jpeg,image/png,image/webp' if profile else 'video/*' }}" required>
@@ -28,7 +29,7 @@
   </form>
 </details>
 {% if profile %}
-<details class="card"><summary><strong>{{ t('media.compose') }}</strong></summary><p class="muted">{{ t('media.compose_help') }}</p><form method="post" action="/library/text" class="stack">{{ m.csrf() }}<input type="hidden" name="profile_id" value="{{ profile.id }}"><label>{{ t('field.title') }}<input name="title" maxlength="300" required dir="auto"></label><label>{{ t('field.caption') }}<textarea name="caption" rows="5" maxlength="5000" required dir="auto"></textarea></label><button class="button" type="submit">{{ t('media.save') }}</button></form></details>
+<details id="compose" class="card"{% if draft.get('form') == 'text' %} open{% endif %}><summary><strong>{{ t('media.compose') }}</strong></summary><p class="muted">{{ t('media.compose_help') }}</p><form method="post" action="/library/text" class="stack">{{ m.csrf() }}<input type="hidden" name="profile_id" value="{{ profile.id }}"><label>{{ t('field.title') }}<input name="title" maxlength="300" required dir="auto" value="{{ draft.get('title', '') if draft.get('form') == 'text' else '' }}"></label><label>{{ t('field.caption') }}<textarea name="caption" rows="5" maxlength="5000" required dir="auto">{{ draft.get('caption', '') if draft.get('form') == 'text' else '' }}</textarea></label><button class="button" type="submit">{{ t('media.save') }}</button></form></details>
 <p class="muted plan-measure">{{ t('media.scope') }}</p>
 {% endif %}
 
@@ -102,6 +103,6 @@
 </div>
 {{ m.pager(pager, '/library', {'status': status_filter, 'profile_id': profile_id|string if profile_id else none}) }}
 {% else %}
-<section class="card"><div class="empty-state">{{ m.icon('library', 32) }}<h3>{{ t('library.empty_title') }}</h3><p>{{ t('media.empty_help') if profile else t('library.empty_help') }}</p><a href="{{ '/plans' if profile else '/sources' }}">{{ t('nav.plans') if profile else t('nav.sources') }}</a></div></section>
+<section class="card"><div class="empty-state">{{ m.icon('library', 32) }}<h3>{{ t('library.empty_title') }}</h3><p>{{ t('media.empty_help') if profile else t('library.empty_help') }}</p><a href="{{ '/plans/' ~ plan.id ~ '/edit' if plan else '/plans' if profile else '/sources' }}">{{ t('plan.edit') if plan else t('nav.plans') if profile else t('nav.sources') }}</a></div></section>
 {% endif %}
 {% endblock %}

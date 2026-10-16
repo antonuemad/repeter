@@ -352,7 +352,8 @@ def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section:
             except (ValueError, ZoneInfoNotFoundError):
                 raise FormError("plan.schedule_invalid") from None
             today = utcnow().astimezone(ZoneInfo(zone)).date()
-            if not today <= start <= today + timedelta(days=365):
+            # An ongoing plan keeps its original start date when its hours/days change.
+            if start != plan.start_date and not today <= start <= today + timedelta(days=365):
                 raise FormError("plan.date_invalid")
             days = form.getlist("weekdays")
             times = [str(t).strip() for t in form.getlist("times") if str(t).strip()]

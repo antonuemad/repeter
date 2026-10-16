@@ -32,6 +32,7 @@ from repeater.models import (
     ActivityLevel,
     ActivityLog,
     ConnectedAccount,
+    ContentPlan,
     CreatorProfile,
     Platform,
     PostStatus,
@@ -153,6 +154,10 @@ def library(
     page: str = "1",
     profile_id: int | None = None,
 ) -> Response:
+    return _library_page(request, db, ctx, status, page, profile_id)
+
+
+def _library_page(request, db, ctx, status="active", page="1", profile_id=None, *, draft=None) -> Response:
     statuses = STATUS_FILTERS.get(status) or STATUS_FILTERS["active"]
     status = status if status in STATUS_FILTERS else "active"
     profiles = list(
@@ -183,6 +188,14 @@ def library(
     )
     accounts = [] if profile_id is not None else target_accounts(db, ctx.workspace.id)
     context = {
+        "draft": draft or {},
+        "plan": db.scalar(
+            select(ContentPlan).where(
+                ContentPlan.workspace_id == ctx.workspace.id, ContentPlan.profile_id == profile_id
+            )
+        )
+        if profile
+        else None,
         "profiles": profiles,
         "profile": profile,
         "profile_id": profile_id,
@@ -196,11 +209,15 @@ def library(
         "posts": latest_posts(db, [v.id for v in videos]),
         "max_upload_mb": get_settings().max_upload_mb,
     }
-    return render(request, "library.html", context)
+    return render(request, "library.html", context, status_code=422 if draft else 200)
 
 
 @router.get("/library/{video_id}")
 def video_detail(request: Request, db: DB, ctx: CurrentWorkspace, video_id: int) -> Response:
+    return _video_page(request, db, ctx, video_id)
+
+
+def _video_page(request, db, ctx, video_id, *, draft=None) -> Response:
     video = get_video(db, ctx, video_id)
     posts = list(
         db.execute(
@@ -212,6 +229,7 @@ def video_detail(request: Request, db: DB, ctx: CurrentWorkspace, video_id: int)
     )
     accounts = [] if video.profile_id is not None else target_accounts(db, ctx.workspace.id)
     context = {
+        "draft": draft or {},
         "formats": content.FORMATS[video.media_kind],
         "content_caption": content.caption(video),
         "compatibility": [
@@ -235,12 +253,14 @@ def video_detail(request: Request, db: DB, ctx: CurrentWorkspace, video_id: int)
         "incomplete": incomplete_accounts(db, accounts),
         "can_delete": ctx.is_owner,
         "previews": _caption_previews(db, video, accounts),
-        "excluded": _excluded_platforms(video),
+        "excluded": [p.value for p in PUBLISH_PLATFORMS if not form_bool(draft, f"platform_{p.value}")]
+        if draft is not None
+        else _excluded_platforms(video),
         "publish_platforms": [p.value for p in PUBLISH_PLATFORMS],
         "has_preview": _preview_file(video) is not None,
-        "overrides": video.overrides or {},
+        "overrides": draft if draft is not None else video.overrides or {},
     }
-    return render(request, "library_detail.html", context)
+    return render(request, "library_detail.html", context, status_code=422 if draft is not None else 200)
 
 
 def _caption_previews(db: Session, video: Video, accounts: list[ConnectedAccount]) -> list[dict[str, Any]]:
@@ -464,7 +484,11 @@ def edit_video(request: Request, db: DB, ctx: CurrentWorkspace, form: Form, vide
             raise FormError("media.invalid_format")
     except FormError as exc:
         flash(request, "error", exc.key, **exc.params)
-        return RedirectResponse(f"/library/{video.id}", status_code=303)
+        draft = _content_draft(form)
+        draft["content_format"] = str(form.get("content_format", video.content_format))[:32]
+        for p in PUBLISH_PLATFORMS:
+            draft[f"platform_{p.value}"] = "1" if form_bool(form, f"platform_{p.value}") else ""
+        return _video_page(request, db, ctx, video.id, draft=draft)
     excluded = sorted(p.value for p in PUBLISH_PLATFORMS if not form_bool(form, f"platform_{p.value}"))
     overrides = {
         k: v for k, v in (video.overrides or {}).items() if k not in ("title", "caption", "exclude_platforms")
@@ -679,12 +703,12 @@ async def upload(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
             raise UploadRejected("library.upload_no_file")
     except UploadRejected as exc:
         sink.discard()
-        flash(request, "error", exc.key, **exc.params)
-        return RedirectResponse("/library", status_code=303)
+        return await run_in_threadpool(_upload_error, request, db, ctx, sink, exc)
     except FormParserError:
         sink.discard()
-        flash(request, "error", "library.upload_bad_request")
-        return RedirectResponse("/library", status_code=303)
+        return await run_in_threadpool(
+            _upload_error, request, db, ctx, sink, UploadRejected("library.upload_bad_request")
+        )
     except BaseException:
         sink.discard()
         raise
@@ -714,19 +738,43 @@ def _import_upload(request: Request, db: Session, ctx: WorkspaceContext, sink: U
             content_format=placement,
         )
         db.commit()
-    except FormError as exc:
+    except (FormError, ValueError) as exc:
         db.rollback()
-        flash(request, "error", exc.key, **exc.params)
-        return RedirectResponse("/library", status_code=303)
-    except ValueError as exc:
-        db.rollback()
-        messages.flash_error(request, exc)
-        return RedirectResponse("/library", status_code=303)
+        return _upload_error(request, db, ctx, sink, exc)
     finally:
         if sink.path.exists():
             sink.path.unlink(missing_ok=True)
     flash(request, "success", "library.uploaded", title=video.title)
     return RedirectResponse(f"/library/{video.id}", status_code=303)
+
+
+def _upload_error(request, db, ctx, sink, exc) -> Response:
+    # A partial multipart body is untrusted until its CSRF token has been checked.
+    if sink.csrf_required and not csrf.token_matches(request.session, sink.fields.get(csrf.FORM_FIELD)):
+        raise csrf.CSRFError()
+    return _library_error(request, db, ctx, sink.fields, "upload", exc)
+
+
+def _library_error(request, db, ctx, fields, form_name, exc) -> Response:
+    messages.flash_error(request, exc)
+    try:
+        person = _upload_profile(db, ctx, form_str(fields, "profile_id", max_len=10))
+    except FormError:
+        person = None
+    if person is None:
+        return RedirectResponse("/library", status_code=303)
+    return _library_page(
+        request, db, ctx, profile_id=person.id, draft={"form": form_name, **_content_draft(fields)}
+    )
+
+
+def _content_draft(fields) -> dict[str, str]:
+    """Keep bounded drafts in the response, never in the small signed session cookie."""
+    draft = {}
+    for key, limit in (("title", MAX_TITLE_CHARS * 4), ("caption", MAX_CAPTION_CHARS * 4), ("format", 32)):
+        value = fields.get(key, "")
+        draft[key] = value[:limit] if isinstance(value, str) else ""
+    return draft
 
 
 def _upload_profile(db: Session, ctx: WorkspaceContext, value: str | None) -> CreatorProfile | None:
@@ -779,6 +827,5 @@ def create_text(request: Request, db: DB, ctx: CurrentWorkspace, form: Form) -> 
         db.commit()
     except FormError as exc:
         db.rollback()
-        flash(request, "error", exc.key, **exc.params)
-        return RedirectResponse("/library", status_code=303)
+        return _library_error(request, db, ctx, form, "text", exc)
     return RedirectResponse(f"/library/{item.id}", status_code=303)

@@ -106,7 +106,8 @@ def test_person_video_story_upload_uses_existing_processing(web_owner, db, sampl
 def test_spoofed_image_rejected_and_temp_removed(web_owner, db, payload):
     p = create_plan(web_owner, db)
     response = upload(web_owner, p.profile_id, payload)
-    assert response.headers["location"] == "/library"
+    assert response.status_code == 422
+    assert f'name="profile_id" value="{p.profile_id}"' in response.text
     assert db.scalar(select(func.count()).select_from(Video)) == 0
     assert list(storage.uploads_dir().glob("*.part")) == []
 
@@ -115,7 +116,7 @@ def test_image_limits_animation_and_csrf(web_owner, db, tmp_path, monkeypatch):
     p = create_plan(web_owner, db)
     assert upload(web_owner, p.profile_id, raster(), token="invalid-token").status_code == 403
     monkeypatch.setattr(images, "MAX_IMAGE_BYTES", 100)
-    assert upload(web_owner, p.profile_id, raster()).headers["location"] == "/library"
+    assert upload(web_owner, p.profile_id, raster()).status_code == 422
     monkeypatch.setattr(images, "MAX_IMAGE_BYTES", 20 * 1024 * 1024)
     monkeypatch.setattr(images, "MAX_IMAGE_PIXELS", 100)
     path = tmp_path / "big.png"

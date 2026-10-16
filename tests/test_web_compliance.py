@@ -625,15 +625,15 @@ def test_first_run_overview_has_a_checklist(web_owner):
     set_lang(web_owner, "en")
     html = web_owner.get("/").text
     card = html.split('class="card setup"', 1)[1].split("</section>", 1)[0]
-    for href in ("/accounts", "/library", "/rules"):
-        assert f'href="{href}"' in card, href
-    assert "Nothing is published until you turn it on yourself" in card
+    assert 'href="/plans#new"' in card
+    assert 'href="/rules"' not in card
+    assert "These steps do not start publishing" in card
     assert card.count("To do") == 3 and "Done" not in card
     set_lang(web_owner, "ar")
     assert "ابدأ من هنا" in web_owner.get("/").text
 
 
-def test_checklist_shows_progress_and_disappears_when_everything_is_done(
+def test_checklist_ignores_unassigned_content_and_legacy_rules(
     web_owner, db, make_account, web_make_video, web_make_rule
 ):
     set_lang(web_owner, "en")
@@ -641,9 +641,9 @@ def test_checklist_shows_progress_and_disappears_when_everything_is_done(
     web_make_rule(account, enabled=False)
     web_make_video()
     card = web_owner.get("/").text.split('class="card setup"', 1)[1].split("</section>", 1)[0]
-    assert card.count("Done") == 2 and card.count("To do") == 1
+    assert card.count("Done") == 0 and card.count("To do") == 3
     web_make_rule(account, enabled=True)
-    assert 'class="card setup"' not in web_owner.get("/").text
+    assert 'class="card setup"' in web_owner.get("/").text
 
 
 # --------------------------------------------------------------------------- ux-compliance-13: RTL arrows

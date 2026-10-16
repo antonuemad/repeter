@@ -103,13 +103,16 @@ def verify_link(request: Request, db: DB, form: Form, kind: Literal["invite", "r
     try:
         _not_signed_in(request, db)
         token_hash = access.digest(str(form.get("token", "")))
-        _find(db, kind, token_hash)
+        row = _find(db, kind, token_hash)
         request.session["access_" + kind] = {
             "digest": token_hash,
             "until": utcnow().timestamp() + PROOF_SECONDS,
         }
         target = "/invite/accept" if kind == "invite" else "/reset-password/confirm"
-        return _private(RedirectResponse(target, 303))
+        response = _private(RedirectResponse(target, 303))
+        if kind == "invite" and not i18n.normalize(request.cookies.get(i18n.COOKIE)):
+            i18n.set_cookie(response, db.get(Workspace, row.workspace_id).locale)
+        return response
     except access.AccessError as exc:
         return _page(request, "access_open.html", {"kind": kind, "error": exc.key}, status=400)
 

@@ -11,7 +11,7 @@ Mode: Operate.
 
 Scope: shared authenticated shell, login, overview, library, schedule, accounts, sources, rules, activity, standalone workspace settings and members subnavigation, customer administration and recovery, and public invitation/password setup/recovery forms. Legal and error routes inherit the same chrome and typography.
 
-Audience and task: selected customers invited by Magic Lap. Sign in, connect owned accounts, prepare content, review explicit publishing rules, and monitor results. The overview should expose the next useful action and the real state of the workspace.
+Audience and task: selected customers invited by Magic Lap. Sign in, create a person, connect and select their owned pages, prepare their library, and preview their rotation. The overview names the newest person and exposes the next useful preparation action. Legacy rules remain a secondary operational surface.
 
 Access tasks: owners review members and issue or revoke editor invitations. Platform operators create paused customer workspaces, invite owners, and review recovery requests. Operators verify identity before issuing a reset. Customers open private links, set their own passwords, and explicitly accept legal terms when joining. Invitation and recovery links are copied and delivered manually; no automatic email is sent.
 
@@ -28,3 +28,10 @@ Constraints: preserve Arabic/English parity, native no-JavaScript navigation and
 Finish evidence: the initial shell and the 2026-10-15 access extension each received an independent finish review with disposition ship and no material fixes. All five access-review sections passed against desktop and mobile captures. An exceptionally long workspace name remains an optional narrow-screen case from the initial shell review, not a design rule. The readiness report owns integration and launch gates.
 
 Open decisions: manual invitation and recovery delivery is settled. Full member removal, workspace closure, packaging, support commitments, and trial volume remain product decisions tracked by PRODUCT.md and the readiness report. Existing registered email addresses cannot join a second workspace through this initial invitation flow.
+
+2026-10-16 hardening: person-scoped preparation replaces the legacy rule-activation checklist. Three
+completed preparation steps lead to the preview, never imply publication readiness. Libraries retain
+drafts on validation errors and link back to the same plan. The incumbent tokens/components remain.
+The local synthetic journey was walked in Chrome, including error recovery, content creation, a
+seven-day repeat preview, Arabic/English and light/dark at desktop/mobile sizes. No horizontal page
+overflow was observed at 390, 768 and 1440 pixels. This is implementation QA, not customer research.

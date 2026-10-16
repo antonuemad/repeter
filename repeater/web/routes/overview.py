@@ -20,6 +20,9 @@ from repeater.models import (
     AccountStatus,
     ActivityLog,
     ConnectedAccount,
+    ContentPlan,
+    CreatorProfile,
+    PlanTarget,
     PostStatus,
     RotationRule,
     ScheduledPost,
@@ -63,44 +66,65 @@ def overview(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
     return render(request, "overview.html", context)
 
 
-def _setup_steps(db: Session, ws_id: int) -> dict[str, bool]:
-    """The first-run checklist: connect an account, bring in videos, review a rule and turn it on."""
-    accounts = _count(
-        db,
-        select(func.count())
-        .select_from(ConnectedAccount)
-        .where(
-            ConnectedAccount.workspace_id == ws_id,
-            ConnectedAccount.platform.in_(PUBLISH_PLATFORMS),
-            ConnectedAccount.status != AccountStatus.DISABLED,
-        ),
+def _setup_steps(db: Session, ws_id: int) -> dict[str, Any]:
+    """Prepare the newest person's plan, without requiring any publishing switches."""
+    plan = db.scalar(
+        select(ContentPlan).where(ContentPlan.workspace_id == ws_id).order_by(ContentPlan.id.desc()).limit(1)
     )
-    videos = _count(
-        db,
-        select(func.count())
-        .select_from(Video)
-        .where(Video.workspace_id == ws_id, Video.status != VideoStatus.ARCHIVED),
+    profile = db.get(CreatorProfile, plan.profile_id) if plan else None
+    edit_url = f"/plans/{plan.id}/edit" if plan else "/plans#new"
+    library_url = f"/library?profile_id={plan.profile_id}&upload=1#upload" if plan else "/plans#new"
+    accounts = (
+        _count(
+            db,
+            select(func.count())
+            .select_from(ConnectedAccount)
+            .join(PlanTarget, PlanTarget.account_id == ConnectedAccount.id)
+            .where(
+                PlanTarget.plan_id == (plan.id if plan else None),
+                PlanTarget.workspace_id == ws_id,
+                ConnectedAccount.workspace_id == ws_id,
+                ConnectedAccount.profile_id == (plan.profile_id if plan else None),
+                ConnectedAccount.platform.in_(PUBLISH_PLATFORMS),
+                ConnectedAccount.status == AccountStatus.ACTIVE,
+            ),
+        )
+        if plan
+        else 0
     )
-    sources = _count(
-        db,
-        select(func.count())
-        .select_from(Source)
-        .where(Source.workspace_id == ws_id, Source.enabled.is_(True), Source.kind != SourceKind.MANUAL),
+    videos = (
+        _count(
+            db,
+            select(func.count())
+            .select_from(Video)
+            .where(
+                Video.workspace_id == ws_id,
+                Video.profile_id == (plan.profile_id if plan else None),
+                Video.status == VideoStatus.READY,
+            ),
+        )
+        if plan
+        else 0
     )
-    rules = _count(
-        db,
-        select(func.count())
-        .select_from(RotationRule)
-        .join(ConnectedAccount, ConnectedAccount.id == RotationRule.connected_account_id)
-        .where(
-            RotationRule.workspace_id == ws_id,
-            RotationRule.enabled.is_(True),
-            ConnectedAccount.status == AccountStatus.ACTIVE,
-        ),
-    )
-    steps = {"accounts": accounts > 0, "content": videos > 0 or sources > 0, "rules": rules > 0}
-    steps["done"] = all(steps.values())
-    return steps
+    steps = {"person": plan is not None, "accounts": accounts > 0, "content": videos > 0}
+    done = all(steps.values())
+    links = {
+        "person": edit_url,
+        "accounts": edit_url + "#targets" if plan else edit_url,
+        "content": library_url,
+    }
+    next_url = f"/plans/{plan.id}" if plan else edit_url
+    for key, href in links.items():
+        if not steps[key]:
+            next_url = href
+            break
+    return {
+        **steps,
+        "done": done,
+        "name": profile.name if profile else None,
+        "links": links,
+        "next_url": next_url,
+    }
 
 
 def _count(db: Session, stmt: Select) -> int:

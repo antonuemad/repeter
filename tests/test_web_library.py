@@ -335,11 +335,13 @@ def test_edit_overrides_and_platforms(web_owner, db, workspace, web_make_video, 
 
 def test_edit_rejects_too_long_title(web_owner, web_make_video, db):
     video = web_make_video()
-    post(web_owner, f"/library/{video.id}/edit", {"title": "x" * 400})
+    set_lang(web_owner, "en")
+    response = post(web_owner, f"/library/{video.id}/edit", {"title": "x" * 400})
+    assert response.status_code == 422
     db.expire_all()
     assert "title" not in (db.get(Video, video.id).overrides or {})
-    set_lang(web_owner, "en")
-    assert "Title is too long" in web_owner.get(f"/library/{video.id}").text
+    assert "Title is too long" in response.text
+    assert f'value="{"x" * 400}"' in response.text
 
 
 def test_detail_shows_caption_preview_and_history(web_owner, db, workspace, web_make_video, make_account):

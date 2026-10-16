@@ -127,8 +127,8 @@ COPY = {
     "plan.browse": ("Browse folders", "عرض الفولدرات"),
     "plan.folder_link": ("Folder link or ID", "رابط الفولدر أو معرّفه"),
     "plan.folder_help": (
-        "Import videos directly inside this folder; optionally include images below. Subfolders are excluded. Saving checks access only; it does not download files.",
-        "بنستورد الفيديوهات الموجودة داخل الفولدر مباشرةً، وتقدر تضم الصور بالاختيار اللي تحت. الفولدرات الفرعية مش ضمن الاستيراد. الحفظ بيتحقق من الوصول فقط، من غير تنزيل ملفات.",
+        "Optional: use a Drive folder, or upload files and write posts in this person’s library. Imports include videos directly inside the folder and, if selected below, images. Subfolders are excluded. Saving checks access only; it does not download files.",
+        "اختياري: استخدم فولدر Drive، أو ارفع ملفات واكتب بوستات في مكتبة الشخص. الاستيراد يشمل الفيديوهات داخل الفولدر مباشرةً، والصور لو اخترتها بالأسفل. الفولدرات الفرعية مش ضمن الاستيراد. الحفظ بيتحقق من الوصول فقط، من غير تنزيل ملفات.",
     ),
     "plan.backfill": ("Existing files to import (0–200)", "عدد الملفات الحالية للاستيراد (٠–٢٠٠)"),
     "plan.backfill_help": (
