@@ -238,7 +238,7 @@ def _purpose_label(purpose: str) -> str:
 
 
 def _plan_return(db: Session, ctx: WorkspaceContext, value: str) -> str | None:
-    match = re.fullmatch(r"/plans/([1-9][0-9]{0,9})/edit", value)
+    match = re.fullmatch(r"/plans/([1-9][0-9]{0,9})/(?:edit|setup/(?:accounts|content))", value)
     if match and db.scalar(
         select(ContentPlan.id).where(
             ContentPlan.id == int(match[1]), ContentPlan.workspace_id == ctx.workspace.id

@@ -2,7 +2,7 @@
 {% import "macros.html" as m with context %}
 {% block title %}{{ t('nav.library') }}{% endblock %}
 {% block content %}
-<div class="page-heading"><h1 dir="auto">{{ profile.name if profile else t('library.title') }}</h1>{% if plan %}<div class="actions"><a class="button" href="/plans/{{ plan.id }}">{{ t('plan.preview') }}</a><a class="button secondary" href="/plans/{{ plan.id }}/edit">{{ t('plan.edit') }}</a></div>{% endif %}</div>
+<div class="page-heading"><h1 dir="auto">{{ profile.name if profile else t('library.title') }}</h1>{% if plan %}<div class="actions"><a class="button secondary" href="/plans/{{ plan.id }}/setup/content">{{ t('wizard.resume') }}</a><a class="button" href="/plans/{{ plan.id }}">{{ t('plan.preview') }}</a><a class="button secondary" href="/plans/{{ plan.id }}/edit">{{ t('plan.edit') }}</a></div>{% endif %}</div>
 <nav class="tabs" aria-label="{{ t('plan.person') }}"><a href="/library"{% if not profile %} aria-current="page"{% endif %}>{{ t('plan.unassigned') }}</a>{% for person in profiles %}<a href="/library?profile_id={{ person.id }}"{% if profile_id == person.id %} aria-current="page"{% endif %} dir="auto">{{ person.name }}</a>{% endfor %}<a href="/plans">{{ t('nav.plans') }}</a></nav>
 <p class="muted">{{ t('media.intro') if profile else t('library.intro') }}</p>
 

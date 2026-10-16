@@ -248,6 +248,14 @@ def _video_page(request, db, ctx, video_id, *, draft=None) -> Response:
         else [],
         "nav": "library",
         "video": video,
+        "person_plan": db.scalar(
+            select(ContentPlan).where(
+                ContentPlan.workspace_id == ctx.workspace.id,
+                ContentPlan.profile_id == video.profile_id,
+            )
+        )
+        if video.profile_id
+        else None,
         "posts": posts,
         "accounts": [a for a in accounts if a.id != video.source_account_id],
         "incomplete": incomplete_accounts(db, accounts),

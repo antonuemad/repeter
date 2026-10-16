@@ -320,6 +320,133 @@ for i, (en, ar) in enumerate(
 ):
     COPY[f"plan.day_{i}"] = (en, ar)
 
+COPY.update(
+    {
+        "wizard.title": ("Set up your rotation", "جهّز روتيشن محتواك"),
+        "wizard.intro": (
+            "Connect your pages, choose your content and preview the next 30 days.",
+            "اربط صفحاتك، اختار محتواك، وشوف معاينة الـ٣٠ يوم الجايين.",
+        ),
+        "wizard.exit": ("Exit setup", "خروج والرجوع لاحقًا"),
+        "wizard.progress": ("Setup steps", "خطوات الإعداد"),
+        "wizard.accounts": ("Accounts & pages", "الحسابات والصفحات"),
+        "wizard.content": ("Content", "المحتوى"),
+        "wizard.schedule": ("Rotation", "الروتيشن"),
+        "wizard.preview": ("Preview", "المعاينة"),
+        "wizard.person_title": ("Whose content are we preparing?", "هنجهّز محتوى مين؟"),
+        "wizard.person_help": (
+            "Use the name of the person or brand. Their library and selected pages stay together.",
+            "اكتب اسم الشخص أو البراند. مكتبته وصفحاته المختارة هيفضلوا مع بعض.",
+        ),
+        "wizard.create": ("Create person and connect accounts", "إنشاء الشخص وربط حساباته"),
+        "wizard.saved_help": (
+            "Each save keeps your progress. You can return to any step; save changes before leaving it.",
+            "كل ضغطة حفظ بتحتفظ بتقدمك. تقدر ترجع لأي خطوة؛ احفظ التعديلات قبل مغادرتها.",
+        ),
+        "wizard.locked": (
+            "Publishing is locked. You can prepare content and preview; nothing will be published.",
+            "قفل النشر شغّال. جهّز المحتوى وعاين الجدول؛ مش هيتنشر أي شيء.",
+        ),
+        "wizard.preview_only": (
+            "This setup saves your choices and previews them. It does not activate publishing.",
+            "الإعداد ده بيحفظ اختياراتك ويعرض معاينتها، من غير تشغيل النشر.",
+        ),
+        "wizard.accounts_title": ("Connect and choose your pages", "اربط حساباتك واختار الصفحات"),
+        "wizard.accounts_help": (
+            "Sign in with each platform and approve only the accounts you want to use. You "
+            "return here to choose this person’s pages.",
+            "سجّل الدخول في كل منصة ووافق على الحسابات اللي عايز تستخدمها فقط. هترجع هنا "
+            "لاختيار صفحات الشخص ده.",
+        ),
+        "wizard.connected": ("{n} available connections", "{n} حساب متصل متاح"),
+        "wizard.not_connected": ("No available connection yet", "مفيش حساب متصل متاح لسه"),
+        "wizard.reconnect": (
+            "Some accounts need to be connected again before selecting them.",
+            "في حسابات محتاجة إعادة ربط قبل اختيارها.",
+        ),
+        "wizard.manage_connection": ("Connect / reconnect", "ربط حساب أو إعادة الربط"),
+        "wizard.connect": ("Connect account", "ربط الحساب"),
+        "wizard.pages_title": ("Which pages belong in this rotation?", "أنهي صفحات تدخل في الروتيشن؟"),
+        "wizard.pages_help": (
+            "Select at least one page below and save. Connecting a platform alone does not select its pages.",
+            "حدّد صفحة واحدة على الأقل بالأسفل واحفظ. ربط المنصة لوحده مش بيختار صفحاتها.",
+        ),
+        "wizard.pick_pages": (
+            "Select at least one active page to continue, or connect an account above.",
+            "اختار صفحة متصلة واحدة على الأقل عشان تكمل، أو اربط حسابًا بالأعلى.",
+        ),
+        "wizard.save_pages": ("Save pages and choose content", "حفظ الصفحات واختيار المحتوى"),
+        "wizard.content_title": ("Where is your original content?", "محتواك الأصلي موجود فين؟"),
+        "wizard.content_help": (
+            "Choose a Drive folder, or add files manually below. Ready items join this "
+            "person’s library and rotation preview.",
+            "اختار فولدر من Drive، أو أضف ملفاتك يدويًا بالأسفل. المحتوى الجاهز بيدخل مكتبة "
+            "الشخص ومعاينة الروتيشن.",
+        ),
+        "wizard.drive_permission": (
+            "Google currently asks for read/download access to Drive files. Repeater "
+            "imports from the folder you select. Review the permission before approving.",
+            "Google بيطلب حاليًا صلاحية قراءة وتنزيل ملفات Drive. Repeater بيستورد من "
+            "الفولدر اللي تختاره. راجع الصلاحية قبل الموافقة.",
+        ),
+        "wizard.change_folder": ("Selected folder", "الفولدر المختار"),
+        "wizard.import_title": ("Prepare the folder’s content", "جهّز محتوى الفولدر"),
+        "wizard.import_help": (
+            "Saving the folder does not start downloads. Start importing when ready, then "
+            "refresh to see preparation progress. Importing never unlocks publishing.",
+            "حفظ الفولدر مش بيبدأ التنزيل. ابدأ الاستيراد لما تكون جاهز، وبعدها حدّث الحالة "
+            "لمتابعة التجهيز. الاستيراد ما بيفتحش قفل النشر.",
+        ),
+        "wizard.library_status": (
+            "Library: {ready} ready · {processing} preparing · {failed} failed",
+            "المكتبة: {ready} جاهز · {processing} قيد التجهيز · {failed} تعذّر تجهيزه",
+        ),
+        "wizard.last_check": ("Last folder check: {at}", "آخر فحص للفولدر: {at}"),
+        "wizard.refresh": ("Refresh status", "تحديث الحالة"),
+        "wizard.alternative": ("Upload files or use another source", "رفع ملفات أو استخدام مصدر آخر"),
+        "wizard.manual_help": (
+            "Add videos, images or text in this person’s library, then use “Return to setup” "
+            "to continue here.",
+            "أضف فيديوهات أو صورًا أو نصوصًا في مكتبة الشخص، وبعدها اضغط «الرجوع للإعداد» عشان تكمل هنا.",
+        ),
+        "wizard.to_schedule": ("Continue to rotation", "متابعة لإعداد الروتيشن"),
+        "wizard.back": ("Previous step", "الخطوة السابقة"),
+        "wizard.empty_help": (
+            "You can set your times now. The preview will show empty slots until content is ready.",
+            "تقدر تحدد المواعيد دلوقتي. المعاينة هتعرض مواعيد فاضية لحد ما المحتوى يبقى جاهز.",
+        ),
+        "wizard.schedule_title": ("When should content rotate?", "المحتوى يتوزّع إمتى؟"),
+        "wizard.schedule_help": (
+            "Start with one time on your chosen days. The repeat interval applies separately "
+            "to each page; gaps stay empty when no content is eligible.",
+            "ابدأ بموعد واحد في الأيام اللي تختارها. فاصل التكرار بيتحسب لكل صفحة لوحدها؛ "
+            "الموعد بيفضل فاضي لو مفيش محتوى مناسب.",
+        ),
+        "wizard.daily_time": ("Time on each selected day", "الوقت في كل يوم مختار"),
+        "wizard.extra_times": ("More than once a day", "أكثر من مرة في اليوم"),
+        "wizard.order": ("Library order", "ترتيب المحتوى"),
+        "wizard.preview_title": ("Your next 30 days", "معاينة الـ٣٠ يوم الجايين"),
+        "wizard.preview_help": (
+            "Review each item, destination and repeat. Empty slots and incompatible formats "
+            "are explained below.",
+            "راجع كل محتوى وصفحته وتكراره. المواعيد الفاضية والصيغ غير المناسبة موضّحة بالأسفل.",
+        ),
+        "wizard.refresh_preview": ("Recalculate preview", "إعادة حساب المعاينة"),
+        "wizard.add_content": (
+            "No ready content yet — return to content preparation",
+            "مفيش محتوى جاهز لسه — ارجع لتجهيز المحتوى",
+        ),
+        "wizard.finish": ("Finish setup", "إنهاء الإعداد"),
+        "wizard.edit_schedule": ("Edit rotation times", "تعديل مواعيد الروتيشن"),
+        "wizard.advanced": ("Advanced settings", "الإعدادات المتقدمة"),
+        "wizard.resume": ("Return to setup", "الرجوع للإعداد"),
+        "wizard.start": ("Start guided setup", "بدء الإعداد خطوة بخطوة"),
+        "wizard.folder_options": ("Import options", "خيارات الاستيراد"),
+    }
+)
+
+COPY["wizard.preview_notes"] = ("How this preview works", "إزاي بنحسب المعاينة؟")
+
 COPY.update(MEDIA_COPY)
 EN = {k: v[0] for k, v in COPY.items()}
 AR = {k: v[1] for k, v in COPY.items()}

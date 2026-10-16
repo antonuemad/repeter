@@ -72,8 +72,8 @@ def _setup_steps(db: Session, ws_id: int) -> dict[str, Any]:
         select(ContentPlan).where(ContentPlan.workspace_id == ws_id).order_by(ContentPlan.id.desc()).limit(1)
     )
     profile = db.get(CreatorProfile, plan.profile_id) if plan else None
-    edit_url = f"/plans/{plan.id}/edit" if plan else "/plans#new"
-    library_url = f"/library?profile_id={plan.profile_id}&upload=1#upload" if plan else "/plans#new"
+    edit_url = f"/plans/{plan.id}/setup/accounts" if plan else "/setup"
+    library_url = f"/plans/{plan.id}/setup/content" if plan else "/setup"
     accounts = (
         _count(
             db,
@@ -110,10 +110,10 @@ def _setup_steps(db: Session, ws_id: int) -> dict[str, Any]:
     done = all(steps.values())
     links = {
         "person": edit_url,
-        "accounts": edit_url + "#targets" if plan else edit_url,
+        "accounts": edit_url,
         "content": library_url,
     }
-    next_url = f"/plans/{plan.id}" if plan else edit_url
+    next_url = f"/plans/{plan.id}/setup/preview" if plan else edit_url
     for key, href in links.items():
         if not steps[key]:
             next_url = href

@@ -35,3 +35,14 @@ drafts on validation errors and link back to the same plan. The incumbent tokens
 The local synthetic journey was walked in Chrome, including error recovery, content creation, a
 seven-day repeat preview, Arabic/English and light/dark at desktop/mobile sizes. No horizontal page
 overflow was observed at 390, 768 and 1440 pixels. This is implementation QA, not customer research.
+
+2026-10-16 guided setup: `/setup` and the per-person `/setup/{step}` routes now keep the core journey
+in four ordered steps. Reuse Magic Lap controls, typography, cards and semantic colors. The step
+navigation uses real links and aria-current; current step is not a claim of completed setup. Save
+buttons advance accounts and scheduling; folder browsing/import status remain within content.
+Advanced options use native disclosures and the existing editor stays reachable. Final preview
+prioritizes coverage and actual simulated rows, with detailed calculation/format help disclosed.
+Native forms work without JavaScript; the page filter remains a progressive enhancement.
+Local Chrome QA covered a synthetic person, selected page, manual text and seven-day repeat preview,
+Arabic/English, light/dark, 390/768/1440 widths and no document overflow. OAuth/folder branches and
+errors were exercised by mocked HTTP acceptance tests. No real content was imported or published.

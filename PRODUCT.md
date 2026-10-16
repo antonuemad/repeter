@@ -198,3 +198,21 @@ validation errors. These drafts are rendered in the response, not stored in sess
 Existing plans can change their times/days while keeping a start date that has already passed.
 Invitations default the password setup page to the invited workspace's language, preserving an
 explicit browser language choice. All verification is synthetic; the production publishing lock remains.
+
+## Guided customer setup (2026-10-16)
+
+`/setup` is the primary first-person entry. After naming a person, one four-step wizard connects
+and selects their accounts/pages, selects optional Drive content, saves local scheduling and
+rotation together, and previews 30 days. OAuth success/cancellation returns to the originating
+accounts or content step; only owned, allowlisted return paths are accepted. The existing advanced
+editor stays available. Each explicit save persists progress; unsaved form edits are not autosaved.
+New wizard-created plans default to repeat mode with a 30-day minimum; existing plans keep their mode.
+
+Folder browsing, access checks and import controls remain separate from publishing. Saving a folder
+never starts its monitor; starting imports is explicit, with ready/preparing/failed library counts.
+Manual upload/text creation remain available with direct links back from the library and item detail.
+Schedule and repeat settings save atomically and stop any active plan for review, as existing saves do.
+The final step uses the same read-only simulation and explains empty slots, incompatibilities and
+repeat waits. No activation control is included in the wizard, and production publishing stays locked.
+All verification uses synthetic data, fake OAuth and mocked provider HTTP; external provider approval
+and first-customer consent/import acceptance are still required independently.

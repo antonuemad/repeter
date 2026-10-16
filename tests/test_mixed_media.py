@@ -576,4 +576,5 @@ def test_people_entry_explains_mixed_content_as_available(web_owner, lang, avail
     set_lang(web_owner, lang)
     page = web_owner.get("/plans")
     assert page.status_code == 200 and available in page.text and obsolete not in page.text
-    assert 'name="name"' in page.text  # The actual first-person setup entry remains available.
+    assert 'href="/setup"' in page.text
+    assert 'name="name"' in web_owner.get("/setup").text  # Guided entry still creates a person.

@@ -40,6 +40,20 @@ from repeater.web.templating import flash, render
 
 router = APIRouter()
 IMPORT_PLATFORMS = (Platform.FACEBOOK, Platform.INSTAGRAM)
+WIZARD_STEPS = ("accounts", "content", "schedule", "preview")
+
+
+def _wizard_step(form, section):
+    step = form.get("wizard_step")
+    if step and step != {
+        "targets": "accounts",
+        "source": "content",
+        "folders": "content",
+        "imports": "content",
+        "schedule": "schedule",
+    }.get(section):
+        raise HTTPException(400)
+    return step
 
 
 def get_plan(db, ctx, plan_id, *, lock=False):
@@ -154,7 +168,36 @@ def _context(db, ctx, plan):
 def _edit(request, db, ctx, plan, *, error=None, submitted=None, **extra):
     data = _context(db, ctx, plan)
     data.update(error=error, submitted=submitted or {}, **extra)
+    if data["submitted"].get("wizard_step") in WIZARD_STEPS:
+        return _wizard(request, db, ctx, plan, data["submitted"]["wizard_step"], data=data)
     return render(request, "plans/edit.html", data, status_code=422 if error else 200)
+
+
+def _wizard(request, db, ctx, plan, step, *, data=None, page="1"):
+    data = data or _context(db, ctx, plan)
+    counts = {}
+    for statuses in data["source_counts"].values():
+        for status, count in statuses.items():
+            counts[status] = counts.get(status, 0) + count
+    data.update(wizard_step=step, wizard_steps=WIZARD_STEPS, library_counts=counts)
+    if step == "preview":
+        data.update(_preview_context(db, ctx, plan, page))
+        data["preview_path"] = f"/plans/{plan.id}/setup/preview"
+    return render(request, "plans/wizard.html", data, status_code=422 if data["error"] else 200)
+
+
+@router.get("/setup")
+def setup_start(request: Request, ctx: CurrentWorkspace) -> Response:
+    return render(request, "plans/start.html", {"nav": "plans", "error": None, "name": ""})
+
+
+@router.get("/plans/{plan_id}/setup/{step}")
+def setup(
+    request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, step: str, page: str = "1"
+) -> Response:
+    if step not in WIZARD_STEPS:
+        raise HTTPException(404)
+    return _wizard(request, db, ctx, get_plan(db, ctx, plan_id), step, page=page)
 
 
 def _revision(form, plan):
@@ -178,6 +221,17 @@ def create(request: Request, db: DB, ctx: CurrentWorkspace, form: Form) -> Respo
     try:
         name = form_str(form, "name", max_len=200, required=True)
     except FormError as exc:
+        if form.get("wizard_step") == "accounts":
+            return render(
+                request,
+                "plans/start.html",
+                {
+                    "nav": "plans",
+                    "error": exc,
+                    "name": str(form.get("name", ""))[:200],
+                },
+                status_code=422,
+            )
         flash(request, "error", exc.key, **exc.params)
         return RedirectResponse("/plans#new", 303)
     person = CreatorProfile(workspace_id=ctx.workspace.id, name=name)
@@ -188,10 +242,12 @@ def create(request: Request, db: DB, ctx: CurrentWorkspace, form: Form) -> Respo
         profile_id=person.id,
         timezone=ctx.workspace.timezone,
         start_date=utcnow().astimezone(ZoneInfo(ctx.workspace.timezone)).date(),
+        rotation_mode="repeat" if form.get("wizard_step") == "accounts" else "once",
     )
     db.add(plan)
     db.commit()
-    return RedirectResponse(f"/plans/{plan.id}/edit", 303)
+    destination = "setup/accounts" if form.get("wizard_step") == "accounts" else "edit"
+    return RedirectResponse(f"/plans/{plan.id}/{destination}", 303)
 
 
 @router.get("/plans/{plan_id}/edit")
@@ -202,6 +258,7 @@ def edit(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int) -> Respo
 @router.post("/plans/{plan_id}/folders")
 def folders(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, form: Form) -> Response:
     plan = get_plan(db, ctx, plan_id)
+    _wizard_step(form, "folders")
     try:
         account = _drive(db, ctx, form)
         page = form_str(form, "page_token", max_len=2000)
@@ -271,6 +328,7 @@ def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section:
     if section not in {"person", "source", "targets", "schedule", "rotation", "imports", "platforms"}:
         raise HTTPException(404)
     plan = get_plan(db, ctx, plan_id, lock=True)
+    wizard_step = _wizard_step(form, section)
     try:
         _revision(form, plan)
         if section == "person":
@@ -310,6 +368,8 @@ def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section:
             source.config = {**source.config, "include_images": form_bool(form, "include_images")}
         elif section == "targets":
             raw = form.getlist("targets")
+            if wizard_step and not raw:
+                raise FormError("wizard.pick_pages")
             if len(raw) > 100 or any(
                 not isinstance(v, str) or not v.isascii() or not v.isdecimal() or len(v) > 10 for v in raw
             ):
@@ -370,15 +430,10 @@ def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section:
                 raise FormError("plan.schedule_invalid")
             plan.timezone, plan.start_date = zone, start
             plan.weekdays, plan.times, plan.ordering = sorted({int(d) for d in days}), sorted(times), ordering
+            if wizard_step:
+                _rotation(form, plan)
         elif section == "rotation":
-            mode = form_str(form, "rotation_mode", max_len=16, required=True)
-            if mode not in {"once", "repeat"}:
-                raise FormError("plan.rotation_invalid")
-            try:
-                days = form_int(form, "repeat_after_days", minimum=1, maximum=365)
-            except FormError:
-                raise FormError("plan.rotation_invalid") from None
-            plan.rotation_mode, plan.repeat_after_days = mode, days
+            _rotation(form, plan)
         elif section == "imports":
             source = _source(db, plan)
             if source is None:
@@ -417,6 +472,9 @@ def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section:
         plan.revision += 1
         db.commit()
         flash(request, "success", "plan.saved")
+        if wizard_step:
+            next_step = {"targets": "content", "schedule": "preview"}.get(section, wizard_step)
+            return RedirectResponse(f"/plans/{plan.id}/setup/{next_step}", 303)
         return RedirectResponse(
             f"/plans/{plan.id}"
             if section in {"schedule", "rotation"}
@@ -444,6 +502,17 @@ def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section:
             submitted["weekdays"] = form.getlist("weekdays")
             submitted["times"] = form.getlist("times")
         return _edit(request, db, ctx, get_plan(db, ctx, plan_id), error=exc, submitted=submitted)
+
+
+def _rotation(form, plan):
+    mode = form_str(form, "rotation_mode", max_len=16, required=True)
+    if mode not in {"once", "repeat"}:
+        raise FormError("plan.rotation_invalid")
+    try:
+        days = form_int(form, "repeat_after_days", minimum=1, maximum=365)
+    except FormError:
+        raise FormError("plan.rotation_invalid") from None
+    plan.rotation_mode, plan.repeat_after_days = mode, days
 
 
 def _add_platform_source(db, ctx, plan, form):
@@ -579,6 +648,18 @@ def control_platform(
 @router.get("/plans/{plan_id}")
 def preview(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, page: str = "1") -> Response:
     plan = get_plan(db, ctx, plan_id)
+    return render(
+        request,
+        "plans/preview.html",
+        {
+            **_context(db, ctx, plan),
+            **_preview_context(db, ctx, plan, page),
+            "preview_path": f"/plans/{plan.id}",
+        },
+    )
+
+
+def _preview_context(db, ctx, plan, page):
     result = simulate(db, plan)
     pager = Page(number=query_int(page, default=1), size=10, total=len(result["rows"]))
     result["rows"] = result["rows"][pager.offset : pager.offset + pager.size]
@@ -591,8 +672,4 @@ def preview(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, page:
         for a in result["accounts"]
         if a.status != AccountStatus.ACTIVE or a.id not in rules or rule_problems(rules[a.id])
     ]
-    return render(
-        request,
-        "plans/preview.html",
-        {**_context(db, ctx, plan), "preview": result, "warnings": warnings, "pager": pager},
-    )
+    return {"preview": result, "warnings": warnings, "pager": pager}

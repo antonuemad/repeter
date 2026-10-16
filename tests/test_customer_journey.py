@@ -14,6 +14,7 @@ from repeater.content_plans import simulate
 from repeater.models import (
     AccountStatus,
     ConnectedAccount,
+    ContentPlan,
     Job,
     Platform,
     RotationRule,
@@ -49,8 +50,10 @@ def setup_card(client):
 
 
 def connect(client, plan, purpose, fake):
+    step = "content" if purpose == "gdrive" else "accounts"
+    target = f"/plans/{plan.id}/setup/{step}"
     with override("oauth", fake.name, fake):
-        response = client.get(f"/connect/{purpose}?return_to=/plans/{plan.id}/edit", follow_redirects=False)
+        response = client.get(f"/connect/{purpose}", params={"return_to": target}, follow_redirects=False)
         assert response.status_code == 303
         state = parse_qs(urlparse(response.headers["location"]).query)["state"][0]
         response = client.get(
@@ -59,7 +62,7 @@ def connect(client, plan, purpose, fake):
             follow_redirects=False,
         )
         assert response.status_code == 303
-        assert response.headers["location"] == f"/plans/{plan.id}/edit"
+        assert response.headers["location"] == target
 
 
 @pytest.mark.parametrize("lang", ["ar", "en"])
@@ -89,8 +92,10 @@ def test_invitation_to_mixed_library_and_rotation(
         assert f'<html lang="{lang}"' in page.text
         assert post(client, "/invite/accept", password_form(), page="/invite/accept").status_code == 303
         assert login(client, "journey@example.com", NEW_PASSWORD).status_code == 303
-        assert 'href="/plans#new"' in setup_card(client)
-        plan = create_plan(client, db, "ليلى · Synthetic creator")
+        assert 'href="/setup"' in setup_card(client)
+        created = post(client, "/plans", {"name": "ليلى · Synthetic creator", "wizard_step": "accounts"})
+        plan = db.get(ContentPlan, int(created.headers["location"].split("/")[2]))
+        assert client.get(created.headers["location"]).status_code == 200
         assert plan.workspace_id == tenant.id
 
         meta_accounts = _meta_accounts()
@@ -128,9 +133,21 @@ def test_invitation_to_mixed_library_and_rotation(
             )
         )
         folder_mock(no_external_http)
-        assert save(client, db, plan, "source", {"drive_id": drive.id, "folder": FOLDER}).status_code == 303
         assert (
-            save(client, db, plan, "targets", {"targets": [str(a.id) for a in accounts]}).status_code == 303
+            save(
+                client, db, plan, "source", {"wizard_step": "content", "drive_id": drive.id, "folder": FOLDER}
+            ).status_code
+            == 303
+        )
+        assert (
+            save(
+                client,
+                db,
+                plan,
+                "targets",
+                {"wizard_step": "accounts", "targets": [str(a.id) for a in accounts]},
+            ).status_code
+            == 303
         )
         assert (
             save(
@@ -139,6 +156,9 @@ def test_invitation_to_mixed_library_and_rotation(
                 plan,
                 "schedule",
                 {
+                    "wizard_step": "schedule",
+                    "rotation_mode": "repeat",
+                    "repeat_after_days": "7",
                     "timezone": "Africa/Cairo",
                     "start_date": (utcnow().date() + timedelta(days=1)).isoformat(),
                     "weekdays": [str(i) for i in range(7)],
@@ -173,10 +193,12 @@ def test_invitation_to_mixed_library_and_rotation(
         clip = video(db, plan, "Synthetic reel")
         db.commit()
         assert client.get(f"/library/{image.id}/preview").status_code == 200
-        assert f'href="/plans/{plan.id}"' in setup_card(client)
+        assert f'href="/plans/{plan.id}/setup/preview"' in setup_card(client)
         for path in (
             f"/plans/{plan.id}",
             f"/plans/{plan.id}?page=2",
+            f"/plans/{plan.id}/setup/preview",
+            f"/plans/{plan.id}/setup/preview?page=2",
             f"/plans/{plan.id}/edit",
             "/schedule",
             "/settings/workspace",

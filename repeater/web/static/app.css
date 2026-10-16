@@ -419,3 +419,39 @@ th { font-size: 12px; background: var(--surface-alt); }
 .media-image { object-fit: contain; background: var(--bg); }
 
 .thumb, .thumb:hover { text-decoration: none; }
+/* The guided setup stays in the incumbent Magic Lap shell and works without JavaScript. */
+.wizard-shell { max-inline-size: 960px; margin-inline: auto; }
+.wizard-progress { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); list-style: none; margin: 0 0 24px; padding: 0; border-block-end: 1px solid var(--border-strong); }
+.wizard-progress li { color: var(--muted); min-inline-size: 0; padding: 12px 8px; }
+.wizard-progress li, .wizard-progress a { display: flex; align-items: center; gap: 8px; }
+.wizard-progress a { color: inherit; min-block-size: 44px; text-decoration: none; }
+.wizard-progress a:hover { text-decoration: underline; }
+.wizard-progress li[aria-current="step"] { color: var(--primary); background: var(--primary-bg); font-weight: 600; }
+.wizard-number { display: inline-flex; align-items: center; justify-content: center; inline-size: 28px; block-size: 28px; flex-shrink: 0; border: 1px solid currentColor; border-radius: 50%; font-size: 12px; }
+.wizard-safety { display: flex; align-items: center; gap: 10px; color: var(--muted); margin-block-end: 24px; }
+.wizard-panel h2 { font-size: 21px; }
+.wizard-connection { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 16px; border-block-end: 1px solid var(--border); }
+.wizard-connection > div { min-inline-size: 0; }
+.wizard-connection p { margin: 4px 0 0; }
+.wizard-panel > .wizard-connection { margin-block-end: 16px; }
+.wizard-connections { margin-block-end: 28px; }
+.wizard-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; margin-block: 28px 16px; }
+.wizard-actions .button { min-inline-size: 180px; }
+.wizard-folder { margin-block: 24px; }
+.wizard-folder > form { margin-block-start: 20px; }
+.wizard-import { margin-block: 24px; }
+.wizard-alternative { border-block: 1px solid var(--border); padding-block: 16px; margin-block-start: 28px; }
+.wizard-alternative p { margin-block-start: 12px; }
+.wizard-footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-block-start: 24px; }
+.wizard-footer p { max-inline-size: 65ch; }
+@media (max-width: 600px) {
+  .wizard-progress { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wizard-progress li { font-size: 13px; padding: 8px; }
+  .wizard-connection { flex-wrap: wrap; }
+  .wizard-connection .button { inline-size: 100%; }
+  .wizard-actions .button { inline-size: 100%; }
+  .wizard-panel h2 { font-size: 19px; }
+}
+
+.wizard-preview-notes { margin-block-end: 24px; }
+.wizard-preview-notes p { margin-block-start: 12px; }

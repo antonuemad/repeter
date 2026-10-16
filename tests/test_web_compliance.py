@@ -625,7 +625,7 @@ def test_first_run_overview_has_a_checklist(web_owner):
     set_lang(web_owner, "en")
     html = web_owner.get("/").text
     card = html.split('class="card setup"', 1)[1].split("</section>", 1)[0]
-    assert 'href="/plans#new"' in card
+    assert 'href="/setup"' in card
     assert 'href="/rules"' not in card
     assert "These steps do not start publishing" in card
     assert card.count("To do") == 3 and "Done" not in card
