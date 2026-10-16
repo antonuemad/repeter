@@ -145,6 +145,11 @@ def upsert_connected_accounts(
             )
         ).scalar_one_or_none()
         if acc is not None and provider_name_for_account(acc) != provider_name_for_account(item):
+            if provider_name_for_account(acc) == "instagram" and provider_name_for_account(item) == "meta":
+                # Facebook Login can return a Page plus its already-direct Instagram account.
+                # Keep that connection intact while still saving the newly authorized Page.
+                out.append(acc)
+                continue
             raise AuthError(
                 "This Instagram account already uses a different login method. "
                 "Reconnect it using its existing Accounts entry.",

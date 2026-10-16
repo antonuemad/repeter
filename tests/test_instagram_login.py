@@ -23,6 +23,7 @@ from repeater.models import (
     ConnectedAccount,
     DataDeletionRequest,
     OAuthState,
+    Platform,
     RotationRule,
     ScheduledPost,
     Video,
@@ -367,3 +368,20 @@ def test_declined_direct_permission_does_not_suggest_ads(mock, db, workspace):
     with pytest.raises(PlatformError) as err:
         instagram.publisher.publish(account_context(a), publish_request())
     assert "ads_read" not in str(err.value)
+
+
+def test_facebook_pages_can_connect_after_direct_instagram_without_replacing_grant(mock, db, workspace):
+    from tests.test_web_oauth import _meta_accounts
+
+    exchange(mock)
+    direct = upsert_connected_accounts(db, workspace.id, [run_exchange()])[0]
+    db.commit()
+    original = direct.token_enc
+    facebook = _meta_accounts()
+    facebook[1].external_id = IG_ID
+    result = upsert_connected_accounts(db, workspace.id, facebook)
+    db.commit()
+    assert {a.platform for a in result} == {Platform.FACEBOOK, Platform.INSTAGRAM}
+    assert direct.token_enc == original and direct.extra["oauth_provider"] == "instagram"
+    assert "fb_user_id" not in direct.extra
+    assert db.scalar(select(func.count()).select_from(ConnectedAccount)) == 2
