@@ -15,6 +15,7 @@ _PROVIDER_MODULES = {
     "tiktok": "repeater.platforms.tiktok",
     "google": "repeater.platforms.google",
     "meta": "repeater.platforms.meta",
+    "instagram": "repeater.platforms.instagram_login",
 }
 _PUBLISHER_MODULES = {
     Platform.TIKTOK: "repeater.platforms.tiktok",
@@ -38,6 +39,19 @@ def get_oauth_provider(name: str) -> OAuthProvider:
 
 def get_provider_for_platform(platform: Platform | str) -> OAuthProvider:
     return get_oauth_provider(PROVIDER_FOR_PLATFORM[Platform(platform)])
+
+
+def provider_name_for_account(account: Any) -> str:
+    if (
+        Platform(account.platform) == Platform.INSTAGRAM
+        and (account.extra or {}).get("oauth_provider") == "instagram"
+    ):
+        return "instagram"
+    return PROVIDER_FOR_PLATFORM[Platform(account.platform)]
+
+
+def get_provider_for_account(account: Any) -> OAuthProvider:
+    return get_oauth_provider(provider_name_for_account(account))
 
 
 def get_publisher(platform: Platform | str) -> Publisher:

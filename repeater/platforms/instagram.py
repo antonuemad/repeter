@@ -167,6 +167,14 @@ def _processing(state: dict[str, Any], message: str, seconds: int = POLL_SECONDS
     )
 
 
+def _graph(account: AccountContext) -> meta.Graph:
+    if (account.extra or {}).get("oauth_provider") == "instagram":
+        from repeater.platforms.instagram_login import Graph
+
+        return Graph(account.tokens.access_token)
+    return meta.Graph(account.tokens.access_token)
+
+
 @contextlib.contextmanager
 def _permission_hint(account: AccountContext) -> Iterator[None]:
     """A permission error on a publishing endpoint is, for a user whose Page role comes from a
@@ -176,7 +184,11 @@ def _permission_hint(account: AccountContext) -> Iterator[None]:
         yield
     except meta.PermissionDeniedError as exc:
         granted = set(account.tokens.scopes or [])
-        if not granted & meta.ADS_SCOPES and "ads_" not in exc.message:
+        if (
+            (account.extra or {}).get("oauth_provider") != "instagram"
+            and not granted & meta.ADS_SCOPES
+            and "ads_" not in exc.message
+        ):
             exc.message = f"{exc.message} {meta.ADS_PERMISSION_HINT}"
             exc.args = (exc.message,)
         raise
@@ -436,7 +448,7 @@ class InstagramPublisher:
             raise PermanentError(" ".join(problems), code="invalid_video")
         ig_user_id = _ig_user_id(account)
         settings = _settings(req.settings)
-        with _permission_hint(account), meta.Graph(account.tokens.access_token) as graph:
+        with _permission_hint(account), _graph(account) as graph:
             _check_publishing_quota(graph, ig_user_id)
             created_at = utcnow()
             container_id = _create_container(graph, ig_user_id, req, settings)
@@ -469,7 +481,7 @@ class InstagramPublisher:
                 "The Instagram upload id is missing; the post cannot be tracked.", code="missing_container"
             )
         ig_user_id = str(state.get("ig_user_id") or _ig_user_id(account))
-        with _permission_hint(account), meta.Graph(account.tokens.access_token) as graph:
+        with _permission_hint(account), _graph(account) as graph:
             if state.get("media_id"):
                 return _published(graph, state, str(state["media_id"]))
             info = graph.get(
@@ -548,7 +560,7 @@ class InstagramLister:
         if since is not None:
             params["since"] = int(since.timestamp())
         out: list[RemoteVideo] = []
-        with meta.Graph(account.tokens.access_token) as graph:
+        with _graph(account) as graph:
             pages = graph.paginate(
                 f"{meta.node(ig_user_id)}/media",
                 params,
@@ -570,7 +582,7 @@ class InstagramLister:
 
     def download(self, account: AccountContext, remote: RemoteVideo, dest: Path) -> Path:
         """Fetch a fresh media_url (CDN links expire) and stream the file to `dest`."""
-        with meta.Graph(account.tokens.access_token) as graph:
+        with _graph(account) as graph:
             body = graph.get(
                 meta.node(remote.external_id),
                 {"fields": "media_url"},

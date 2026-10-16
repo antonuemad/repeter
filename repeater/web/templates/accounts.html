@@ -33,13 +33,14 @@
           {% set handle = a.extra.get('username') or a.extra.get('custom_url') or a.extra.get('email') %}
           {% if handle %}<span class="muted" dir="ltr">{{ handle }}</span>{% endif %}
         </div>
+        {% if a.platform == 'instagram' %}<p class="small muted">{{ t('accounts.method_instagram') if a.extra.get('oauth_provider') == 'instagram' else t('accounts.method_meta') }}</p>{% endif %}
         <div>{{ m.badge('account_status', a.status) }}
           {% if a.last_error and a.status != 'active' %}{{ m.error_text(a.last_error, 300, a.last_error_info) }}{% endif %}
         </div>
       </div>
       <div class="actions">
-        {% if configured[a.platform] and a.status != 'active' %}
-        <a class="button small" href="/connect/{{ purposes[a.platform] }}">{{ t('accounts.reconnect') }}</a>
+        {% if configured[a.id] and a.status != 'active' %}
+        <a class="button small" href="/connect/{{ purposes[a.id] }}">{{ t('accounts.reconnect') }}</a>
         {% endif %}
         {% if a.platform != 'gdrive' and a.status != 'disabled' %}
         <a class="button small secondary" href="/rules/{{ a.id }}">{{ t('accounts.rules') }}</a>

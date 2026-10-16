@@ -203,3 +203,16 @@ Instagram هنا يستخدم **Facebook Login**: حساب Business أو Creator
 مراجع التشغيل: [تشفير rclone](https://rclone.org/crypt/)،
 [Google OAuth](https://developers.google.com/identity/protocols/oauth2/web-server)،
 [Telegram sendMessage](https://core.telegram.org/bots/api#sendmessage).
+
+## تجهيز الربط العام وInstagram المباشر — 2026-10-16
+
+حزمة المراجعة الجاهزة للتحرير والتقديم: [Google وMeta](../review/external-access.md).
+العميل يختار الآن Instagram مباشرة لحساب Business أو Creator، بدون صفحة Facebook؛
+وربط Facebook يظل للحسابات الحالية والصفحات. التوكنات والصلاحيات ومسارات الحذف منفصلة.
+لا يتم تحويل حساب مرتبط بالطريقة القديمة تلقائيًا؛ استخدم زر إعادة الربط الخاص به.
+
+صفحة التعريف العامة `/about` تشرح حدود التجربة وروابط الخصوصية والتواصل. تحديث الخصوصية
+بتاريخ 2026-10-16 يتطلب موافقة جديدة من كل مستخدم. لا نقبلها نيابة عن المستخدم.
+الموافقات الخارجية لم تكتمل: Google يحتاج مراجعة النطاقات وتقييمًا مناسبًا لصلاحية Drive
+المقيدة، وMeta يحتاج التحقق المطلوب وAdvanced Access. لا يكفي نجاح CI أو ظهور زر الربط.
+النشر الفعلي يظل مقفولًا؛ لا اختبار حي حتى لو طلبه نموذج مراجعة المنصة.

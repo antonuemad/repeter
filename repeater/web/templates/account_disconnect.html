@@ -6,7 +6,9 @@
   <h1>{{ t('accounts.disconnect_title') }}</h1>
   <p>{{ m.platform(account.platform) }} <strong dir="auto">{{ account.display_name }}</strong></p>
   <p>{{ t('accounts.disconnect_body') }}</p>
-  {% if account.platform in ['instagram', 'facebook'] %}
+  {% if account.platform == 'instagram' and account.extra.get('oauth_provider') == 'instagram' %}
+  <p class="muted">{{ t('accounts.disconnect_instagram_note') }}</p>
+  {% elif account.platform in ['instagram', 'facebook'] %}
   <p class="muted">{{ t('accounts.disconnect_meta_note') }}</p>
   {% elif account.platform in ['youtube', 'gdrive'] %}
   <p class="muted">{{ t('accounts.disconnect_google_note') }} <a href="https://myaccount.google.com/permissions" rel="noopener noreferrer" target="_blank">myaccount.google.com/permissions</a></p>

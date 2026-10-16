@@ -111,6 +111,7 @@ def _start(client, purpose: str) -> tuple[Any, str]:
         ("youtube", "google", True),
         ("gdrive", "google", True),
         ("meta", "meta", False),
+        ("instagram", "instagram", False),
     ],
 )
 def test_connect_creates_state_and_redirects(web_owner, db, admin_user, purpose, provider, pkce):

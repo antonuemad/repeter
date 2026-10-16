@@ -31,6 +31,7 @@ from repeater.models import (
     SourceKind,
     Video,
 )
+from repeater.platforms import provider_name_for_account
 from repeater.platforms.base import PlatformError
 from repeater.sources.drive import browse_folders, folder_details, parse_folder_id
 from repeater.timeutil import utcnow
@@ -147,11 +148,13 @@ def _context(db, ctx, plan):
             a for a in accounts if a.platform in PUBLISH_PLATFORMS and a.profile_id in (None, plan.profile_id)
         ],
         "drives": [a for a in accounts if a.platform == Platform.GDRIVE and a.status == AccountStatus.ACTIVE],
+        "account_providers": {a.id: provider_name_for_account(a) for a in accounts},
         "connections": [
             (p, get_settings().platform_configured(provider))
             for p, provider in [
                 ("gdrive", "google"),
                 ("youtube", "google"),
+                ("instagram", "instagram"),
                 ("meta", "meta"),
                 ("tiktok", "tiktok"),
             ]

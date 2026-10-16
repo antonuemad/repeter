@@ -12,7 +12,7 @@ A saved draft is the truth. Preview is read-only and import is an independent ac
 <div class="plan-setup">
 <section class="card" id="connections"><h2>{{ t('plan.connections') }}</h2><p class="muted">{{ t('plan.connect_help') }}</p><div class="actions">
 {% for purpose, configured in connections %}
-{% set label = 'Facebook / Instagram' if purpose == 'meta' else platform_name(purpose) %}
+{% set label = t('accounts.connect_meta') if purpose == 'meta' else t('accounts.connect_instagram') if purpose == 'instagram' else platform_name(purpose) %}
 {% if configured %}<a class="button secondary" href="/connect/{{ purpose }}?return_to=/plans/{{ plan.id }}/edit">{{ label }}</a>{% else %}<span class="muted">{{ label }} · {{ t('plan.unavailable') }}</span>{% endif %}
 {% endfor %}</div></section>
 {% set images_selected = submitted.get('include_images') in ['1', 'on', 'true', 'yes'] if 'drive_id' in submitted else (source and source.config.get('include_images', false)) %}

@@ -502,6 +502,11 @@ def _next_page_params(paging: Any) -> dict[str, str] | None:
 class Graph:
     """Graph API client bound to one access token (or none, for the OAuth token endpoint)."""
 
+    api_host = GRAPH_URL
+
+    def proof(self, access_token: str) -> str | None:
+        return appsecret_proof(access_token)
+
     def __init__(
         self,
         access_token: str | None = None,
@@ -510,14 +515,14 @@ class Graph:
         timeout: httpx.Timeout = API_TIMEOUT,
     ) -> None:
         self._token = access_token or None
-        self._proof = appsecret_proof(access_token) if access_token else None
-        self._base = f"{GRAPH_URL}/{graph_version()}"
+        self._proof = self.proof(access_token) if access_token else None
+        self._base = f"{self.api_host}/{graph_version()}"
         self._own = http is None
         self._http = http or client(timeout=timeout)
 
     def with_token(self, access_token: str) -> Graph:
         """Another client on the same connection pool (closing it leaves the pool open)."""
-        return Graph(access_token, http=self._http)
+        return type(self)(access_token, http=self._http)
 
     def close(self) -> None:
         if self._own:
@@ -544,6 +549,7 @@ class Graph:
         headers: dict[str, str] = {}
         if self._token:
             headers["Authorization"] = f"Bearer {self._token}"
+        if self._proof:
             if data is None:
                 params["appsecret_proof"] = self._proof
             else:
@@ -617,11 +623,11 @@ def _b64url_decode(value: str) -> bytes:
         raise ValueError("signed_request is not base64url") from exc
 
 
-def parse_signed_request(signed_request: str) -> dict:
+def parse_signed_request(signed_request: str, *, secret: str | None = None) -> dict:
     """Verify and decode a Meta signed_request (data deletion / deauthorize callbacks):
     base64url(HMAC-SHA256(payload, app secret)) "." base64url(JSON payload).
     Raises ValueError when it is malformed, tampered with or not HMAC-SHA256."""
-    secret = get_settings().meta_app_secret
+    secret = get_settings().meta_app_secret if secret is None else secret
     if not secret:
         raise ValueError("Meta app secret is not configured")
     if not isinstance(signed_request, str) or len(signed_request) > MAX_SIGNED_REQUEST_CHARS:
@@ -746,6 +752,7 @@ def _instagram_account(
         tokens=_page_tokens(token, scopes),
         avatar_url=avatar if isinstance(avatar, str) and avatar else None,
         extra={
+            "oauth_provider": "meta",
             "ig_user_id": ig_user_id,
             **({"account_type": ig["account_type"]} if ig.get("account_type") else {}),
             "page_id": str(page["id"]),

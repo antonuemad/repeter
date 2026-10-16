@@ -13,6 +13,7 @@ from repeater import accounts as account_service
 from repeater.config import get_settings
 from repeater.jobs import kinds
 from repeater.models import PROVIDER_FOR_PLATFORM, AccountStatus, ConnectedAccount, Platform
+from repeater.platforms import provider_name_for_account
 from repeater.web.auth import CurrentWorkspace, WorkspaceContext, require_owner
 from repeater.web.deps import DB, Form
 from repeater.web.routes.oauth import PLATFORM_PURPOSES, PURPOSE_PROVIDERS
@@ -24,6 +25,7 @@ router = APIRouter()
 CONNECT_BUTTONS = (
     ("tiktok", ("tiktok",)),
     ("youtube", ("youtube",)),
+    ("instagram", ("instagram",)),
     ("meta", ("instagram", "facebook")),
     ("gdrive", ("gdrive",)),
 )
@@ -53,11 +55,13 @@ def accounts_page(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
         "nav": "accounts",
         "accounts": rows,
         "buttons": buttons,
-        "purposes": {p.value: purpose for p, purpose in PLATFORM_PURPOSES.items()},
-        "configured": {
-            p.value: settings.platform_configured(PURPOSE_PROVIDERS[purpose])
-            for p, purpose in PLATFORM_PURPOSES.items()
+        "purposes": {
+            a.id: "instagram"
+            if provider_name_for_account(a) == "instagram"
+            else PLATFORM_PURPOSES[Platform(a.platform)]
+            for a in rows
         },
+        "configured": {a.id: settings.platform_configured(provider_name_for_account(a)) for a in rows},
         "can_disconnect": ctx.is_owner,
     }
     return render(request, "accounts.html", context)
@@ -92,6 +96,8 @@ def disconnect(request: Request, db: DB, ctx: CurrentWorkspace, form: Form, acco
         if account.platform in (Platform.INSTAGRAM, Platform.FACEBOOK)
         else "accounts.disconnected"
     )
+    if provider_name_for_account(account) == "instagram":
+        key = "accounts.disconnected_instagram"
     flash(request, "success", key, name=account.display_name)
     return RedirectResponse("/accounts", status_code=303)
 

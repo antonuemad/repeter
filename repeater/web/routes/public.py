@@ -30,11 +30,13 @@ User-agent: facebookexternalhit
 Allow: /m/
 Allow: /privacy
 Allow: /terms
+Allow: /about
 Disallow: /
 
 User-agent: *
 Allow: /privacy
 Allow: /terms
+Allow: /about
 Disallow: /
 """
 MEDIA_HEADERS = {
@@ -126,6 +128,11 @@ def _encoded_file(video: Video | None) -> Path | None:
     except ValueError:
         return None
     return path if path is not None and path.is_file() else None
+
+
+@router.get("/about")
+def about(request: Request) -> Response:
+    return i18n.remember_requested(request, render(request, "about.html", _legal_context()))
 
 
 @router.get("/privacy")

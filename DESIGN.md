@@ -313,3 +313,20 @@ Language, theme, and logout are explicit utility actions. The theme control subm
 - **Don't** use a platform identifier color as the only indication of publication status.
 - **Don't** give new cards stronger shadows or arbitrary corner shapes that compete with the existing task hierarchy.
 - **Don't** require JavaScript to navigate, submit a form, or choose the theme.
+
+## Direct Instagram onboarding — 2026-10-16
+
+The account wizard now distinguishes direct Instagram Login (professional account, no
+Facebook Page) from existing Facebook-linked accounts. Connection counts and reconnect
+links follow the saved login method. The Accounts page repeats that method next to the
+account and explains workspace-only disconnect versus removing the provider grant.
+The public `/about` page uses the existing legal-page measure and shell to explain the
+invitation pilot, preparation workflow, data access, support and review limits.
+
+Finish review: inspected the Arabic wizard at 1728px and 390px and the English public
+page at both widths using synthetic local data; no horizontal overflow. Existing Inter /
+IBM Plex Sans Arabic, 16px row spacing and native navigation remain in use. The current
+publishing-lock notice stays visible. The UI detector returned no findings. Disabled
+provider states were inspected in-browser; configured links, both locales, ownership,
+reconnect routing and callback errors are covered by the simulated web tests. No new
+visual system or animated effects were introduced.

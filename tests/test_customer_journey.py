@@ -66,8 +66,9 @@ def connect(client, plan, purpose, fake):
 
 
 @pytest.mark.parametrize("lang", ["ar", "en"])
+@pytest.mark.parametrize("instagram_method", ["meta", "instagram"])
 def test_invitation_to_mixed_library_and_rotation(
-    web_owner, web_app, db, admin_user, workspace, lang, no_external_http
+    web_owner, web_app, db, admin_user, workspace, lang, no_external_http, instagram_method
 ):
     admin_user.is_platform_admin = True
     db.commit()
@@ -100,6 +101,15 @@ def test_invitation_to_mixed_library_and_rotation(
 
         meta_accounts = _meta_accounts()
         meta_accounts[1].extra["account_type"] = "BUSINESS"
+        if instagram_method == "instagram":
+            direct = meta_accounts.pop()
+            direct.extra = {
+                "oauth_provider": "instagram",
+                "ig_login_user_id": "1234",
+                "ig_user_id": direct.external_id,
+                "account_type": "BUSINESS",
+            }
+            connect(client, plan, "instagram", FakeProvider("instagram", False, [direct]))
         connect(client, plan, "meta", FakeProvider("meta", False, meta_accounts))
         connect(
             client,

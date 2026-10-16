@@ -24,7 +24,7 @@ from repeater.models import (
     SourceKind,
     Video,
 )
-from repeater.platforms import get_provider_for_platform
+from repeater.platforms import get_provider_for_account, provider_name_for_account
 from repeater.platforms.base import (
     AccountContext,
     AuthError,
@@ -117,7 +117,7 @@ def fresh_context(
     ctx = account_context(account)
     if not ctx.tokens.expires_within(REFRESH_MARGIN, now):
         return ctx  # someone else refreshed it while we waited for the lock
-    provider = get_provider_for_platform(account.platform)
+    provider = get_provider_for_account(account)
     try:
         tokens = provider.refresh(ctx)
     except AuthError as exc:
@@ -144,6 +144,12 @@ def upsert_connected_accounts(
                 ConnectedAccount.external_id == item.external_id,
             )
         ).scalar_one_or_none()
+        if acc is not None and provider_name_for_account(acc) != provider_name_for_account(item):
+            raise AuthError(
+                "This Instagram account already uses a different login method. "
+                "Reconnect it using its existing Accounts entry.",
+                code="login_method_conflict",
+            )
         created = acc is None
         if created:
             acc = ConnectedAccount(
@@ -194,7 +200,7 @@ def disconnect(
     maintenance a few days later (see repeater.jobs.maintenance)."""
     if revoke and account.token_enc:
         try:
-            get_provider_for_platform(account.platform).revoke(account_context(account))
+            get_provider_for_account(account).revoke(account_context(account))
         except (PlatformError, AccountUnavailable, Exception) as exc:  # noqa: BLE001 - best effort
             log_activity(
                 session,
@@ -356,7 +362,10 @@ def delete_account_records(
     deletion. Returns what was removed."""
     # Library imports outlive a disconnect. Preserve only the deletion key before the FK to
     # this account (and its sources) is lost, so a later callback can still erase the imports.
-    meta_user = (account.extra or {}).get("fb_user_id")
+    direct = provider_name_for_account(account) == "instagram"
+    meta_user = (account.extra or {}).get("ig_login_user_id" if direct else "fb_user_id")
+    if direct and meta_user:
+        meta_user = f"instagram:{meta_user}"
     if account.platform in (Platform.INSTAGRAM, Platform.FACEBOOK) and meta_user:
         imported_sources = select(Source.id).where(Source.connected_account_id == account.id)
         session.execute(
@@ -418,3 +427,23 @@ def accounts_due_for_refresh(
             )
         ).scalars()
     )
+
+
+def meta_identity_conditions(provider: str, user_id: str) -> tuple:
+    """Keep Facebook and Instagram app-scoped identities in separate namespaces."""
+    if provider == "instagram":
+        return (
+            ConnectedAccount.platform == Platform.INSTAGRAM,
+            ConnectedAccount.extra["oauth_provider"].astext == "instagram",
+            ConnectedAccount.extra["ig_login_user_id"].astext == user_id,
+        )
+    if provider == "meta":
+        return (
+            ConnectedAccount.platform.in_((Platform.FACEBOOK, Platform.INSTAGRAM)),
+            or_(
+                ConnectedAccount.extra["oauth_provider"].astext.is_(None),
+                ConnectedAccount.extra["oauth_provider"].astext == "meta",
+            ),
+            ConnectedAccount.extra["fb_user_id"].astext == user_id,
+        )
+    raise ValueError("Unsupported deletion provider")

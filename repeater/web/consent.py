@@ -26,7 +26,7 @@ from repeater.timeutil import utcnow
 
 # Version of the legal texts (the effective date shown on /privacy and /terms). Change it
 # whenever either text changes in substance: every user is then asked to accept it again.
-LEGAL_VERSION = "2026-10-15"
+LEGAL_VERSION = "2026-10-16"
 SESSION_KEY = "consent"
 EVENT = "terms_accepted"
 

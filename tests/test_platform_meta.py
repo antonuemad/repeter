@@ -334,6 +334,7 @@ def test_exchange_code_pages_ig_and_pagination(mock):
     assert ig.display_name == "magiclap"
     assert ig.avatar_url == IG_A["profile_picture_url"]
     assert ig.extra == {
+        "oauth_provider": "meta",
         "ig_user_id": IG_A["id"],
         "page_id": "111",
         "username": "magiclap",

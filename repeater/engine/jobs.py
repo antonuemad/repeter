@@ -211,13 +211,14 @@ def delete_user_data(session: Session, request_id: int) -> bool:
     if request is None or request.status == "completed":
         session.rollback()
         return False
+    from repeater.accounts import meta_identity_conditions
+
     external_user_id = str(request.external_user_id)
+    conditions = meta_identity_conditions(request.provider, external_user_id)
+    deletion_key = f"instagram:{external_user_id}" if request.provider == "instagram" else external_user_id
     accounts = list(
         session.execute(
-            select(ConnectedAccount)
-            .where(ConnectedAccount.extra["fb_user_id"].astext == external_user_id)
-            .order_by(ConnectedAccount.id)
-            .with_for_update()
+            select(ConnectedAccount).where(*conditions).order_by(ConnectedAccount.id).with_for_update()
         ).scalars()
     )
     for account in accounts:
@@ -247,7 +248,7 @@ def delete_user_data(session: Session, request_id: int) -> bool:
     # Account retention deliberately keeps the imported library, with this minimal deletion
     # key. The account and source FKs may already be NULL when Meta sends its callback.
     detached = session.execute(
-        select(Video.id, Video.workspace_id).where(Video.meta_deletion_user_id == external_user_id)
+        select(Video.id, Video.workspace_id).where(Video.meta_deletion_user_id == deletion_key)
     ).all()
     _delete_videos(session, detached)
     request.status = "completed"

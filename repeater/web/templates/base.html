@@ -74,7 +74,7 @@
       {% for f in flashes %}<div class="flash flash-{{ f.level }}" role="{{ 'alert' if f.level == 'error' else 'status' }}">{{ f.message }}</div>{% endfor %}
       {% block content %}{% endblock %}
     </main>
-    <footer class="footer"><div class="container footer-row"><span class="muted">© 2026 Magic Lap</span><a href="/privacy">{{ t('footer.privacy') }}</a><a href="/terms">{{ t('footer.terms') }}</a><a href="mailto:info@magic-lap.com">info@magic-lap.com</a></div></footer>
+    <footer class="footer"><div class="container footer-row"><span class="muted">© 2026 Magic Lap</span><a href="/about">Repeater</a><a href="/privacy">{{ t('footer.privacy') }}</a><a href="/terms">{{ t('footer.terms') }}</a><a href="mailto:info@magic-lap.com">info@magic-lap.com</a></div></footer>
   </div>
 </body>
 </html>

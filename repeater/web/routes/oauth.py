@@ -31,7 +31,13 @@ log = logging.getLogger("repeater.web.oauth")
 router = APIRouter()
 
 # Button the user clicked -> OAuth provider that serves it.
-PURPOSE_PROVIDERS = {"tiktok": "tiktok", "youtube": "google", "gdrive": "google", "meta": "meta"}
+PURPOSE_PROVIDERS = {
+    "tiktok": "tiktok",
+    "youtube": "google",
+    "gdrive": "google",
+    "meta": "meta",
+    "instagram": "instagram",
+}
 # Purpose used to (re)connect an account of each platform.
 PLATFORM_PURPOSES = {
     Platform.TIKTOK: "tiktok",
@@ -181,7 +187,12 @@ def _save_accounts(
             )
         ).all()
     }
-    accounts = upsert_connected_accounts(db, ctx.workspace.id, items, actor=ctx.actor)
+    try:
+        accounts = upsert_connected_accounts(db, ctx.workspace.id, items, actor=ctx.actor)
+    except PlatformError:
+        db.rollback()
+        flash(request, "error", "oauth.login_method_conflict")
+        return RedirectResponse(return_path or "/accounts", status_code=303)
     # New rules start OFF (engine.rules.ensure_rule): nothing is published before the user has
     # reviewed the account's settings and turned publishing on.
     needs_setup: list[ConnectedAccount] = []
@@ -234,6 +245,7 @@ def _purpose_label(purpose: str) -> str:
         "youtube": "YouTube",
         "gdrive": "Google Drive",
         "meta": "Facebook / Instagram",
+        "instagram": "Instagram",
     }.get(purpose, purpose)
 
 

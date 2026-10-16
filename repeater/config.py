@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     meta_app_id: str = ""
     meta_app_secret: str = ""
+    instagram_app_id: str = ""
+    instagram_app_secret: str = ""
     meta_graph_version: str = "v26.0"
     # TikTok audit state of the developer app. Until TikTok has audited it, every post made through
     # the API is restricted to private viewing (SELF_ONLY, on a private account), so the rule form
@@ -109,6 +111,7 @@ class Settings(BaseSettings):
             "tiktok": bool(self.tiktok_client_key and self.tiktok_client_secret),
             "google": bool(self.google_client_id and self.google_client_secret),
             "meta": bool(self.meta_app_id and self.meta_app_secret),
+            "instagram": bool(self.instagram_app_id and self.instagram_app_secret),
         }.get(provider, False)
 
 

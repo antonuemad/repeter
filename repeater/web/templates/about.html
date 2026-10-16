@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Repeater · Magic Lap{% endblock %}
+{% block robots %}<meta name="robots" content="index, follow">{% endblock %}
+{% block content %}
+<article class="card legal">
+{% if lang == 'ar' %}
+<h1>مكتبة محتواك، وجدول لكل صفحاتك</h1>
+<p class="muted">Repeater من Magic Lap يساعد صناع المحتوى والفرق على تنظيم محتواهم المملوك، اختيار الحسابات، ومعاينة جدول إعادة الاستخدام لكل شخص.</p>
+<p class="banner banner-warning">التجربة الحالية بالدعوات. النشر الفعلي مقفول على كل المنصات أثناء الاختبار.</p>
+<h2>من الربط إلى معاينة الروتيشن</h2>
+<ol><li>اقبل دعوتك واضبط كلمة مرورك.</li><li>اربط حساباتك من شاشة موافقة Google أو Meta الرسمية. Instagram المباشر مخصص لحسابات Business وCreator ولا يحتاج صفحة Facebook.</li><li>اختار فولدر Google Drive أو مصدرًا مدعومًا، وحدد محتوى الشخص وحساباته.</li><li>حدد الوتيرة والفاصل قبل إعادة المحتوى، وراجع معاينة الجدول قبل التشغيل.</li></ol>
+<h2>وصول واضح لبياناتك</h2>
+<p>Google Drive يتيح استعراض المجلدات واستيراد الملفات المختارة إلى مكتبتك. YouTube يتيح قراءة قائمة فيديوهاتك؛ الاستيراد يحتاج الملفات الأصلية في Drive لأن YouTube API لا يتيح تنزيلها. يمكن استيراد الفيديوهات المتاحة عبر واجهات Facebook وInstagram الرسمية للحسابات التي تفوّضها.</p>
+<p>نطلب صلاحيات الحساب والقراءة والنشر لدعم خطة المحتوى. قفل الاختبار يمنع تنفيذ النشر. لا نطلب كلمة مرور المنصة، ولا نقرأ الرسائل الخاصة. يمكنك فصل الحساب من الإعدادات أو إلغاء التفويض لدى المنصة.</p>
+<p>ربط حسابات العملاء الخارجيين يخضع لمراجعات Google وMeta؛ لم نعلن إتمام هذه الاعتمادات. TikTok مؤجل حاليًا.</p>
+<p><a class="button" href="/login">دخول العملاء المدعوين</a></p>
+<p>للدعوات أو المساعدة أو حذف البيانات: <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>. راجع <a href="/privacy">سياسة الخصوصية</a> و<a href="/terms">شروط الخدمة</a>.</p>
+{% else %}
+<h1>Your content library. A schedule for every account.</h1>
+<p class="muted">Repeater by Magic Lap helps creators and teams organize their own content, choose their accounts, and preview a content rotation for each person.</p>
+<p class="banner banner-warning">Invitation-only pilot. Actual publishing is locked on every platform during testing.</p>
+<h2>From connection to rotation preview</h2>
+<ol><li>Accept your invitation and set your password.</li><li>Connect through the official Google or Meta consent screen. Direct Instagram login supports Business and Creator accounts without a Facebook Page.</li><li>Choose a Google Drive folder or a supported source, then select the person's content and accounts.</li><li>Set the frequency and repeat interval, and review the schedule preview before activation.</li></ol>
+<h2>Understand your data access</h2>
+<p>Google Drive lets you browse folders and import selected files into your library. YouTube lets you read your upload list; importing requires original files in Drive because YouTube API does not provide downloads. Facebook and Instagram videos can be imported where their official APIs provide files for accounts you authorize.</p>
+<p>We request account, reading and publishing permissions to support your content plan. The pilot lock prevents publishing. We never ask for platform passwords or read private messages. Disconnect in Repeater or revoke access at the platform at any time.</p>
+<p>External customer connections depend on Google and Meta reviews; these approvals are not yet complete. TikTok is currently deferred.</p>
+<p><a class="button" href="/login">Invited customer sign in</a></p>
+<p>For invitations, support or data deletion: <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>. Read our <a href="/privacy">Privacy Policy</a> and <a href="/terms">Terms of Service</a>.</p>
+{% endif %}
+</article>
+{% endblock %}

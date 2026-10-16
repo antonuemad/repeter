@@ -18,7 +18,9 @@ SESSION_KEY = "csrf"
 FORM_FIELD = "csrf_token"
 HEADER = "X-CSRF-Token"
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
-EXEMPT_PATHS = frozenset({"/meta/deauthorize", "/meta/data-deletion"})
+EXEMPT_PATHS = frozenset(
+    {"/meta/deauthorize", "/meta/data-deletion", "/instagram/deauthorize", "/instagram/data-deletion"}
+)
 # Routes that parse their multipart body as a stream and verify the token from it.
 STREAMED_PATHS = frozenset({"/library/upload"})
 
