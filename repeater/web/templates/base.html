@@ -33,6 +33,7 @@
         <a href="{{ href }}"{% if selected %} aria-current="page"{% endif %}>{{ m.icon(icon, 18) }}<span>{{ t('nav.' ~ key) }}</span>{% if selected %}<span class="nav-dot" aria-hidden="true"></span>{% endif %}</a>
         {% endfor %}
         <a href="/activity"{% if nav == 'activity' %} aria-current="page"{% endif %}>{{ m.icon('activity',18) }}<span>{{ t('nav.activity') }}</span></a>
+        <a href="/guide"{% if nav == 'guide' %} aria-current="page"{% endif %}>{{ m.icon('guide',18) }}<span>{{ t('nav.guide') }}</span></a>
         <details class="nav-section"{% if nav in ['sources','rules','schedule'] %} open{% endif %}><summary>{{ m.icon('settings',18) }}{{ t('nav.advanced') }}</summary><div>
         {% for key, href in [('sources','/sources'),('rules','/rules'),('schedule','/schedule')] %}<a href="{{ href }}"{% if nav == key %} aria-current="page"{% endif %}>{{ m.icon(key,18) }}<span>{{ t('nav.' ~ key) }}</span></a>{% endfor %}
         </div></details>

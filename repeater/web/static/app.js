@@ -182,6 +182,19 @@
       });
     });
     setupNavigation();
+    // The guide remains fully readable without JS; collapse only its mobile index.
+    var guideIndex = document.querySelector('[data-guide-index]');
+    if (guideIndex && window.matchMedia) {
+      var guideDesktop = window.matchMedia('(min-width: 761px)');
+      function adaptGuide() { guideIndex.open = guideDesktop.matches; }
+      adaptGuide();
+      guideDesktop.addEventListener('change', adaptGuide);
+      guideIndex.querySelectorAll('a').forEach(function (link) {
+        link.addEventListener('click', function () {
+          if (!guideDesktop.matches) { guideIndex.open = false; }
+        });
+      });
+    }
     setupConfirm();
     setupUpload();
     setupTikTok();

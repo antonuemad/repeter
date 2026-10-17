@@ -511,6 +511,37 @@ th { font-size: 12px; background: var(--surface-alt); }
 .account-connections .activation-help { max-inline-size: 32ch; }
 .plan-people > li > div { min-inline-size: 0; }
 .plan-people h2 { overflow-wrap: anywhere; }
+
+/* A reading surface within the existing Magic Lap shell. */
+.guide-layout { display: grid; grid-template-columns: 248px minmax(0, 1fr); align-items: start; gap: 48px; }
+.guide-index { position: sticky; inset-block-start: 80px; max-block-size: calc(100vh - 104px); overflow-y: auto; padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
+.guide-index > summary { min-block-size: 44px; font-weight: 600; }
+.guide-index ol { padding-inline-start: 24px; margin: 8px 0 0; }
+.guide-index li { padding-inline-start: 4px; }
+.guide-index a { display: block; padding-block: 8px; color: var(--muted); text-decoration: none; }
+.guide-index a:hover { color: var(--primary); text-decoration: underline; }
+.guide-reading { min-inline-size: 0; max-inline-size: 75ch; }
+.guide-overview { font-weight: 500; margin: 0; padding-block: 12px 24px; border-block-end: 1px solid var(--border-strong); }
+.guide-chapter { padding-block: 32px; border-block-end: 1px solid var(--border); scroll-margin-block-start: 24px; }
+.guide-chapter h2 { font-size: 21px; margin: 0 0 12px; text-wrap: balance; }
+.guide-chapter-number { color: var(--subtle); }
+.guide-chapter-intro { color: var(--muted); margin: 0 0 20px; }
+.guide-steps { padding-inline-start: 24px; margin: 0; }
+.guide-steps li { padding-inline-start: 8px; margin-block-end: 16px; }
+.guide-steps li::marker { color: var(--primary); font-weight: 600; }
+.guide-note { padding: 16px; background: var(--surface-alt); border-radius: 10px; margin-block: 20px; }
+.guide-chapter-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; }
+.guide-chapter-actions a { display: inline-flex; align-items: center; min-block-size: 44px; }
+.guide-contact { padding-block: 24px; }
+@media (max-width: 1100px) {
+  .guide-layout { grid-template-columns: 208px minmax(0, 1fr); gap: 24px; }
+}
+@media (max-width: 760px) {
+  .guide-layout { grid-template-columns: minmax(0, 1fr); }
+  .guide-index { position: static; max-block-size: none; }
+  .guide-chapter h2 { font-size: 19px; }
+  .guide-steps li { padding-inline-start: 4px; }
+}
 @media (max-width: 600px) {
   .person-switch { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; }
   .person-switch label { min-inline-size: 0; inline-size: 100%; }

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}{{ t('nav.guide') }}{% endblock %}
+{% block content %}
+<!-- Read / Magic Lap: a stable chapter index and ordered tasks beside a bounded reading column.
+     Extend the existing shell, typography and semantic tokens. No platform actions run here. -->
+<div class="page-heading guide-heading">
+  <div><h1>{{ t('nav.guide') }}</h1><p class="measure">{{ t('guide.intro') }}</p></div>
+  <a class="button" href="/plans">{{ t('guide.continue') }}</a>
+</div>
+<div class="guide-layout">
+  <details class="guide-index" open data-guide-index>
+    <summary>{{ t('guide.contents') }}</summary>
+    <nav aria-label="{{ t('guide.contents') }}"><ol>
+      {% for chapter in chapters %}<li><a href="#{{ chapter.id }}">{{ chapter.title }}</a></li>{% endfor %}
+    </ol></nav>
+  </details>
+  <div class="guide-reading">
+    <p class="guide-overview">{{ t('guide.path') }}</p>
+    {% for chapter in chapters %}
+    <section class="guide-chapter" id="{{ chapter.id }}" aria-labelledby="{{ chapter.id }}-title" tabindex="-1">
+      <h2 id="{{ chapter.id }}-title"><span class="guide-chapter-number" aria-hidden="true">{{ loop.index }}.</span> {{ chapter.title }}</h2>
+      <p class="guide-chapter-intro">{{ chapter.intro }}</p>
+      <ol class="guide-steps">{% for step in chapter.steps %}<li>{{ step }}</li>{% endfor %}</ol>
+      <p class="guide-note">{{ chapter.note }}</p>
+      <div class="guide-chapter-actions"><a href="{{ guide_links[chapter.destination] }}">{{ chapter.action }}</a><a href="#main">{{ t('guide.top') }}</a></div>
+    </section>
+    {% endfor %}
+    <p class="guide-contact">{{ t('guide.support') }} <a href="mailto:info@magic-lap.com">info@magic-lap.com</a></p>
+  </div>
+</div>
+{% endblock %}

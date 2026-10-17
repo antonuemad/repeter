@@ -221,6 +221,13 @@ _YOUTUBE_CATEGORIES_AR = {
 }
 
 EN: dict[str, str] = {
+    "nav.guide": "User guide",
+    "guide.intro": "Every step, from your invitation to a prepared library and a 30-day rotation preview. Start at the beginning or jump to the task you need.",
+    "guide.continue": "Continue preparing a person",
+    "guide.contents": "In this guide",
+    "guide.path": "Your first journey: add a person → connect and select their pages → add content → choose times → preview the calendar.",
+    "guide.top": "Back to contents",
+    "guide.support": "Need help with your workspace? Contact",
     "nav.settings": "Workspace settings",
     "shell.workspace": "Workspace",
     "shell.support": "Help & support",
@@ -816,6 +823,13 @@ EN: dict[str, str] = {
 }
 
 AR: dict[str, str] = {
+    "nav.guide": "دليل الاستخدام",
+    "guide.intro": "كل الخطوات من الدعوة لحد تجهيز المكتبة ومعاينة روتيشن ٣٠ يوم. ابدأ من الأول أو اختار المهمة اللي محتاجها من الفهرس.",
+    "guide.continue": "كمّل تجهيز شخص",
+    "guide.contents": "محتويات الدليل",
+    "guide.path": "رحلتك الأولى: أضف شخصًا ← اربط صفحاته واخترها ← أضف محتواه ← حدّد المواعيد ← عاين التقويم.",
+    "guide.top": "الرجوع للفهرس",
+    "guide.support": "محتاج مساعدة في مساحة العمل؟ تواصل على",
     "nav.settings": "إعدادات مساحة العمل",
     "shell.workspace": "مساحة العمل",
     "shell.support": "المساعدة والدعم",
