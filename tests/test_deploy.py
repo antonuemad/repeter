@@ -1881,6 +1881,9 @@ def test_offsite_phase_receipts_and_dedicated_config(sandbox: dict) -> None:
 
 def test_media_readback_failure_does_not_record_a_successful_media_backup(sandbox: dict) -> None:
     make_env(sandbox, RCLONE_REMOTE="crypt:repeater", RCLONE_MEDIA_SYNC="daily")
+    media = sandbox["root"] / "media"
+    media.mkdir()
+    (media / "synthetic.mp4").write_bytes(b"synthetic media")
     _write_status(sandbox, 40)
     previous = status_file(sandbox).read_text()
     result = backup(sandbox, STUB_RCLONE_FAIL_ON="check")
