@@ -11,13 +11,13 @@ Mode: Operate.
 
 Scope: shared authenticated shell, login, overview, guided setup, people, accounts, library, weekly calendar and slot editing, activity, advanced sources/rules/legacy schedule, workspace settings/members/billing, operator customer administration/recovery/billing/service health, and public invitation/password setup/recovery forms. Legal and error routes inherit the same chrome and typography.
 
-Audience and task: selected customers invited by Magic Lap. Sign in, create a person, connect and select their owned pages, prepare their library, and preview their rotation. The overview names the newest person and exposes the next useful preparation action. Legacy rules remain a secondary operational surface.
+Audience and task: selected customers invited by Magic Lap. Sign in, create a person, connect and select their owned pages, prepare their library, and preview their rotation. The overview resumes the selected person (newest on a first visit) and exposes the next useful preparation action. Legacy rules remain a secondary operational surface.
 
 Access tasks: owners review members, issue or revoke editor invitations, and reauthenticate to change owner/editor/suspended access while preserving a last owner. Affected sessions are revoked. Platform operators create paused customer workspaces, invite owners, and verify identity before issuing a reset. Customers set their own passwords and accept legal terms. Invitation/reset messages use an encrypted outbox with a manual-link fallback; actual SMTP delivery remains unconfigured. Closure pauses work, disconnects accounts locally and revokes access; operator reopening leaves the workspace paused without restoring tokens.
 
 Chosen direction: the user pinned https://sentinel-eye.magic-lap.com/ as the approved family. The primary artifact's direction contract explicitly overrides seed c15f641f. Keep Repeater's own product name and content within that family. No generated comp was selected; the supplied reference and measured implementation are the authority.
 
-Navigation order: Overview → Get started → People → Accounts → Library → Calendar → Activity. Sources, Rules and the legacy Schedule live in an Advanced tools disclosure, followed by Settings. A separate operator-only disclosure contains Customers, Service health, and Plans & payment review. Native disclosures start open when a child is current. Settings has local links for workspace, members and billing.
+Navigation order: Home → People → Library → Calendar → Accounts → Activity. Home and People own creation and next-step entry; there is no duplicate permanent Get started item. Sources, Rules and the legacy Schedule live in an Advanced tools disclosure, followed by Settings. A separate operator-only disclosure contains Customers, Service health, and Plans & payment review. Native disclosures start open when a child is current. Settings has local links for workspace, members and billing.
 
 First-view composition: familiar utility chrome, a compact route title and useful actions, then workspace status and task content. The overview pairs operational counts with ordered setup guidance, attention states, upcoming work, and account health. The memorable detail is the same calm Magic Lap shell in both reading directions, with the next publishing task immediately actionable.
 
@@ -77,3 +77,12 @@ fixes required. Final desktop English and mobile Arabic captures are
 acceptance uses mocked HTTP and synthetic accounts. The UI verdict does not establish live
 publication acceptance. This surface reuses the existing visual system; DESIGN.md and its sidecar
 need no new tokens or reusable component guidance.
+
+
+Current usability composition (2026-10-18): Home places its next action above a compact
+accounts/content/times checklist; health details are secondary. Person selection follows
+owned setup, library and calendar navigation. Accounts show existing connections before
+an add-provider disclosure. Shared content forms, compact library controls, progressive
+schedule options and actionable preview entries follow DESIGN.md's customer-journey
+section. Desktop/mobile confirmation used synthetic data with the publishing lock active;
+no new visual world, font system or animation was introduced.

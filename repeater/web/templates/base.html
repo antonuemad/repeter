@@ -28,10 +28,11 @@
     <details class="sidebar-navigation" open data-navigation>
       <summary class="nav-toggle">{{ m.icon('menu') }}<span>{{ t('nav.label') }}</span></summary>
       <nav class="mainnav" aria-label="{{ t('nav.label') }}">
-        {% for key, href, icon in [('overview', '/', 'overview'), ('prepare', '/setup', 'plans'), ('plans', '/plans', 'plans'), ('accounts', '/accounts', 'accounts'), ('library', '/library', 'library'), ('calendar', '/calendar', 'schedule'), ('activity', '/activity', 'activity')] %}
-        {% set selected = current_path == '/setup' if key == 'prepare' else nav == key and current_path != '/setup' %}
+        {% for key, href, icon in [('overview', '/', 'overview'), ('plans', '/plans', 'plans'), ('library', '/library' ~ ('?profile_id=' ~ active_person.id if active_person else ''), 'library'), ('calendar', '/calendar' ~ ('?person=' ~ active_person.id if active_person else ''), 'schedule'), ('accounts', '/accounts', 'accounts')] %}
+        {% set selected = nav == key %}
         <a href="{{ href }}"{% if selected %} aria-current="page"{% endif %}>{{ m.icon(icon, 18) }}<span>{{ t('nav.' ~ key) }}</span>{% if selected %}<span class="nav-dot" aria-hidden="true"></span>{% endif %}</a>
         {% endfor %}
+        <a href="/activity"{% if nav == 'activity' %} aria-current="page"{% endif %}>{{ m.icon('activity',18) }}<span>{{ t('nav.activity') }}</span></a>
         <details class="nav-section"{% if nav in ['sources','rules','schedule'] %} open{% endif %}><summary>{{ m.icon('settings',18) }}{{ t('nav.advanced') }}</summary><div>
         {% for key, href in [('sources','/sources'),('rules','/rules'),('schedule','/schedule')] %}<a href="{{ href }}"{% if nav == key %} aria-current="page"{% endif %}>{{ m.icon(key,18) }}<span>{{ t('nav.' ~ key) }}</span></a>{% endfor %}
         </div></details>
@@ -49,7 +50,7 @@
     <header class="topbar">
       <div class="topbar-row">
         {% if user and workspace %}
-        <div class="breadcrumb"><span>{{ t('shell.workspace') }}</span><span aria-hidden="true">/</span><strong dir="auto">{{ workspace.name }}</strong></div>
+        <div class="breadcrumb"><strong dir="auto">{{ workspace.name }}</strong>{% if active_person %}<span aria-hidden="true">/</span><a href="/plans" dir="auto" title="{{ t('simple.change_person') }}">{{ active_person.name }}</a>{% endif %}</div>
         {% else %}
         <a class="brand" href="/login"><img src="/static/favicon.svg" alt="" width="34" height="34"><span><strong>Repeater</strong><small>Magic Lap</small></span></a>
         {% endif %}

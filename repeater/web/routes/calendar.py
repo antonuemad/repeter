@@ -27,6 +27,7 @@ from repeater.models import (
 from repeater.timeutil import ensure_aware, utcnow
 from repeater.web.auth import CurrentWorkspace
 from repeater.web.deps import DB, Form, FormError, form_int
+from repeater.web.journey import remember_person
 from repeater.web.routes.plans import get_plan
 from repeater.web.templating import flash, render
 
@@ -103,6 +104,8 @@ def calendar(request: Request, db: DB, ctx: CurrentWorkspace, day: str = "", per
         .limit(101)
     ).all()
     selected = [(profile, plan) for profile, plan in people if not person or profile.id == person]
+    if person and selected:
+        remember_person(request, *selected[0])
     events = []
     for profile, plan in selected[:20]:
         for row in simulate(db, plan)["rows"]:
@@ -171,6 +174,7 @@ def calendar(request: Request, db: DB, ctx: CurrentWorkspace, day: str = "", per
             "first": first,
             "person_filter": person,
             "people": people[:100],
+            "selected_plan": selected[0][1] if person and selected else None,
             "limited": len(events) > 1000 or len(selected) > 20 or len(actual) > 500,
         },
     )
@@ -179,6 +183,7 @@ def calendar(request: Request, db: DB, ctx: CurrentWorkspace, day: str = "", per
 @router.get("/calendar/{plan_id}/{account_id}/edit")
 def edit_slot(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, account_id: int, slot: str):
     plan, account, original, edit, at = slot_context(db, ctx, plan_id, account_id, slot)
+    remember_person(request, db.get(CreatorProfile, plan.profile_id), plan)
     choices = list(
         db.scalars(
             select(Video)

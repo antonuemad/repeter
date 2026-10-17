@@ -186,8 +186,8 @@ def test_invitation_to_mixed_library_and_rotation(
         )
 
         library = client.get(f"/library?profile_id={plan.profile_id}")
-        assert f'href="/plans/{plan.id}"' in library.text
-        assert f'href="/plans/{plan.id}/edit"' in library.text
+        assert f'href="/plans/{plan.id}/setup/preview"' in library.text
+        assert f'href="/plans/{plan.id}/setup/content"' in library.text
         text = post(
             client,
             "/library/text",
@@ -287,7 +287,7 @@ def test_text_validation_keeps_person_and_long_escaped_draft(web_owner, db):
     assert html.escape(body) in response.text
     assert '<details id="compose" class="card" open>' in response.text
     assert f'name="profile_id" value="{plan.profile_id}"' in response.text
-    assert f'href="/plans/{plan.id}"' in response.text
+    assert f'href="/plans/{plan.id}/setup/preview"' in response.text
     assert not db.scalar(select(func.count()).select_from(Video))
     assert len(str(web_owner.cookies)) < 4000
     assert (

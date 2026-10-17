@@ -14,7 +14,14 @@ from repeater import accounts as account_service
 from repeater.config import get_settings
 from repeater.crypto import CryptoError
 from repeater.jobs import kinds
-from repeater.models import PROVIDER_FOR_PLATFORM, AccountStatus, ConnectedAccount, ContentPlan, Platform
+from repeater.models import (
+    PROVIDER_FOR_PLATFORM,
+    AccountStatus,
+    ConnectedAccount,
+    ContentPlan,
+    CreatorProfile,
+    Platform,
+)
 from repeater.platforms import provider_name_for_account, tiktok
 from repeater.platforms.base import AuthError, PlatformError
 from repeater.timeutil import utcnow
@@ -67,6 +74,14 @@ def accounts_page(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
         },
         "configured": {a.id: settings.platform_configured(provider_name_for_account(a)) for a in rows},
         "can_disconnect": ctx.is_owner,
+        "people": {
+            row.id: row
+            for row in db.execute(
+                select(CreatorProfile.id, CreatorProfile.name, ContentPlan.id.label("plan_id"))
+                .join(ContentPlan, ContentPlan.profile_id == CreatorProfile.id)
+                .where(CreatorProfile.workspace_id == ctx.workspace.id)
+            )
+        },
     }
     return render(request, "accounts.html", context)
 

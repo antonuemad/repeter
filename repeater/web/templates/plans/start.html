@@ -4,7 +4,6 @@
 {% block content %}
 <div class="wizard-shell">
   <div class="page-heading"><div><h1>{{ t('wizard.title') }}</h1><p>{{ t('wizard.intro') }}</p></div><a href="/plans">{{ t('wizard.exit') }}</a></div>
-  <ol class="wizard-progress" aria-label="{{ t('wizard.progress') }}">{% for step in ['accounts', 'content', 'schedule', 'preview'] %}<li{% if loop.first %} aria-current="step"{% endif %}><span class="wizard-number">{{ loop.index }}</span>{{ t('wizard.' ~ step) }}</li>{% endfor %}</ol>
   <section class="card wizard-panel">
     <h2>{{ t('wizard.person_title') }}</h2><p class="muted plan-measure">{{ t('wizard.person_help') }}</p>
     {{ m.form_error(error) }}

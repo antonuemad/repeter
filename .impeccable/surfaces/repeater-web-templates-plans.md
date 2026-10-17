@@ -401,3 +401,16 @@ Fresh independent execution finish reviewer disposition: SHIP. No material findi
 
 This documentation handoff records the accepted review and source evidence. It did not rerun
 the detector, browser, or tests and does not broaden the reviewed state coverage.
+
+
+## Customer simplification (2026-10-18)
+
+People rows resume at the next incomplete accounts/content/times step, with owned-page
+and ready-item counts. Guided content setup contains the same upload/text forms as the
+library and returns to the same person after success or validation failure. Drive and
+supported platform imports remain explicit choices. Extra schedule date/zone/order fields
+stay available in a disclosure; saved values are submitted without JavaScript. Preview
+shows concise totals before its entries, retains diagnostics in disclosures, links directly
+to individual slot editing and offers the person's unified calendar as its next action.
+Current source and execution restrictions are unchanged. DESIGN.md records the bounded
+visual evidence and finish verdict for this simplification.

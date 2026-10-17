@@ -286,3 +286,22 @@ authorizations request only these scopes regardless of publishing/audit settings
 without creator_info, and return to the read view without a publishing rule or planning job. A
 reconnect stops any legacy rule. Content Posting API and its posting/draft scopes are deferred;
 read approval does not authorize publishing or imply Content Posting API audit completion.
+
+
+## Customer usability — 2026-10-18
+
+Home and People now name the next preparation task using selected active destinations,
+ready person-owned content and a usable schedule. The selected person carries across
+setup, library, calendar and content detail. It is revalidated against the current
+workspace, including after membership changes or person deletion. The generic library
+opens the selected/newest person's library; unassigned legacy content is explicitly
+available with profile_id=0.
+
+File upload and text composition work inline in guided setup. An allowlisted numeric
+setup plan must belong to the same workspace and person before content is saved; success
+returns to content setup and validation errors retain escaped bounded drafts. CSRF,
+streaming upload limits, tenant boundaries and publication guards remain enforced.
+Selecting or previewing content creates no publishing reservation or publishing job.
+Optional metadata and advanced times remain available through native disclosures.
+Production publishing and TikTok audit flags remain false; no real social publication,
+container creation or draft upload was used for this work.

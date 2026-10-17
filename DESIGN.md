@@ -336,3 +336,49 @@ publishing-lock notice stays visible. The UI detector returned no findings. Disa
 provider states were inspected in-browser; configured links, both locales, ownership,
 reconnect routing and callback errors are covered by the simulated web tests. No new
 visual system or animated effects were introduced.
+
+
+## Customer journey simplification — 2026-10-18
+
+Keep the existing Magic Lap palette, Inter / IBM Plex Sans Arabic, logical-start rail,
+status language, native forms and disclosures. The primary navigation is Home, People,
+Library, Calendar, Accounts, then Activity. Creation starts from Home or People; there
+is no duplicate permanent “Get started” destination. Advanced tools and administration
+remain available in their existing disclosures.
+
+A selected person appears in the breadcrumb. Library and calendar links preserve that
+selection; the server revalidates ownership on each request. Home places one next action
+before its compact three-step checklist. People rows show selected-page and ready-item
+counts and resume at the first unfinished task. Readiness means ready to preview, not
+approved to publish. A valid default daily schedule is identified as a default.
+
+Use shared upload and text forms in both the library and content setup. Setup displays
+four plain choices: local files, text, Drive folder, or supported platform imports.
+Optional file titles/captions and extra scheduling controls use native disclosures;
+failed submissions reopen the relevant form and preserve bounded escaped text. A file
+must be selected again after rejection. Drive permission information, explicit import
+controls and actual platform limitations remain visible within the selected method.
+
+The library opens on the selected person, or the newest person on a first visit.
+Unassigned legacy content remains an explicit option (profile_id=0), including filters,
+pagination and action-return links. Closed content-add forms share one desktop row.
+On mobile, person selection and its submit action share a row; calendar week navigation
+keeps the previous/next actions together. Preview totals stay visible, while distribution
+metadata is disclosed on demand. Individual preview entries link to the existing slot
+editor. Connected accounts lead to their person; adding another provider is a disclosure.
+Publishing controls disappear while the server lock is active; server-side guards remain.
+
+Finish evidence: one batched desktop/mobile review and one confirmation, using synthetic
+local accounts and media. Arabic light at 1365×900, 768×1024 and 390×844; English dark on
+mobile and desktop. No horizontal overflow was found. The main Home action is visible at
+390×844. UI interaction covered page selection → inline text addition → saved times →
+preview, without creating a publication. The review caught and corrected a Jinja dict.items
+collision and overly distant mobile actions. Regression tests cover the counter and flow.
+
+Hook advisories reviewed: Inter is intentionally pinned by the user's approved reference.
+The side-tab reminder at app.css:148 points to the existing full-surface secondary-button
+hover; it adds no asymmetric border or decorative stripe. Thin native control borders and
+the existing navigation selection are retained. No detector rules were disabled.
+
+Finish verdict: SHIP for the customer preparation journey with publishing locked. This
+review does not establish live publishing acceptance or external-platform approval.

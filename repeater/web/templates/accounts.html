@@ -5,22 +5,6 @@
 <h1>{{ t('accounts.title') }}</h1>
 <p class="muted">{{ t('accounts.intro') }}</p>
 
-<section class="connect-grid">
-  {% for b in buttons %}
-  <div class="card connect connect-{{ b.purpose }}">
-    <span class="connection-icon">{{ m.icon('sources' if b.purpose == 'gdrive' else 'accounts', 24) }}</span>
-    <h2>{{ t('accounts.connect_' ~ b.purpose) }}</h2>
-    <p class="muted small">{{ t('accounts.connect_' ~ b.purpose ~ '_help') }}</p>
-    {% if b.configured %}
-    {# A plain link: the provider is reached by redirect, never by a form post (CSP form-action 'self'). #}
-    <a class="button" href="/connect/{{ b.purpose }}">{{ t('accounts.connect') }}</a>
-    {% else %}
-    <span class="badge badge-disabled">{{ t('accounts.not_configured') }}</span><p class="muted activation-help">{{ t('accounts.activation_help') }}</p>
-    {% endif %}
-  </div>
-  {% endfor %}
-</section>
-
 <section class="card">
   <h2>{{ t('accounts.connected') }}</h2>
   {% if accounts %}
@@ -46,7 +30,7 @@
         <a class="button small" href="/connect/{{ purposes[a.id] }}">{{ t('accounts.reconnect') }}</a>
         {% endif %}
         {% if a.platform != 'gdrive' and a.status != 'disabled' %}
-        <a class="button small secondary" href="/rules/{{ a.id }}">{{ t('accounts.rules') }}</a>
+        {% if a.profile_id in people %}<a class="button small secondary" href="/plans/{{ people[a.profile_id].plan_id }}/setup/accounts" dir="auto">{{ people[a.profile_id].name }}</a>{% else %}<a class="button small secondary" href="/plans">{{ t('simple.assign_person') }}</a>{% endif %}
         {% endif %}
         {% if can_disconnect and a.status != 'disabled' %}
         <a class="button small danger" href="/accounts/{{ a.id }}/disconnect">{{ t('accounts.disconnect') }}</a>
@@ -60,4 +44,19 @@
   {% endif %}
   {% if not can_disconnect %}<p class="muted small">{{ t('accounts.editor_note') }}</p>{% endif %}
 </section>
+<details class="card account-connections"{% if not accounts %} open{% endif %}><summary><strong>{{ t('simple.connect_more') }}</strong></summary><div class="wizard-connections">
+  {% for b in buttons %}
+  <div class="wizard-connection"><div>
+    <h3>{{ t('accounts.connect_' ~ b.purpose) }}</h3>
+    <p class="muted small">{{ t('accounts.connect_' ~ b.purpose ~ '_help') }}</p>
+    </div>{% if b.configured %}
+    {# A plain link: the provider is reached by redirect, never by a form post (CSP form-action 'self'). #}
+    <a class="button secondary" href="/connect/{{ b.purpose }}">{{ t('accounts.connect') }}</a>
+    {% else %}
+    <span class="badge badge-disabled">{{ t('accounts.not_configured') }}</span><p class="muted activation-help">{{ t('accounts.activation_help') }}</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div></details>
+
 {% endblock %}

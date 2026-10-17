@@ -271,6 +271,9 @@ def current_workspace(request: Request, user: CurrentUser, db: DB) -> WorkspaceC
         raise HTTPException(status_code=403, detail="workspace_closed")
     request.state.workspace = WorkspaceView(id=ws.id, name=ws.name, timezone=ws.timezone, paused=ws.paused)
     request.state.role = member.role
+    from repeater.web.journey import restore_person
+
+    restore_person(request, db, ws.id)
     return WorkspaceContext(user=user, workspace=ws, role=member.role)
 
 

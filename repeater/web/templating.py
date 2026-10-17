@@ -135,6 +135,7 @@ def base_context(request: Request) -> dict[str, Any]:
         "csrf_field": csrf.FORM_FIELD,
         "user": user,
         "workspace": workspace,
+        "active_person": getattr(request.state, "active_person", None),
         "publishing_enabled": get_settings().publishing_enabled,
         "role": getattr(request.state, "role", None),
         "zone": tz(workspace.timezone if workspace is not None else None),

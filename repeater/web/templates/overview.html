@@ -4,33 +4,32 @@
 {% block content %}
 <div class="page-heading">
   <div><h1>{{ t('nav.overview') }}</h1><p>{{ t('overview.intro') }}</p></div>
-  <div class="actions"><a class="button secondary" href="/plans">{{ t('nav.plans') }}</a><a class="button secondary" href="/calendar">{{ m.icon('schedule', 18) }}{{ t('overview.open_schedule') }}</a></div>
+  <div class="actions"><a class="button secondary" href="/plans">{{ t('nav.plans') }}</a><a class="button secondary" href="/calendar{{ '?person=' ~ active_person.id if active_person else '' }}">{{ m.icon('schedule', 18) }}{{ t('overview.open_schedule') }}</a></div>
 </div>
-<section class="stats" aria-label="{{ t('nav.overview') }}">
-  {% for key, icon in [('ready', 'video'), ('upcoming', 'clock'), ('published_week', 'send'), ('failed', 'alert')] %}
-  <div class="stat"><div class="stat-top"><span class="stat-label">{{ t('overview.count_' ~ key) }}</span>{{ m.icon(icon, 20) }}</div><span class="stat-value">{{ counts[key] }}</span></div>
-  {% endfor %}
-</section>
-
 {% if backup_stale_hours %}
 <div class="flash flash-warning" role="alert">{{ t('overview.backup_stale', hours=backup_stale_hours) }}</div>
 {% endif %}
 
 <section class="card setup" aria-labelledby="setup-title">
-  <div class="setup-heading"><h2 id="setup-title">{{ t('overview.setup_title') }}</h2><span class="badge">{{ t('overview.setup_progress', done=(setup.person | int) + (setup.accounts | int) + (setup.content | int)) }}</span></div>
-  {% if setup.name %}<p>{{ t('overview.setup_person') }} <strong dir="auto">{{ setup.name }}</strong></p>{% endif %}
-  <p class="muted">{{ t('overview.setup_intro') }}</p>
+  <div class="setup-heading"><h2 id="setup-title">{{ t('simple.home_title') }}</h2><span class="badge">{{ t('overview.setup_progress', done=setup.completed) }}</span></div>
+  {% if setup.name %}<p>{{ t('overview.setup_person') }} <strong dir="auto">{{ setup.name }}</strong> · <a href="/plans">{{ t('simple.change_person') }}</a></p>{% endif %}
+  <p class="muted">{{ t('simple.home_intro') }}</p>
+  <a class="button setup-next" href="{{ setup.next_url }}">{{ t('plan.preview') if setup.done else t('simple.next_' ~ setup.next_step) }}{{ m.icon('arrow', 16) }}</a>
   <ol class="steps">
     {% for key, href in setup.links.items() %}
     <li class="step{{ ' step-done' if setup[key] else '' }}">
       <a href="{{ href }}">{{ t('overview.step_' ~ key) }}</a>
-      <span class="muted small">{{ t('overview.step_' ~ key ~ '_help') }}</span>
       <span class="badge badge-{{ 'active' if setup[key] else 'disabled' }}">{{ t('overview.step_done') if setup[key] else t('overview.step_todo') }}</span>
     </li>
     {% endfor %}
   </ol>
   {% if setup.done %}<p class="muted small">{{ t('overview.preview_help') }}</p>{% endif %}
-  <a class="button setup-next" href="{{ setup.next_url }}">{{ t('plan.preview') if setup.done else t('overview.setup_next') }}{{ m.icon('arrow', 16) }}</a>
+</section>
+
+<section class="stats" aria-label="{{ t('nav.overview') }}">
+  {% for key, icon in ([('ready', 'video'), ('accounts', 'accounts'), ('processing', 'clock'), ('failed', 'alert')] if not publishing_enabled else [('ready', 'video'), ('upcoming', 'clock'), ('published_week', 'send'), ('failed', 'alert')]) %}
+  <div class="stat"><div class="stat-top"><span class="stat-label">{{ t('overview.count_' ~ key) }}</span>{{ m.icon(icon, 20) }}</div><span class="stat-value">{{ counts[key] }}</span></div>
+  {% endfor %}
 </section>
 
 {% if reconnect_accounts or attention_posts or failed_videos or failing_sources or incomplete_rules %}
@@ -75,6 +74,7 @@
 <div class="attention-ok">{{ m.icon('check', 20) }}<span>{{ t('overview.all_clear') }}</span></div>
 {% endif %}
 
+<details class="overview-details"><summary>{{ t('simple.more_activity') }}</summary>
 <div class="overview-grid">
   <section class="card">
     <h2>{{ t('overview.next_48h') }}</h2>
@@ -89,9 +89,9 @@
       </li>
       {% endfor %}
     </ul>
-    <p><a href="/calendar">{{ t('overview.see_schedule') }}</a></p>
+    <p><a href="/calendar{{ '?person=' ~ active_person.id if active_person else '' }}">{{ t('overview.see_schedule') }}</a></p>
     {% else %}
-    <div class="empty-state">{{ m.icon('schedule', 32) }}<h3>{{ t('overview.no_upcoming_title') }}</h3><p>{{ t('overview.no_upcoming_help') }}</p><a class="button small secondary" href="{{ setup.next_url }}">{{ t('plan.preview') if setup.done else t('overview.setup_next') }}</a></div>
+    <div class="empty-state">{{ m.icon('schedule', 32) }}<h3>{{ t('overview.no_upcoming_title') }}</h3><p>{{ t('overview.no_upcoming_help') }}</p><a class="button small secondary" href="{{ setup.next_url }}">{{ t('plan.preview') if setup.done else t('simple.next_' ~ setup.next_step) }}</a></div>
     {% endif %}
   </section>
 
@@ -116,4 +116,5 @@
   {% if activity %}{{ m.activity_list(activity, zone) }}{% else %}<div class="empty-state">{{ m.icon('activity', 32) }}<h3>{{ t('overview.no_activity_title') }}</h3><p>{{ t('overview.no_activity_help') }}</p></div>{% endif %}
   <p><a href="/activity">{{ t('overview.see_activity') }}</a></p>
 </section>
+</details>
 {% endblock %}

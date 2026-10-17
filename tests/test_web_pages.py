@@ -358,8 +358,6 @@ def test_overview_guides_to_content_and_manual_upload_even_with_existing_videos(
     web_owner, db, web_make_video
 ):
     """A primary upload action must reach the form, including a populated library."""
-    from html import unescape
-
     from tests.test_content_plans import create_plan
 
     plan = create_plan(web_owner, db)
@@ -368,10 +366,7 @@ def test_overview_guides_to_content_and_manual_upload_even_with_existing_videos(
     assert f'href="/plans/{plan.id}/setup/content"' in overview
     wizard = web_owner.get(f"/plans/{plan.id}/setup/content")
     assert wizard.status_code == 200
-    target = unescape(re.search(r'href="([^"]*#upload)"', wizard.text).group(1))
-    assert f"profile_id={plan.profile_id}" in target
-    page = web_owner.get(target)
-    assert page.status_code == 200
-    disclosure = re.search(r'<details\b[^>]*\bid="upload"[^>]*>', page.text).group(0)
-    assert re.search(r"\bopen\b", disclosure), "upload action left the form collapsed"
-    assert 'action="/library/upload"' in page.text
+    assert 'id="upload"' in wizard.text
+    assert 'action="/library/upload"' in wizard.text
+    assert f'name="setup_plan_id" value="{plan.id}"' in wizard.text
+    assert f'name="profile_id" value="{plan.profile_id}"' in wizard.text

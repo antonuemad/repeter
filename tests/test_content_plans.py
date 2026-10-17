@@ -358,7 +358,8 @@ def test_library_filter_keeps_person_and_unassigned_content_separate(web_owner, 
     )
     assert 'action="/library/upload"' in r.text
     assert f'name="profile_id" value="{p.profile_id}"' in r.text
-    r = web_owner.get("/library")
+    assert "Owned video" in web_owner.get("/library").text
+    r = web_owner.get("/library?profile_id=0")
     assert "Unassigned video" in r.text and "Owned video" not in r.text
     assert (
         f"profile_id={p.profile_id}" in web_owner.get(f"/library?profile_id={p.profile_id}&status=all").text

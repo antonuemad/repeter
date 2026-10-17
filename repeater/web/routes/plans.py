@@ -37,6 +37,7 @@ from repeater.sources.drive import browse_folders, folder_details, parse_folder_
 from repeater.timeutil import utcnow
 from repeater.web.auth import CurrentWorkspace
 from repeater.web.deps import DB, Form, FormError, Page, form_bool, form_int, form_str, query_int
+from repeater.web.journey import progress, remember_person
 from repeater.web.templating import flash, render
 
 router = APIRouter()
@@ -170,6 +171,7 @@ def _context(db, ctx, plan):
 
 def _edit(request, db, ctx, plan, *, error=None, submitted=None, **extra):
     data = _context(db, ctx, plan)
+    remember_person(request, data["person"], plan)
     data.update(error=error, submitted=submitted or {}, **extra)
     if data["submitted"].get("wizard_step") in WIZARD_STEPS:
         return _wizard(request, db, ctx, plan, data["submitted"]["wizard_step"], data=data)
@@ -178,6 +180,9 @@ def _edit(request, db, ctx, plan, *, error=None, submitted=None, **extra):
 
 def _wizard(request, db, ctx, plan, step, *, data=None, page="1"):
     data = data or _context(db, ctx, plan)
+    remember_person(request, data["person"], plan)
+    data.setdefault("draft", {})
+    data["max_upload_mb"] = get_settings().max_upload_mb
     counts = {}
     for statuses in data["source_counts"].values():
         for status, count in statuses.items():
@@ -216,7 +221,16 @@ def index(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
         .where(CreatorProfile.workspace_id == ctx.workspace.id)
         .order_by(CreatorProfile.id)
     ).all()
-    return render(request, "plans/index.html", {"nav": "plans", "people": rows, "error": None})
+    return render(
+        request,
+        "plans/index.html",
+        {
+            "nav": "plans",
+            "people": rows,
+            "error": None,
+            "progress": progress(db, ctx.workspace.id, [plan for _, plan in rows]),
+        },
+    )
 
 
 @router.post("/plans")
@@ -252,6 +266,7 @@ def create(request: Request, db: DB, ctx: CurrentWorkspace, form: Form) -> Respo
     )
     db.add(plan)
     db.commit()
+    remember_person(request, person, plan)
     destination = "setup/accounts" if form.get("wizard_step") == "accounts" else "edit"
     return RedirectResponse(f"/plans/{plan.id}/{destination}", 303)
 
@@ -658,6 +673,7 @@ def control_platform(
 @router.get("/plans/{plan_id}")
 def preview(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, page: str = "1") -> Response:
     plan = get_plan(db, ctx, plan_id)
+    remember_person(request, db.get(CreatorProfile, plan.profile_id), plan)
     return render(
         request,
         "plans/preview.html",

@@ -55,6 +55,7 @@ from repeater.web.deps import (
     query_int,
     safe_next,
 )
+from repeater.web.journey import remember_person
 from repeater.web.templating import flash, render
 
 log = logging.getLogger("repeater.web.library")
@@ -154,7 +155,20 @@ def library(
     page: str = "1",
     profile_id: int | None = None,
 ) -> Response:
-    return _library_page(request, db, ctx, status, page, profile_id)
+    if profile_id is None:
+        selected = getattr(request.state, "active_person", None)
+        profile_id = (
+            selected["id"]
+            if selected
+            else db.scalar(
+                select(CreatorProfile.id)
+                .join(ContentPlan, ContentPlan.profile_id == CreatorProfile.id)
+                .where(CreatorProfile.workspace_id == ctx.workspace.id)
+                .order_by(CreatorProfile.id.desc())
+                .limit(1)
+            )
+        )
+    return _library_page(request, db, ctx, status, page, profile_id or None)
 
 
 def _library_page(request, db, ctx, status="active", page="1", profile_id=None, *, draft=None) -> Response:
@@ -209,6 +223,8 @@ def _library_page(request, db, ctx, status="active", page="1", profile_id=None, 
         "posts": latest_posts(db, [v.id for v in videos]),
         "max_upload_mb": get_settings().max_upload_mb,
     }
+    if profile and context["plan"]:
+        remember_person(request, profile, context["plan"])
     return render(request, "library.html", context, status_code=422 if draft else 200)
 
 
@@ -268,6 +284,8 @@ def _video_page(request, db, ctx, video_id, *, draft=None) -> Response:
         "has_preview": _preview_file(video) is not None,
         "overrides": draft if draft is not None else video.overrides or {},
     }
+    if context["person_plan"]:
+        remember_person(request, db.get(CreatorProfile, video.profile_id), context["person_plan"])
     return render(request, "library_detail.html", context, status_code=422 if draft is not None else 200)
 
 
@@ -557,6 +575,7 @@ TEXT_FIELD_LIMITS = {
     "caption": MAX_CAPTION_CHARS * 4,
     "profile_id": 12,
     "format": 32,
+    "setup_plan_id": 12,
 }
 MAX_PARTS = 16
 MULTIPART_OVERHEAD = 1024 * 1024
@@ -727,6 +746,7 @@ def _import_upload(request: Request, db: Session, ctx: WorkspaceContext, sink: U
     assert sink.path is not None
     try:
         profile = _upload_profile(db, ctx, sink.fields.get("profile_id"))
+        setup_plan = _setup_plan(db, ctx, sink.fields, profile)
         selection = sink.fields.get("format", "video_reel")
         if selection not in {"video_reel", "video_story", "image_post", "image_story"} or (
             profile is None and selection != "video_reel"
@@ -753,7 +773,9 @@ def _import_upload(request: Request, db: Session, ctx: WorkspaceContext, sink: U
         if sink.path.exists():
             sink.path.unlink(missing_ok=True)
     flash(request, "success", "library.uploaded", title=video.title)
-    return RedirectResponse(f"/library/{video.id}", status_code=303)
+    return RedirectResponse(
+        f"/plans/{setup_plan.id}/setup/content" if setup_plan else f"/library/{video.id}", status_code=303
+    )
 
 
 def _upload_error(request, db, ctx, sink, exc) -> Response:
@@ -764,13 +786,21 @@ def _upload_error(request, db, ctx, sink, exc) -> Response:
 
 
 def _library_error(request, db, ctx, fields, form_name, exc) -> Response:
-    messages.flash_error(request, exc)
     try:
         person = _upload_profile(db, ctx, form_str(fields, "profile_id", max_len=10))
     except FormError:
         person = None
     if person is None:
-        return RedirectResponse("/library", status_code=303)
+        messages.flash_error(request, exc)
+        return RedirectResponse("/library?profile_id=0", status_code=303)
+    setup_plan = _setup_plan(db, ctx, fields, person)
+    if setup_plan:
+        from repeater.web.routes.plans import _context, _wizard
+
+        data = _context(db, ctx, setup_plan)
+        data.update(error=exc, draft={"form": form_name, **_content_draft(fields)})
+        return _wizard(request, db, ctx, setup_plan, "content", data=data)
+    messages.flash_error(request, exc)
     return _library_page(
         request, db, ctx, profile_id=person.id, draft={"form": form_name, **_content_draft(fields)}
     )
@@ -800,12 +830,38 @@ def _upload_profile(db: Session, ctx: WorkspaceContext, value: str | None) -> Cr
     return person
 
 
+def _setup_plan(db, ctx, fields, person):
+    """Only an owned matching person can return an upload to guided setup."""
+    raw = fields.get("setup_plan_id")
+    if raw is None:
+        return None
+    if (
+        not isinstance(raw, str)
+        or not raw.isascii()
+        or not raw.isdecimal()
+        or len(raw) > 10
+        or not 1 <= int(raw) <= 2147483647
+    ):
+        raise HTTPException(400)
+    plan = db.scalar(
+        select(ContentPlan).where(
+            ContentPlan.id == int(raw),
+            ContentPlan.workspace_id == ctx.workspace.id,
+            ContentPlan.profile_id == (person.id if person else None),
+        )
+    )
+    if plan is None:
+        raise HTTPException(404)
+    return plan
+
+
 @router.post("/library/text")
 def create_text(request: Request, db: DB, ctx: CurrentWorkspace, form: Form) -> Response:
     try:
         person = _upload_profile(db, ctx, form_str(form, "profile_id", max_len=10, required=True))
         if person is None:
             raise FormError("media.person_required")
+        setup_plan = _setup_plan(db, ctx, form, person)
         body = form_text(form, "caption", max_len=MAX_CAPTION_CHARS)
         if not body.strip():
             raise FormError("media.empty_text")
@@ -839,4 +895,8 @@ def create_text(request: Request, db: DB, ctx: CurrentWorkspace, form: Form) -> 
     except FormError as exc:
         db.rollback()
         return _library_error(request, db, ctx, form, "text", exc)
-    return RedirectResponse(f"/library/{item.id}", status_code=303)
+    if setup_plan:
+        flash(request, "success", "media.text_added")
+    return RedirectResponse(
+        f"/plans/{setup_plan.id}/setup/content" if setup_plan else f"/library/{item.id}", status_code=303
+    )

@@ -16,13 +16,11 @@ from repeater.engine.rules import rule_problems
 from repeater.media import storage
 from repeater.models import (
     ACTIVE_POST_STATUSES,
-    PUBLISH_PLATFORMS,
     AccountStatus,
     ActivityLog,
     ConnectedAccount,
     ContentPlan,
     CreatorProfile,
-    PlanTarget,
     PostStatus,
     RotationRule,
     ScheduledPost,
@@ -34,6 +32,7 @@ from repeater.models import (
 from repeater.timeutil import utcnow
 from repeater.web.auth import CurrentWorkspace
 from repeater.web.deps import DB
+from repeater.web.journey import progress, remember_person
 from repeater.web.templating import render
 
 log = logging.getLogger("repeater.web")
@@ -57,7 +56,7 @@ def overview(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
         "failing_sources": _failing_sources(db, ws_id),
         "incomplete_rules": _incomplete_rules(db, ws_id),
         "reconnect_accounts": _reconnect_accounts(db, ws_id),
-        "setup": _setup_steps(db, ws_id),
+        "setup": _setup_steps(request, db, ws_id),
         "disk": _disk_usage(),
         # Only owners can act on the server's backup job.
         "backup_stale_hours": backups.stale_hours() if ctx.is_owner else None,
@@ -66,64 +65,28 @@ def overview(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
     return render(request, "overview.html", context)
 
 
-def _setup_steps(db: Session, ws_id: int) -> dict[str, Any]:
-    """Prepare the newest person's plan, without requiring any publishing switches."""
-    plan = db.scalar(
-        select(ContentPlan).where(ContentPlan.workspace_id == ws_id).order_by(ContentPlan.id.desc()).limit(1)
-    )
-    profile = db.get(CreatorProfile, plan.profile_id) if plan else None
-    edit_url = f"/plans/{plan.id}/setup/accounts" if plan else "/setup"
-    library_url = f"/plans/{plan.id}/setup/content" if plan else "/setup"
-    accounts = (
-        _count(
-            db,
-            select(func.count())
-            .select_from(ConnectedAccount)
-            .join(PlanTarget, PlanTarget.account_id == ConnectedAccount.id)
-            .where(
-                PlanTarget.plan_id == (plan.id if plan else None),
-                PlanTarget.workspace_id == ws_id,
-                ConnectedAccount.workspace_id == ws_id,
-                ConnectedAccount.profile_id == (plan.profile_id if plan else None),
-                ConnectedAccount.platform.in_(PUBLISH_PLATFORMS),
-                ConnectedAccount.status == AccountStatus.ACTIVE,
-            ),
-        )
-        if plan
-        else 0
-    )
-    videos = (
-        _count(
-            db,
-            select(func.count())
-            .select_from(Video)
-            .where(
-                Video.workspace_id == ws_id,
-                Video.profile_id == (plan.profile_id if plan else None),
-                Video.status == VideoStatus.READY,
-            ),
-        )
-        if plan
-        else 0
-    )
-    steps = {"person": plan is not None, "accounts": accounts > 0, "content": videos > 0}
-    done = all(steps.values())
-    links = {
-        "person": edit_url,
-        "accounts": edit_url,
-        "content": library_url,
-    }
-    next_url = f"/plans/{plan.id}/setup/preview" if plan else edit_url
-    for key, href in links.items():
-        if not steps[key]:
-            next_url = href
-            break
+def _setup_steps(request, db: Session, ws_id: int) -> dict[str, Any]:
+    """Resume the selected person, or the newest one on a first visit."""
+    selected = getattr(request.state, "active_person", None)
+    query = select(ContentPlan).where(ContentPlan.workspace_id == ws_id)
+    if selected:
+        query = query.where(ContentPlan.profile_id == selected["id"])
+    plan = db.scalar(query.order_by(ContentPlan.id.desc()).limit(1))
+    if plan:
+        profile = db.get(CreatorProfile, plan.profile_id)
+        remember_person(request, profile, plan)
+        return {**progress(db, ws_id, [plan])[plan.id], "name": profile.name, "plan_id": plan.id}
     return {
-        **steps,
-        "done": done,
-        "name": profile.name if profile else None,
-        "links": links,
-        "next_url": next_url,
+        "accounts": False,
+        "content": False,
+        "schedule": False,
+        "done": False,
+        "completed": 0,
+        "name": None,
+        "plan_id": None,
+        "next_step": "person",
+        "links": {key: "/setup" for key in ("accounts", "content", "schedule")},
+        "next_url": "/setup",
     }
 
 

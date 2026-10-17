@@ -95,7 +95,7 @@ def test_upload_with_real_import(web_owner, db, sample_video):
 
 def test_upload_rejects_non_video_with_message(web_owner, db):
     resp = _upload(web_owner, data=b"this is not a video at all" * 100)
-    assert resp.status_code == 303 and resp.headers["location"] == "/library"
+    assert resp.status_code == 303 and resp.headers["location"] == "/library?profile_id=0"
     set_lang(web_owner, "en")
     assert "not a video" in web_owner.get("/library").text
     assert db.execute(select(Video)).first() is None
@@ -122,7 +122,7 @@ def test_upload_accepts_csrf_header(web_owner, fake_create):
 def test_upload_too_large_by_stream(web_owner, fake_create, monkeypatch):
     monkeypatch.setattr(library, "upload_limit_bytes", lambda: 1000)
     resp = _upload(web_owner, data=b"x" * 5000)
-    assert resp.status_code == 303 and resp.headers["location"] == "/library"
+    assert resp.status_code == 303 and resp.headers["location"] == "/library?profile_id=0"
     assert fake_create == {} and _uploads() == []
     set_lang(web_owner, "en")
     assert "larger than the 0 MB limit" in web_owner.get("/library").text

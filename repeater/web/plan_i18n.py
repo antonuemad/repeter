@@ -447,6 +447,78 @@ COPY.update(
 
 COPY["wizard.preview_notes"] = ("How this preview works", "إزاي بنحسب المعاينة؟")
 
+COPY.update(
+    {
+        "nav.plans": ("People", "الأشخاص"),
+        "nav.overview": ("Home", "الرئيسية"),
+        "nav.calendar": ("Calendar", "الجدول"),
+        "simple.change_person": ("Choose another person", "اختيار شخص آخر"),
+        "simple.home_title": ("Your next step", "خطوتك الجاية"),
+        "simple.home_intro": (
+            "Keep the pages, content and schedule for each person together. Start with the first unfinished step.",
+            "حسابات كل شخص ومحتواه ومواعيده في مكان واحد. كمّل أول خطوة ناقصة.",
+        ),
+        "simple.next_person": ("Add your first person", "أضف أول شخص"),
+        "simple.next_accounts": ("Choose their pages", "اختار صفحاته"),
+        "simple.next_content": ("Add their content", "أضف محتواه"),
+        "simple.next_schedule": ("Set their times", "حدّد مواعيده"),
+        "simple.person_summary": (
+            "{pages} selected pages · {items} ready items",
+            "{pages} صفحة مختارة · {items} محتوى جاهز",
+        ),
+        "simple.ready_preview": ("Ready to preview", "جاهز للمعاينة"),
+        "simple.times": ("Edit times", "تعديل المواعيد"),
+        "simple.more_activity": ("Activity and workspace health", "النشاط وحالة مساحة العمل"),
+        "simple.upload": ("Upload from your device", "ارفع من جهازك"),
+        "simple.upload_hint": ("A video or image you already have", "فيديو أو صورة موجودة عندك"),
+        "simple.file_details": ("Title and caption (optional)", "العنوان والوصف (اختياري)"),
+        "simple.text_hint": ("Write a Facebook text post", "اكتب بوست نصي لفيسبوك"),
+        "simple.drive": ("Use a Google Drive folder", "اختار فولدر Google Drive"),
+        "simple.drive_hint": (
+            "Import your files and check for new ones",
+            "استورد ملفاتك وتابع الجديد في الفولدر",
+        ),
+        "simple.platform_import": ("Import from a connected platform", "استورد من منصة مربوطة"),
+        "simple.platform_hint": ("Owned Facebook or Instagram content", "محتواك على فيسبوك أو إنستجرام"),
+        "simple.platform_help": (
+            "Facebook and Instagram support owned-content imports. Open source settings to choose the account and recent items. TikTok currently offers public-video reading only; YouTube import is unavailable.",
+            "تقدر تستورد محتواك من فيسبوك وإنستجرام. افتح إعدادات المصدر لاختيار الحساب والمحتوى الأخير. تيكتوك متاح لقراءة قائمة الفيديوهات العامة حاليًا، واستيراد يوتيوب غير متاح.",
+        ),
+        "simple.library_help": (
+            "Add content, open an item to edit it, then preview where it will appear.",
+            "أضف محتواك، وافتح أي عنصر لتعديله، وبعدها عاين توزيعه على الصفحات.",
+        ),
+        "simple.library_for": ("Whose library?", "مكتبة مين؟"),
+        "simple.open_library": ("Open library", "فتح المكتبة"),
+        "simple.open_calendar": ("Open their calendar", "فتح جدول الشخص"),
+        "simple.zone": (
+            "All times use {zone}. Change it in extra options below.",
+            "كل المواعيد بتوقيت {zone}. تقدر تغيّره من الخيارات الإضافية بالأسفل.",
+        ),
+        "simple.schedule_options": (
+            "Start date, time zone and content order",
+            "تاريخ البداية والتوقيت وترتيب المحتوى",
+        ),
+        "simple.connect_more": ("Connect another account", "ربط حساب جديد"),
+        "simple.preview_details": ("Distribution and repeat details", "تفاصيل التوزيع والتكرار"),
+        "simple.assign_person": ("Choose a person for this page", "اختيار شخص للصفحة"),
+        "overview.step_schedule": ("Choose the days and times", "حدّد الأيام والمواعيد"),
+        "overview.step_schedule_help": (
+            "A daily time is ready by default. Review it before your preview.",
+            "في موعد يومي مبدئي جاهز. راجعه قبل معاينة الجدول.",
+        ),
+        "wizard.title": ("Set up a person", "تجهيز شخص"),
+        "wizard.schedule": ("Times", "المواعيد"),
+        "wizard.pages_title": ("Which pages should receive their content?", "محتواه يروح لأنهي صفحات؟"),
+        "wizard.to_schedule": ("Continue to times", "متابعة لتحديد المواعيد"),
+        "wizard.edit_schedule": ("Edit times", "تعديل المواعيد"),
+        "wizard.content_help": (
+            "Choose one way to add your content. You can add more later, and your library stays with this person.",
+            "اختار طريقة لإضافة محتواك. تقدر تضيف المزيد بعدين، والمكتبة بتفضل خاصة بالشخص ده.",
+        ),
+    }
+)
+
 COPY.update(MEDIA_COPY)
 EN = {k: v[0] for k, v in COPY.items()}
 AR = {k: v[1] for k, v in COPY.items()}

@@ -2,7 +2,7 @@
 {% import "macros.html" as m with context %}
 {% block title %}{{ m.video_title(video) }}{% endblock %}
 {% block content %}
-<p><a href="/library{{ '?profile_id=' ~ video.profile_id if video.profile_id else '' }}">{{ t('common.back_arrow') }} {{ t('library.back') }}</a></p>
+<p><a href="/library{{ '?profile_id=' ~ video.profile_id if video.profile_id else '?profile_id=0' }}">{{ t('common.back_arrow') }} {{ t('library.back') }}</a></p>
 <div class="page-heading"><h1 dir="auto">{{ m.video_title(video) }}</h1>{% if person_plan %}<a class="button secondary" href="/plans/{{ person_plan.id }}/setup/content">{{ t('wizard.resume') }}</a>{% endif %}</div>
 
 <div class="grid-2">
@@ -58,7 +58,7 @@
       {% endif %}
     </div>
     {% if can_delete %}<p class="muted small">{{ t('media.delete_help') if video.profile_id else t('library.delete_help') }}</p>{% endif %}
-    {% if video.status == 'ready' and accounts %}
+    {% if publishing_enabled and video.status == 'ready' and accounts %}
     <form method="post" action="/library/{{ video.id }}/publish-now" class="stack" data-confirm="{{ t('library.publish_now_confirm') }}">
       {{ m.csrf() }}
       <label>{{ t('library.publish_to') }}
