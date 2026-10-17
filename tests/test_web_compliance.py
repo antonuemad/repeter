@@ -621,16 +621,20 @@ def test_platform_errors_are_shown_as_received_under_a_translated_label(
 # --------------------------------------------------------------------------- ux-compliance-11: first run
 
 
-def test_first_run_overview_has_a_checklist(web_owner):
+def test_first_run_overview_has_a_checklist(web_owner, monkeypatch):
+    from repeater.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "publishing_enabled", False)
     set_lang(web_owner, "en")
     html = web_owner.get("/").text
     card = html.split('class="card setup"', 1)[1].split("</section>", 1)[0]
     assert 'href="/setup"' in card
     assert 'href="/rules"' not in card
-    assert "These steps do not start publishing" in card
+    assert "publishing is disabled for every account" in html
+    assert "Your next step" in card
     assert card.count("To do") == 3 and "Done" not in card
     set_lang(web_owner, "ar")
-    assert "ابدأ من هنا" in web_owner.get("/").text
+    assert "خطوتك الجاية" in web_owner.get("/").text
 
 
 def test_checklist_ignores_unassigned_content_and_legacy_rules(
@@ -658,7 +662,11 @@ def test_back_links_and_flow_arrows_follow_the_text_direction(
     _add_post(db, workspace, video, account, status=PostStatus.NEEDS_ATTENTION, error="x")
     for path, ar_link, en_link in (
         (f"/rules/{account.id}", '<a href="/rules">→ القواعد</a>', '<a href="/rules">← Rules</a>'),
-        (f"/library/{video.id}", '<a href="/library">→ المكتبة</a>', '<a href="/library">← Library</a>'),
+        (
+            f"/library/{video.id}",
+            '<a href="/library?profile_id=0">→ المكتبة</a>',
+            '<a href="/library?profile_id=0">← Library</a>',
+        ),
         ("/sources/new?kind=ytdlp", '<a href="/sources">→ المصادر</a>', '<a href="/sources">← Sources</a>'),
     ):
         set_lang(web_owner, "ar")
