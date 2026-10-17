@@ -1,18 +1,23 @@
 """Authenticated, read-only user guide using revalidated person navigation."""
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
 from repeater.web import i18n
 from repeater.web.auth import CurrentWorkspace
-from repeater.web.guide_content import chapters_for
+from repeater.web.guide_content import chapters_for, groups_for
 from repeater.web.templating import render
 
 router = APIRouter()
 
 
 @router.get("/guide")
-def guide(request: Request, ctx: CurrentWorkspace) -> Response:
+def guide(request: Request, ctx: CurrentWorkspace, topic: str = "access") -> Response:
+    lang = i18n.request_lang(request)
+    chapters = chapters_for(lang, is_admin=ctx.user.is_platform_admin)
+    position = next((i for i, chapter in enumerate(chapters) if chapter["id"] == topic), None)
+    if position is None:
+        raise HTTPException(404)
     person = getattr(request.state, "active_person", None)
     setup = f"/plans/{person['plan_id']}/setup" if person else None
     links = {
@@ -40,7 +45,12 @@ def guide(request: Request, ctx: CurrentWorkspace) -> Response:
         "guide.html",
         {
             "nav": "guide",
-            "chapters": chapters_for(i18n.request_lang(request), is_admin=ctx.user.is_platform_admin),
+            "chapter": chapters[position],
+            "guide_groups": groups_for(lang, chapters),
+            "chapter_number": position + 1,
+            "chapter_count": len(chapters),
+            "previous_chapter": chapters[position - 1] if position else None,
+            "next_chapter": chapters[position + 1] if position + 1 < len(chapters) else None,
             "guide_links": links,
         },
     )

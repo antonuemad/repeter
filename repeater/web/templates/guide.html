@@ -1,31 +1,44 @@
 {% extends "base.html" %}
+{% import "macros.html" as m with context %}
 {% block title %}{{ t('nav.guide') }}{% endblock %}
 {% block content %}
-<!-- Read / Magic Lap: a stable chapter index and ordered tasks beside a bounded reading column.
-     Extend the existing shell, typography and semantic tokens. No platform actions run here. -->
-<div class="page-heading guide-heading">
-  <div><h1>{{ t('nav.guide') }}</h1><p class="measure">{{ t('guide.intro') }}</p></div>
-  <a class="button" href="/plans">{{ t('guide.continue') }}</a>
-</div>
-<div class="guide-layout">
-  <details class="guide-index" open data-guide-index>
-    <summary>{{ t('guide.contents') }}</summary>
-    <nav aria-label="{{ t('guide.contents') }}"><ol>
-      {% for chapter in chapters %}<li><a href="#{{ chapter.id }}">{{ chapter.title }}</a></li>{% endfor %}
-    </ol></nav>
-  </details>
-  <div class="guide-reading">
-    <p class="guide-overview">{{ t('guide.path') }}</p>
-    {% for chapter in chapters %}
-    <section class="guide-chapter" id="{{ chapter.id }}" aria-labelledby="{{ chapter.id }}-title" tabindex="-1">
-      <h2 id="{{ chapter.id }}-title"><span class="guide-chapter-number" aria-hidden="true">{{ loop.index }}.</span> {{ chapter.title }}</h2>
-      <p class="guide-chapter-intro">{{ chapter.intro }}</p>
-      <ol class="guide-steps">{% for step in chapter.steps %}<li>{{ step }}</li>{% endfor %}</ol>
-      <p class="guide-note">{{ chapter.note }}</p>
-      <div class="guide-chapter-actions"><a href="{{ guide_links[chapter.destination] }}">{{ chapter.action }}</a><a href="#main">{{ t('guide.top') }}</a></div>
-    </section>
-    {% endfor %}
-    <p class="guide-contact">{{ t('guide.support') }} <a href="mailto:info@magic-lap.com">info@magic-lap.com</a></p>
+<!-- Read / Magic Lap. One topic at a time: grouped contents support a clear reading surface.
+     Existing visual tokens and authenticated task links remain; this page cannot run work. -->
+<div class="guide-workspace">
+  <div class="page-heading guide-heading">
+    <div><h1>{{ t('nav.guide') }}</h1><p>{{ t('guide.intro') }}</p></div>
+  </div>
+  <div class="guide-layout">
+    <details class="guide-index" id="guide-contents" open data-guide-index>
+      <summary><span>{{ t('guide.contents') }}</span><small>{{ chapter.label }}</small></summary>
+      <nav aria-label="{{ t('guide.contents') }}">
+        {% for group in guide_groups %}
+        <details class="guide-group"{% if group.id == chapter.group %} open{% endif %}>
+          <summary>{{ group.title }}</summary>
+          <ul>{% for item in group.chapters %}<li><a href="/guide?topic={{ item.id }}#guide-article" data-guide-topic="{{ item.id }}" title="{{ item.title }}"{% if item.id == chapter.id %} aria-current="page"{% endif %}>{{ item.label }}</a></li>{% endfor %}</ul>
+        </details>
+        {% endfor %}
+      </nav>
+    </details>
+    <div class="guide-reading">
+      <section class="guide-chapter" id="guide-topic" aria-labelledby="guide-article">
+        <header class="guide-article-header" id="{{ chapter.id }}">
+          <h2 id="guide-article" tabindex="-1">{{ chapter.title }}</h2>
+          <p class="guide-position">{{ t('guide.position', number=chapter_number, total=chapter_count) }}</p>
+          <p class="guide-chapter-intro">{{ chapter.intro }}</p>
+        </header>
+        <div class="guide-article-body">
+          <ol class="guide-steps" role="list">{% for step in chapter.steps %}<li><span aria-hidden="true">{{ loop.index }}</span><p>{{ step }}</p></li>{% endfor %}</ol>
+          <aside class="guide-note" aria-label="{{ t('guide.note') }}">{{ m.icon('help', 20) }}<div><strong>{{ t('guide.note') }}</strong><p>{{ chapter.note }}</p></div></aside>
+          <div class="guide-chapter-actions"><a class="button" href="{{ guide_links[chapter.destination] }}">{{ chapter.action }}</a><a class="guide-back-index" href="#guide-contents">{{ t('guide.top') }}</a></div>
+        </div>
+      </section>
+      <nav class="guide-pagination" aria-label="{{ t('guide.browse') }}">
+        {% if previous_chapter %}<a href="/guide?topic={{ previous_chapter.id }}#guide-article" rel="prev"><span>{{ t('guide.previous') }}</span><strong>{{ previous_chapter.label }}</strong></a>{% else %}<span></span>{% endif %}
+        {% if next_chapter %}<a href="/guide?topic={{ next_chapter.id }}#guide-article" rel="next"><span>{{ t('guide.next') }}</span><strong>{{ next_chapter.label }}</strong></a>{% else %}<span></span>{% endif %}
+      </nav>
+      <p class="guide-contact">{{ t('guide.support') }} <a href="mailto:info@magic-lap.com">info@magic-lap.com</a></p>
+    </div>
   </div>
 </div>
 {% endblock %}

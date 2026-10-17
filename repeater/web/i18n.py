@@ -222,7 +222,12 @@ _YOUTUBE_CATEGORIES_AR = {
 
 EN: dict[str, str] = {
     "nav.guide": "User guide",
-    "guide.intro": "Every step, from your invitation to a prepared library and a 30-day rotation preview. Start at the beginning or jump to the task you need.",
+    "guide.intro": "Choose a topic or follow the steps in order, from your first sign-in to your rotation preview.",
+    "guide.position": "Topic {number} of {total}",
+    "guide.previous": "Previous topic",
+    "guide.next": "Next topic",
+    "guide.browse": "Browse guide topics",
+    "guide.note": "Keep in mind",
     "guide.continue": "Continue preparing a person",
     "guide.contents": "In this guide",
     "guide.path": "Your first journey: add a person → connect and select their pages → add content → choose times → preview the calendar.",
@@ -824,7 +829,12 @@ EN: dict[str, str] = {
 
 AR: dict[str, str] = {
     "nav.guide": "دليل الاستخدام",
-    "guide.intro": "كل الخطوات من الدعوة لحد تجهيز المكتبة ومعاينة روتيشن ٣٠ يوم. ابدأ من الأول أو اختار المهمة اللي محتاجها من الفهرس.",
+    "guide.intro": "اختار موضوعًا، أو امشِ بالخطوات بالترتيب من أول دخولك لحد معاينة الروتيشن.",
+    "guide.position": "الموضوع {number} من {total}",
+    "guide.previous": "الموضوع السابق",
+    "guide.next": "الموضوع التالي",
+    "guide.browse": "تصفّح موضوعات الدليل",
+    "guide.note": "خلي بالك",
     "guide.continue": "كمّل تجهيز شخص",
     "guide.contents": "محتويات الدليل",
     "guide.path": "رحلتك الأولى: أضف شخصًا ← اربط صفحاته واخترها ← أضف محتواه ← حدّد المواعيد ← عاين التقويم.",

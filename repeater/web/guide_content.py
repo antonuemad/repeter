@@ -699,6 +699,39 @@ CHAPTERS = (
 )
 
 
+# Short navigation names avoid wrapping full article headings in the topic index.
+NAVIGATION = {
+    "access": ("start", ("الدخول واستعادة كلمة المرور", "Sign-in and password recovery")),
+    "navigation": ("start", ("التنقّل داخل النظام", "Find your way around")),
+    "person": ("start", ("إضافة شخص أو براند", "Add a person or brand")),
+    "accounts": ("content", ("ربط الصفحات واختيارها", "Connect and select pages")),
+    "connection-management": ("content", ("إدارة الاتصالات وقراءة TikTok", "Connections and TikTok reading")),
+    "drive": ("content", ("فولدر Google Drive", "Google Drive folder")),
+    "manual-content": ("content", ("رفع ملف أو كتابة بوست", "Upload or compose a post")),
+    "platform-import": ("content", ("استيراد فيديوهات من منصة", "Import platform videos")),
+    "library": ("content", ("تنظيم مكتبة المحتوى", "Organize your library")),
+    "rotation": ("rotation", ("المواعيد وفاصل التكرار", "Times and repeat interval")),
+    "preview": ("rotation", ("معاينة الـ٣٠ يوم", "30-day preview")),
+    "calendar": ("rotation", ("تعديل موعد أو محتواه", "Edit a slot or its content")),
+    "safety": ("rotation", ("قفل النشر وقائمة الانتظار", "Publishing lock and queue")),
+    "activity": ("management", ("المشاكل والتنبيهات", "Problems and alerts")),
+    "advanced": ("management", ("المصادر والقواعد", "Sources and rules")),
+    "settings": ("management", ("إعدادات مساحة العمل", "Workspace settings")),
+    "members": ("management", ("الأعضاء وأمان الحساب", "Members and account security")),
+    "billing": ("management", ("الباقة والفواتير", "Plan and billing")),
+    "administration": ("admin", ("العملاء والتحصيل", "Customers and payments")),
+    "operations": ("admin", ("النسخ والاستعادة", "Backups and recovery")),
+}
+
+GROUPS = {
+    "start": ("ابدأ من هنا", "Getting started"),
+    "content": ("الحسابات والمحتوى", "Accounts and content"),
+    "rotation": ("الروتيشن والتقويم", "Rotation and calendar"),
+    "management": ("الإدارة والمساعدة", "Management and help"),
+    "admin": ("لمسؤول المنصة", "Platform administration"),
+}
+
+
 def chapters_for(lang: str, *, is_admin: bool) -> list[dict]:
     index = 0 if lang == "ar" else 1
     return [
@@ -710,7 +743,18 @@ def chapters_for(lang: str, *, is_admin: bool) -> list[dict]:
             "note": chapter.note[index],
             "destination": chapter.destination,
             "action": chapter.action[index],
+            "group": NAVIGATION[chapter.id][0],
+            "label": NAVIGATION[chapter.id][1][index],
         }
         for chapter in CHAPTERS
         if is_admin or not chapter.admin_only
+    ]
+
+
+def groups_for(lang: str, chapters: list[dict]) -> list[dict]:
+    index = 0 if lang == "ar" else 1
+    return [
+        {"id": key, "title": title[index], "chapters": members}
+        for key, title in GROUPS.items()
+        if (members := [chapter for chapter in chapters if chapter["group"] == key])
     ]

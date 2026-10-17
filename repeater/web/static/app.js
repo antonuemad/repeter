@@ -185,7 +185,7 @@
     // The guide remains fully readable without JS; collapse only its mobile index.
     var guideIndex = document.querySelector('[data-guide-index]');
     if (guideIndex && window.matchMedia) {
-      var guideDesktop = window.matchMedia('(min-width: 761px)');
+      var guideDesktop = window.matchMedia('(min-width: 1200px)');
       function adaptGuide() { guideIndex.open = guideDesktop.matches; }
       adaptGuide();
       guideDesktop.addEventListener('change', adaptGuide);
@@ -194,6 +194,17 @@
           if (!guideDesktop.matches) { guideIndex.open = false; }
         });
       });
+      document.querySelectorAll('.guide-back-index').forEach(function (link) {
+        link.addEventListener('click', function () { guideIndex.open = true; });
+      });
+      // Preserve the guide's original shared /guide#topic links using only known topics.
+      if (!new URLSearchParams(window.location.search).has('topic') && window.location.hash) {
+        var oldTopic;
+        try { oldTopic = decodeURIComponent(window.location.hash.slice(1)); } catch (_) { oldTopic = ''; }
+        guideIndex.querySelectorAll('[data-guide-topic]').forEach(function (link) {
+          if (link.dataset.guideTopic === oldTopic) { window.location.replace(link.href); }
+        });
+      }
     }
     setupConfirm();
     setupUpload();

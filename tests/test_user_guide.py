@@ -1,5 +1,6 @@
 """The guide is discoverable, bilingual, tenant-safe and entirely read-only."""
 
+from html import unescape
 from html.parser import HTMLParser
 
 import pytest
@@ -24,6 +25,7 @@ class Links(HTMLParser):
         self.forms = []
         self.section = None
         self.chapter_links = {}
+        self.id_tags = {}
         self.feed(html)
 
     def handle_starttag(self, tag, attrs):
@@ -33,6 +35,7 @@ class Links(HTMLParser):
             self.chapter_links[self.section] = []
         if "id" in attrs:
             self.ids.append(attrs["id"])
+            self.id_tags[attrs["id"]] = tag
         if tag == "a":
             self.links.append(attrs)
             if self.section:
@@ -69,10 +72,14 @@ def test_members_can_read_localized_guide_without_admin_sections(request, client
     assert f'<html lang="{lang}" dir="{"rtl" if lang == "ar" else "ltr"}">' in response.text
     doc = Links(response.text)
     assert len(doc.ids) == len(set(doc.ids))
+    assert list(doc.chapter_links) == ["guide-topic"]
+    assert "access" in doc.ids and "drive" not in doc.ids
     for chapter in chapters_for(lang, is_admin=False):
-        assert chapter["id"] in doc.ids
-        assert {"href": f"#{chapter['id']}"} in doc.links
-        assert chapter["title"] in response.text
+        assert any(
+            link.get("data-guide-topic") == chapter["id"]
+            and link["href"] == f"/guide?topic={chapter['id']}#guide-article"
+            for link in doc.links
+        )
     assert "administration" not in doc.ids and "operations" not in doc.ids
     assert not any(link["href"].startswith("/admin/") for link in doc.links)
     assert any(link.get("href") == "/guide" and link.get("aria-current") == "page" for link in doc.links)
@@ -87,24 +94,67 @@ def test_platform_admin_also_gets_customer_and_operations_instructions(web_owner
     assert response.status_code == 200
     doc = Links(response.text)
     for chapter in chapters_for(lang, is_admin=True):
+        assert any(link.get("data-guide-topic") == chapter["id"] for link in doc.links)
+    assert {"href": "/admin/operations"} in Links(web_owner.get("/guide?topic=operations").text).links
+    assert {"href": "/admin/customers"} in Links(web_owner.get("/guide?topic=administration").text).links
+
+
+@pytest.mark.parametrize("lang", ["ar", "en"])
+@pytest.mark.parametrize("is_admin", [False, True])
+def test_topics_work_without_javascript_and_previous_next_follow_allowed_sequence(
+    web_owner, admin_user, db, lang, is_admin
+):
+    admin_user.is_platform_admin = is_admin
+    db.commit()
+    set_lang(web_owner, lang)
+    chapters = chapters_for(lang, is_admin=is_admin)
+    for position, chapter in enumerate(chapters):
+        response = web_owner.get(f"/guide?topic={chapter['id']}")
+        assert response.status_code == 200
+        doc = Links(response.text)
+        assert list(doc.chapter_links) == ["guide-topic"]
+        assert doc.id_tags["guide-article"] == "h2"
         assert chapter["id"] in doc.ids
-    assert {"href": "/admin/operations"} in doc.links
-    assert {"href": "/admin/customers"} in doc.links
+        assert chapter["title"] in unescape(response.text) and chapter["steps"][0] in unescape(response.text)
+        assert response.headers["cache-control"] == "no-store"
+        selected = [link for link in doc.links if link.get("data-guide-topic") and link.get("aria-current")]
+        assert len(selected) == 1 and selected[0]["data-guide-topic"] == chapter["id"]
+        previous = [link["href"] for link in doc.links if link.get("rel") == "prev"]
+        following = [link["href"] for link in doc.links if link.get("rel") == "next"]
+        assert previous == (
+            [f"/guide?topic={chapters[position - 1]['id']}#guide-article"] if position else []
+        )
+        assert following == (
+            [f"/guide?topic={chapters[position + 1]['id']}#guide-article"]
+            if position + 1 < len(chapters)
+            else []
+        )
+
+
+@pytest.mark.parametrize("topic", ["missing", "administration", "operations", "//evil.test", "<script>"])
+def test_unknown_or_restricted_topic_does_not_leak_admin_content(web_owner, topic):
+    response = web_owner.get("/guide", params={"topic": topic})
+    assert response.status_code == 404
+    assert "<script>" not in response.text
 
 
 def test_selected_person_is_retained_in_task_links_and_never_accepted_from_query(web_owner, db):
     first = create_plan(web_owner, db, "First synthetic person")
     second = create_plan(web_owner, db, "Second synthetic person")
     web_owner.get(f"/plans/{first.id}/setup/content")
-    response = web_owner.get(f"/guide?person={second.profile_id}")
-    doc = Links(response.text)
-    for step in ("accounts", "content", "schedule", "preview"):
-        assert {"href": f"/plans/{first.id}/setup/{step}"} in doc.links
-        assert {"href": f"/plans/{second.id}/setup/{step}"} not in doc.links
-    assert {"href": f"/library?profile_id={first.profile_id}"} in doc.links
-    assert {"href": f"/calendar?person={first.profile_id}"} in doc.links
-    assert {"href": "/accounts"} in doc.chapter_links["connection-management"]
-    assert {"href": f"/plans/{first.id}/setup/accounts"} in doc.chapter_links["accounts"]
+    for topic, destination in {
+        "accounts": f"/plans/{first.id}/setup/accounts",
+        "drive": f"/plans/{first.id}/setup/content",
+        "rotation": f"/plans/{first.id}/setup/schedule",
+        "preview": f"/plans/{first.id}/setup/preview",
+        "library": f"/library?profile_id={first.profile_id}",
+        "calendar": f"/calendar?person={first.profile_id}",
+        "connection-management": "/accounts",
+    }.items():
+        response = web_owner.get(f"/guide?topic={topic}&person={second.profile_id}")
+        doc = Links(response.text)
+        assert {"href": destination, "class": "button"} in doc.chapter_links["guide-topic"]
+        assert f"/plans/{second.id}/setup" not in response.text
 
 
 def test_deleted_person_falls_back_to_choosing_person(web_owner, db):
@@ -112,7 +162,7 @@ def test_deleted_person_falls_back_to_choosing_person(web_owner, db):
     web_owner.get(f"/plans/{plan.id}/setup/content")
     db.delete(db.get(CreatorProfile, plan.profile_id))
     db.commit()
-    response = web_owner.get("/guide")
+    response = web_owner.get("/guide?topic=drive")
     assert response.status_code == 200
     assert f"/plans/{plan.id}/setup" not in response.text
     assert {"href": "/plans"} in Links(response.text).links
@@ -145,8 +195,8 @@ def test_guide_opens_no_provider_and_creates_no_work(web_owner, db, monkeypatch,
     before = [db.scalar(select(func.count()).select_from(model)) for model in models]
     set_lang(web_owner, lang)
     with respx.mock(assert_all_called=False) as mock:
-        for _ in range(2):
-            response = web_owner.get("/guide")
+        for topic in ("drive", "safety", "connection-management", "safety"):
+            response = web_owner.get(f"/guide?topic={topic}")
             assert response.status_code == 200
         assert not mock.calls
     assert [db.scalar(select(func.count()).select_from(model)) for model in models] == before

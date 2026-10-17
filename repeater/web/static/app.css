@@ -512,35 +512,67 @@ th { font-size: 12px; background: var(--surface-alt); }
 .plan-people > li > div { min-inline-size: 0; }
 .plan-people h2 { overflow-wrap: anywhere; }
 
-/* A reading surface within the existing Magic Lap shell. */
-.guide-layout { display: grid; grid-template-columns: 248px minmax(0, 1fr); align-items: start; gap: 48px; }
-.guide-index { position: sticky; inset-block-start: 80px; max-block-size: calc(100vh - 104px); overflow-y: auto; padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
-.guide-index > summary { min-block-size: 44px; font-weight: 600; }
-.guide-index ol { padding-inline-start: 24px; margin: 8px 0 0; }
-.guide-index li { padding-inline-start: 4px; }
-.guide-index a { display: block; padding-block: 8px; color: var(--muted); text-decoration: none; }
-.guide-index a:hover { color: var(--primary); text-decoration: underline; }
-.guide-reading { min-inline-size: 0; max-inline-size: 75ch; }
-.guide-overview { font-weight: 500; margin: 0; padding-block: 12px 24px; border-block-end: 1px solid var(--border-strong); }
-.guide-chapter { padding-block: 32px; border-block-end: 1px solid var(--border); scroll-margin-block-start: 24px; }
-.guide-chapter h2 { font-size: 21px; margin: 0 0 12px; text-wrap: balance; }
-.guide-chapter-number { color: var(--subtle); }
-.guide-chapter-intro { color: var(--muted); margin: 0 0 20px; }
-.guide-steps { padding-inline-start: 24px; margin: 0; }
-.guide-steps li { padding-inline-start: 8px; margin-block-end: 16px; }
-.guide-steps li::marker { color: var(--primary); font-weight: 600; }
-.guide-note { padding: 16px; background: var(--surface-alt); border-radius: 10px; margin-block: 20px; }
-.guide-chapter-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; }
-.guide-chapter-actions a { display: inline-flex; align-items: center; min-block-size: 44px; }
-.guide-contact { padding-block: 24px; }
-@media (max-width: 1100px) {
-  .guide-layout { grid-template-columns: 208px minmax(0, 1fr); gap: 24px; }
+/* One guide topic per page, inside the established Magic Lap reading surface. */
+.guide-workspace { max-inline-size: 1120px; margin-inline: auto; }
+.guide-heading { margin-block-end: 24px; }
+.guide-heading p { max-inline-size: 72ch; }
+.guide-layout { display: grid; grid-template-columns: 248px minmax(0, 1fr); align-items: start; gap: 24px; }
+.guide-index { position: sticky; inset-block-start: 80px; max-block-size: calc(100vh - 104px); overflow-y: auto; }
+.guide-index > summary { min-block-size: 44px; padding-block: 8px 16px; margin-block-end: 8px; border-block-end: 1px solid var(--border); font-weight: 600; }
+.guide-index > summary small { display: none; }
+.guide-group + .guide-group { margin-block-start: 8px; }
+.guide-group > summary { display: flex; align-items: center; gap: 12px; min-block-size: 44px; padding: 8px 12px; font-weight: 600; font-size: 13px; color: var(--muted); }
+.guide-group > summary::after { content: ""; inline-size: 6px; block-size: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); margin-inline-start: auto; }
+.guide-group[open] > summary::after { transform: rotate(225deg); }
+.guide-group ul { list-style: none; padding: 0; margin: 0; }
+.guide-group a { display: flex; align-items: center; min-block-size: 44px; padding: 10px 16px; border-radius: 8px; color: var(--muted); text-decoration: none; font-size: 13px; }
+.guide-group a:hover { background: var(--surface-alt); color: var(--text); }
+.guide-group a[aria-current="page"] { background: var(--primary-bg); color: var(--primary); font-weight: 600; }
+.guide-reading { min-inline-size: 0; }
+.guide-chapter { padding: 32px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; scroll-margin-block-start: 24px; }
+.guide-article-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px 20px; padding-block-end: 24px; border-block-end: 1px solid var(--border); }
+.guide-article-header h2 { font-size: 21px; margin: 0; text-wrap: balance; justify-self: start; scroll-margin-block-start: 24px; }
+.guide-position { font-size: 12px; color: var(--subtle); white-space: nowrap; margin: 4px 0 0; }
+.guide-chapter-intro { grid-column: 1 / -1; color: var(--muted); margin: 0; }
+.guide-article-body { max-inline-size: 72ch; margin-inline: auto; padding-block-start: 24px; }
+.guide-steps { list-style: none; padding: 0; margin: 0; }
+.guide-steps li { display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: start; gap: 12px; padding-block: 16px; border-block-end: 1px solid var(--border); }
+.guide-steps li:first-child { padding-block-start: 0; }
+.guide-steps li:last-child { border: 0; }
+.guide-steps li > span { display: grid; place-items: center; inline-size: 32px; block-size: 32px; border-radius: 50%; background: var(--primary-bg); color: var(--primary); font-size: 13px; font-weight: 600; }
+.guide-steps p { margin: 0; font-size: 15px; line-height: 1.85; }
+.guide-note { display: flex; align-items: start; gap: 12px; padding: 16px; background: var(--surface-alt); border-radius: 10px; margin-block: 20px 24px; }
+.guide-note > .icon { margin-block-start: 4px; color: var(--primary); }
+.guide-note strong { display: block; margin-block-end: 4px; font-size: 13px; }
+.guide-note p { margin: 0; font-size: 13px; line-height: 1.85; }
+.guide-chapter-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; }
+.guide-back-index { display: none; }
+.guide-pagination { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin-block-start: 24px; }
+.guide-pagination a { min-block-size: 72px; padding-block: 12px; border-block-start: 1px solid var(--border-strong); color: var(--text); text-decoration: none; }
+.guide-pagination a[rel="next"] { text-align: end; }
+.guide-pagination span { display: block; color: var(--muted); font-size: 12px; margin-block-end: 4px; }
+.guide-pagination strong { font-weight: 500; }
+.guide-pagination a:hover strong { text-decoration: underline; }
+.guide-contact { color: var(--muted); font-size: 12px; text-align: center; padding-block: 24px 0; margin: 0; }
+@media (max-width: 1199px) {
+  .guide-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .guide-index { position: static; max-block-size: none; overflow: visible; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; scroll-margin-block-start: 80px; }
+  .guide-index > summary { padding: 12px 16px; margin: 0; border: 0; }
+  .guide-index > summary small { display: block; color: var(--muted); font-size: 12px; font-weight: 400; margin-block-start: 4px; }
+  .guide-index nav { padding: 0 12px 12px; }
+  .guide-back-index { display: inline-flex; align-items: center; min-block-size: 44px; }
 }
-@media (max-width: 760px) {
-  .guide-layout { grid-template-columns: minmax(0, 1fr); }
-  .guide-index { position: static; max-block-size: none; }
-  .guide-chapter h2 { font-size: 19px; }
-  .guide-steps li { padding-inline-start: 4px; }
+@media (max-width: 600px) {
+  .guide-chapter { padding: 20px; }
+  .guide-article-header { grid-template-columns: minmax(0, 1fr); gap: 8px; padding-block-end: 20px; }
+  .guide-article-header h2 { font-size: 19px; }
+  .guide-position { margin: 0; }
+  .guide-chapter-intro { font-size: 13px; }
+  .guide-article-body { padding-block-start: 20px; }
+  .guide-steps p { font-size: 14px; }
+  .guide-note { gap: 8px; padding: 12px; }
+  .guide-chapter-actions .button { inline-size: 100%; }
+  .guide-pagination { gap: 16px; }
 }
 @media (max-width: 600px) {
   .person-switch { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; }
