@@ -65,6 +65,100 @@ def test_recovery_rejects_missing_or_outside_media(tmp_path, path):
         load_script("recovery_drill").verify_media(tmp_path, [{"encoded_path": path}])
 
 
+def test_empty_database_is_not_a_complete_media_recovery(tmp_path):
+    drill = load_script("recovery_drill")
+    assert drill.verify_media(tmp_path, [])["referenced_files_verified"] == 0
+    with pytest.raises(RuntimeError, match="actual library media"):
+        drill.verify_media(tmp_path, [{"original_path": None}], require_media=True)
+
+
+def test_mail_drill_reads_only_the_expected_message_without_marking_it_read(monkeypatch):
+    from email.message import EmailMessage
+    from types import SimpleNamespace
+
+    drill = load_script("mail_drill")
+    token = "a" * 43
+    message = EmailMessage()
+    message["Message-ID"] = "<synthetic-reset@magic-lap.com>"
+    message["From"] = message["To"] = "info@magic-lap.com"
+    message.set_content("Synthetic: https://example.com/reset-password#token=" + token)
+    calls = []
+
+    class Inbox:
+        def __init__(self, host, port, **kwargs):
+            assert kwargs["ssl_context"].check_hostname
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def login(self, *args):
+            pass
+
+        def select(self, folder, *, readonly):
+            assert readonly
+            return "OK", []
+
+        def uid(self, command, *args):
+            calls.append((command, args))
+            return ("OK", [b"1"]) if command == "search" else ("OK", [(b"1", message.as_bytes())])
+
+    monkeypatch.setattr(drill.imaplib, "IMAP4_SSL", Inbox)
+    settings = SimpleNamespace(
+        smtp_username="info@magic-lap.com", smtp_from="info@magic-lap.com", smtp_credential="synthetic"
+    )
+    assert drill.received_reset(
+        settings,
+        message["Message-ID"],
+        hashlib.sha256(token.encode()).hexdigest(),
+        imap_host="imap.test.invalid",
+    ) == (token, "INBOX")
+    assert calls[0] == ("search", (None, "HEADER", "Message-ID", '"<synthetic-reset@magic-lap.com>"'))
+    assert calls[1] == ("fetch", (b"1", "(BODY.PEEK[])"))
+
+
+def test_canary_restore_checks_metadata_derived_files_and_offline_decryption(tmp_path, monkeypatch):
+    drill = load_script("recovery_drill")
+    (tmp_path / "encoded.mp4").write_bytes(b"synthetic encoded")
+    row = dict(
+        id=2,
+        profile_id=3,
+        media_kind="video",
+        content_format="reel",
+        status="ready",
+        caption="Synthetic",
+        encoded_path="encoded.mp4",
+        overrides={"recovery_encrypted_probe": "synthetic-ciphertext"},
+    )
+    manifest = {
+        "workspace_id": 1,
+        "plan_id": 4,
+        "probe": "expected",
+        "items": [
+            {
+                **row,
+                "files": {"encoded_path": hashlib.sha256(b"synthetic encoded").hexdigest()},
+                "encrypted_probe": True,
+            }
+        ],
+    }
+
+    def sql(query):
+        return "t" if "SELECT paused" in query else "f" if "SELECT enabled" in query else json.dumps(row)
+
+    calls = []
+    monkeypatch.setattr(drill, "run", lambda args, **kw: calls.append((args, kw)) or b"true\n")
+    result = drill.verify_canary(sql, tmp_path, manifest, {"REPEATER_TOKEN_ENCRYPTION_KEYS": "synthetic-key"})
+    assert result["encrypted_probe_verified"] and result["canary_files_sha256_verified"] == 1
+    assert calls[0][0][calls[0][0].index("--network") + 1] == "none"
+    assert "synthetic-key" not in str(calls[0][0])
+    (tmp_path / "encoded.mp4").write_bytes(b"tampered-encoded!")
+    with pytest.raises(RuntimeError, match="checksum"):
+        drill.verify_canary(sql, tmp_path, manifest, {"REPEATER_TOKEN_ENCRYPTION_KEYS": "synthetic-key"})
+
+
 def test_external_monitor_records_outage_and_recovery_without_provider_calls(tmp_path, monkeypatch, capsys):
     monitor = load_script("external_monitor")
     monkeypatch.setattr(monitor, "check_https", lambda url: False)
@@ -111,6 +205,58 @@ def test_monitor_email_uses_verified_tls_and_redacts_failures(monkeypatch):
     assert calls[0][2]["context"].check_hostname
     message = calls[-1][1]
     assert message["To"] == "info@magic-lap.com" and "secret" not in str(message)
+
+
+def test_notification_drill_sends_exactly_two_labelled_messages_and_keeps_real_state(tmp_path, monkeypatch):
+    drill = load_script("notification_drill")
+    monitor = sys.modules["monitor"]
+    sent = []
+
+    class FakeSMTP:
+        def __init__(self, *a, **kw):
+            assert kw["context"].check_hostname
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+        def login(self, username, password):
+            assert password == "synthetic-secret"
+
+        def send_message(self, message):
+            sent.append(message)
+            return {}
+
+    monkeypatch.setattr(monitor.smtplib, "SMTP_SSL", FakeSMTP)
+    real_state = tmp_path / "monitor.json"
+    real_state.write_text('{"delivered_fingerprint":"production"}')
+    values = {
+        "REPEATER_SMTP_HOST": "smtp.test.invalid",
+        "REPEATER_SMTP_USERNAME": "test",
+        "REPEATER_SMTP_PASSWORD": "synthetic-secret",
+        "REPEATER_SMTP_SSL": "true",
+    }
+    result = drill.exercise(values, tmp_path, "synthetic-123")
+    assert result["ok"] and len(sent) == 2
+    assert [m["Message-ID"] for m in sent] == [
+        "<repeater-monitor-synthetic-123-failure@magic-lap.com>",
+        "<repeater-monitor-synthetic-123-recovery@magic-lap.com>",
+    ]
+    assert all("[TEST synthetic-123]" in m["Subject"] and "No real outage" in str(m) for m in sent)
+    assert "synthetic-secret" not in json.dumps(result)
+    assert json.loads(real_state.read_text()) == {"delivered_fingerprint": "production"}
+
+
+def test_notification_drill_fails_if_delivery_fails(tmp_path, monkeypatch):
+    drill = load_script("notification_drill")
+    monkeypatch.setattr(sys.modules["monitor"], "send_alert", lambda *a: False)
+    result = drill.exercise({}, tmp_path, "synthetic-failure")
+    assert not result["ok"] and not result["failure_smtp_accepted"]
+    assert not result["recovery_smtp_accepted"]
+    with pytest.raises(ValueError, match="fresh"):
+        drill.exercise({}, tmp_path, "reuse")
 
 
 def test_twenty_tenants_rotation_capacity_isolated_and_mock_only(db, tmp_path, capsys):

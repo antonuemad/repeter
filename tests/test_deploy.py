@@ -1879,6 +1879,18 @@ def test_offsite_phase_receipts_and_dedicated_config(sandbox: dict) -> None:
     assert set((sandbox["logs"] / "rclone.log.config").read_text().splitlines()) == {str(config)}
 
 
+def test_media_readback_failure_does_not_record_a_successful_media_backup(sandbox: dict) -> None:
+    make_env(sandbox, RCLONE_REMOTE="crypt:repeater", RCLONE_MEDIA_SYNC="daily")
+    _write_status(sandbox, 40)
+    previous = status_file(sandbox).read_text()
+    result = backup(sandbox, STUB_RCLONE_FAIL_ON="check")
+    assert result.returncode != 0 and "media library failed read-back" in result.stderr
+    folder = status_file(sandbox).parent
+    assert status_file(sandbox).read_text() == previous
+    assert (folder / "last_offsite_db_success").exists()
+    assert not (folder / "last_offsite_media_success").exists()
+
+
 def test_missing_dedicated_rclone_config_fails_before_upload(sandbox: dict) -> None:
     make_env(sandbox, RCLONE_REMOTE="crypt:x", RCLONE_CONFIG="/no/such/config")
     result = backup(sandbox)

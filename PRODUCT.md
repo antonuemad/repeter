@@ -13,8 +13,9 @@ user, 2026-10-15). Creator and operator workflows already exist in PLAN.md and t
 application. The platform administrator creates separate paused customer workspaces and issues
 private invitation links. Customers set their own passwords and explicitly accept
 the current legal texts. Invitation and password-reset delivery now use an encrypted
-transactional outbox. SMTP delivery still needs the actual mailbox password; no real
-email has been sent. Manual link delivery remains available during setup.
+transactional outbox. Hostinger SMTP is configured; an invitation and an isolated password-reset
+drill reached the operator inbox. Manual link delivery remains available during setup. These
+checks establish delivery to that mailbox, not deliverability to every customer provider.
 
 ## Product Purpose
 
@@ -37,8 +38,8 @@ different capabilities; not every platform is an official download source.
 - Rotation rules, publication history, attention states, pause and reconnect are
   existing capabilities and must remain available.
 - Google and Meta developer credentials and initial account links (including read-only Drive)
-  are configured (2026-10-15). TikTok setup was explicitly deferred after signup email delivery
-  failed. Customer platform approvals and real publication acceptance
+  are configured (2026-10-15). TikTok uses Sandbox for read-only connections; its production review
+  was submitted for Login Kit, user.info.basic and video.list on 2026-10-17. Customer platform approvals and real publication acceptance
   remain launch gates; a healthy server does not establish publishing readiness.
 - Preserve owner/editor authorization, tenant isolation, CSRF, explicit consent,
   platform-required settings and unknown-outcome publication safeguards.

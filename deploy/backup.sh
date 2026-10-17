@@ -299,6 +299,9 @@ offsite_media() {
     rclone sync "$media_dir" "$remote/media" --backup-dir "$remote/media-trash/$(date -u +%Y%m%d)" \
         --max-delete "$max_delete" --exclude "uploads/**" --exclude ".cookies/**" "${RCLONE_TIMEOUTS[@]}" ||
         die "rclone sync of the media library failed (more than $max_delete deletions? see RCLONE_MAX_DELETE)"
+    rclone check "$media_dir" "$remote/media" --download --one-way \
+        --exclude "uploads/**" --exclude ".cookies/**" "${RCLONE_TIMEOUTS[@]}" ||
+        die "the off-site media library failed read-back verification"
     offsite_expire_trash "$remote" "$trash_days"
 }
 

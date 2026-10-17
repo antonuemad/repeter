@@ -25,6 +25,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from email.message import EmailMessage
+from email.utils import make_msgid
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -197,8 +198,19 @@ def send_email_alert(values: dict[str, str], failures: list[str]) -> bool:
         message["From"] = values.get("REPEATER_SMTP_FROM", "info@magic-lap.com")
         message["To"] = values.get("REPEATER_OPERATOR_EMAIL", "info@magic-lap.com")
         message["Subject"] = "Repeater monitor: " + ("action needed" if failures else "recovered")
+        drill = values.get("REPEATER_MONITOR_DRILL_ID", "")
+        if drill:
+            if not re.fullmatch(r"[A-Za-z0-9-]{1,64}", drill):
+                return False
+            phase = "failure" if failures else "recovery"
+            message["Message-ID"] = f"<repeater-monitor-{drill}-{phase}@magic-lap.com>"
+            message.replace_header("Subject", f"Repeater monitor [TEST {drill}]: {phase}")
+        else:
+            message["Message-ID"] = make_msgid(domain="magic-lap.com")
         message.set_content(
-            "Repeater: " + (", ".join(failures) if failures else "All monitored checks recovered.")
+            ("SIMULATED NOTIFICATION DRILL. No real outage was created.\n" if drill else "")
+            + "Repeater: "
+            + (", ".join(failures) if failures else "All monitored checks recovered.")
         )
         factory = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
         options = {"timeout": 15}

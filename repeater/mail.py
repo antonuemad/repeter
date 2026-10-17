@@ -117,7 +117,13 @@ def prepare_recoveries(db):
         membership = (
             db.scalar(
                 select(WorkspaceMember)
-                .where(WorkspaceMember.user_id == user.id, WorkspaceMember.role.in_(["owner", "editor"]))
+                .join(Workspace, Workspace.id == WorkspaceMember.workspace_id)
+                .where(
+                    WorkspaceMember.user_id == user.id,
+                    WorkspaceMember.role.in_(["owner", "editor"]),
+                    Workspace.closed_at.is_(None),
+                )
+                .order_by(WorkspaceMember.workspace_id)
                 .limit(1)
             )
             if user

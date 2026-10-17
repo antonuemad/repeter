@@ -224,6 +224,29 @@ def test_automatic_recovery_does_not_recover_operator_or_unknown(
     assert len(sent) == 1 and sent[0][0] == user.email
 
 
+def test_recovery_uses_open_membership_when_an_earlier_workspace_is_closed(
+    db, workspace, admin_user, mail_ready, monkeypatch
+):
+    from repeater.security import hash_password
+
+    workspace.closed_at = utcnow()
+    open_workspace = Workspace(name="Synthetic open workspace", paused=True)
+    db.add(open_workspace)
+    user = User(email="multi-workspace@example.com", password_hash=hash_password(PASSWORD))
+    db.add(user)
+    db.flush()
+    for workspace_id in (workspace.id, open_workspace.id):
+        db.add(WorkspaceMember(workspace_id=workspace_id, user_id=user.id, role="editor"))
+    access.request_recovery(db, user.email)
+    db.commit()
+    sent = []
+    monkeypatch.setattr(mail, "send_email", lambda *a, **kw: sent.append(a))
+    mail.deliver(db, {})
+    queued = db.scalar(select(MailOutbox))
+    assert queued.workspace_id == open_workspace.id and queued.status == "sent"
+    assert len(sent) == 1 and sent[0][0] == user.email
+
+
 def test_bank_transfer_invoice_requires_configuration_and_manual_verification(
     web_owner, db, workspace, admin_user, monkeypatch
 ):

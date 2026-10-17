@@ -24,7 +24,7 @@ def run(args, **kwargs):
     return result.stdout
 
 
-def verify_media(root, rows):
+def verify_media(root, rows, *, require_media=False):
     root = Path(root).resolve()
     checked = 0
     fingerprint = hashlib.sha256()
@@ -51,7 +51,89 @@ def verify_media(root, rows):
                 raise RuntimeError("Restored media size does not match the database")
             fingerprint.update(str(relative).encode() + digest.digest())
             checked += 1
+    if require_media and not checked:
+        raise RuntimeError("The drill requires actual library media; empty recovery is insufficient")
     return {"referenced_files_verified": checked, "media_fingerprint": fingerprint.hexdigest()}
+
+
+def verify_canary(sql, media, manifest, values):
+    """Compare synthetic records and every derived file with their pre-backup evidence."""
+    workspace_id, plan_id = int(manifest["workspace_id"]), int(manifest["plan_id"])
+    if sql(f"SELECT paused FROM workspaces WHERE id={workspace_id}") != "t":  # noqa: S608 - integer ID
+        raise RuntimeError("Restored canary workspace is missing or unpaused")
+    if sql(f"SELECT enabled FROM content_plans WHERE id={plan_id} AND workspace_id={workspace_id}") != "f":  # noqa: S608 - integer IDs
+        raise RuntimeError("Restored canary plan is missing or enabled")
+    probe = None
+    checked = 0
+    for item in manifest["items"]:
+        row = sql(
+            f"SELECT row_to_json(v) FROM videos v WHERE id={int(item['id'])} AND workspace_id={workspace_id}"  # noqa: S608 - integer IDs
+        )
+        if not row:
+            raise RuntimeError("Restored synthetic library item is missing")
+        row = json.loads(row)
+        for key in ("profile_id", "media_kind", "content_format", "status", "caption"):
+            if row.get(key) != item.get(key):
+                raise RuntimeError("Restored synthetic library metadata does not match")
+        for key, expected in item.get("files", {}).items():
+            relative = row.get(key)
+            root = Path(media).resolve()
+            path = (root / (relative or "")).resolve()
+            if (
+                not relative
+                or Path(relative).is_absolute()
+                or not path.is_relative_to(root)
+                or not path.is_file()
+            ):
+                raise RuntimeError("Restored synthetic media checksum does not match")
+            with path.open("rb") as stream:
+                if hashlib.file_digest(stream, "sha256").hexdigest() != expected:
+                    raise RuntimeError("Restored synthetic media checksum does not match")
+            checked += 1
+        if item.get("encrypted_probe"):
+            probe = (row.get("overrides") or {}).get("recovery_encrypted_probe")
+    if not probe or not checked:
+        raise RuntimeError("The synthetic restore manifest requires media and an encrypted probe")
+    # Only the encryption key and the synthetic probe reach an offline Python process. No
+    # application/worker or provider client starts, and no secret appears in process arguments.
+    answer = run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-i",
+            "--network",
+            "none",
+            "--memory",
+            "256m",
+            "--cpus",
+            "0.5",
+            "--entrypoint",
+            "python",
+            "repeater-app:latest",
+            "-c",
+            "import json,os,sys; d=json.load(sys.stdin); "
+            "os.environ['REPEATER_TOKEN_ENCRYPTION_KEYS']=d['keys']; "
+            "from repeater.crypto import decrypt_json; "
+            "print(json.dumps(decrypt_json(d['ciphertext'])=={'probe':d['expected']}))",
+        ],
+        input=json.dumps(
+            {
+                "keys": values["REPEATER_TOKEN_ENCRYPTION_KEYS"],
+                "ciphertext": probe,
+                "expected": manifest["probe"],
+            }
+        ).encode(),
+    )
+    if answer.strip() != b"true":
+        raise RuntimeError("Restored encryption probe could not be decrypted")
+    return {
+        "canary_items_verified": len(manifest["items"]),
+        "canary_files_sha256_verified": checked,
+        "encrypted_probe_verified": True,
+        "canary_workspace_paused": True,
+        "canary_plan_disabled": True,
+    }
 
 
 def main(argv=None):
@@ -59,6 +141,10 @@ def main(argv=None):
     parser.add_argument("--env-file", type=Path, default=Path(__file__).with_name(".env"))
     parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--max-media-gb", type=int, default=50)
+    parser.add_argument("--require-media", action="store_true", help="fail an empty-library drill")
+    parser.add_argument(
+        "--canary-manifest", type=Path, help="pre-backup evidence for synthetic records/files"
+    )
     args = parser.parse_args(argv)
     values = load_env(args.env_file)
     remote = values.get("RCLONE_REMOTE", "").rstrip("/")
@@ -225,10 +311,14 @@ def main(argv=None):
                 "workspaces": int(sql("SELECT count(*) FROM workspaces")),
                 "library_items": len(rows),
                 "offsite_media_files": total["count"],
-                **verify_media(media, rows),
+                **verify_media(media, rows, require_media=args.require_media),
                 "elapsed_seconds": round(time.monotonic() - started, 2),
                 "checked_at": int(time.time()),
             }
+            if args.canary_manifest:
+                receipt.update(
+                    verify_canary(sql, media, json.loads(args.canary_manifest.read_text()), values)
+                )
         finally:
             if container_started:
                 run(["docker", "rm", "-f", name])
