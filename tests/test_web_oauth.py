@@ -224,13 +224,32 @@ def test_callback_success_with_real_rules_and_pkce(web_owner, db):
     assert "Publishing is off for Magic Channel" in web_owner.get(f"/rules/{account.id}").text
 
 
-def test_new_tiktok_account_goes_to_rule_settings(web_owner, db):
+def test_new_tiktok_account_goes_to_read_view_without_rule_or_jobs(web_owner, db):
     fake = FakeProvider("tiktok", uses_pkce=False, accounts=[_tiktok_account()])
     with override("oauth", "tiktok", fake):
         _, state = _start(web_owner, "tiktok")
         resp = web_owner.get(f"/oauth/tiktok/callback?code=c&state={state}", follow_redirects=False)
     account = db.execute(select(ConnectedAccount)).scalar_one()
-    assert resp.headers["location"] == f"/rules/{account.id}"
+    assert resp.headers["location"] == f"/accounts/{account.id}/videos"
+    assert not list(db.scalars(select(RotationRule)))
+    assert not list(db.scalars(select(Job)))
+
+
+def test_tiktok_read_only_reconnect_stops_legacy_rule(web_owner, db, make_account):
+    from repeater.engine.rules import ensure_rule
+
+    existing = make_account("tiktok", external_id="open-1")
+    rule = ensure_rule(db, existing)
+    rule.enabled = True
+    db.commit()
+    fake = FakeProvider("tiktok", uses_pkce=False, accounts=[_tiktok_account()])
+    with override("oauth", "tiktok", fake):
+        _, state = _start(web_owner, "tiktok")
+        resp = web_owner.get(f"/oauth/tiktok/callback?code=c&state={state}", follow_redirects=False)
+    db.refresh(rule)
+    assert resp.headers["location"] == f"/accounts/{existing.id}/videos"
+    assert rule.enabled is False
+    assert not list(db.scalars(select(Job)))
 
 
 def test_callback_state_is_single_use(web_owner, db):

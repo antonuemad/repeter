@@ -195,13 +195,21 @@ def _save_accounts(
         return RedirectResponse(return_path or "/accounts", status_code=303)
     # New rules start OFF (engine.rules.ensure_rule): nothing is published before the user has
     # reviewed the account's settings and turned publishing on.
+    read_only_tiktok = purpose == "tiktok" and bool(accounts)
     needs_setup: list[ConnectedAccount] = []
     for account in accounts:
+        if read_only_tiktok:
+            # The current TikTok release is for connecting and reading only. A reconnect
+            # must also stop any legacy rule, without creating a rule or planning job.
+            old_rule = db.scalar(select(RotationRule).where(RotationRule.connected_account_id == account.id))
+            if old_rule is not None:
+                old_rule.enabled = False
+            continue
         rule = engine_rules.ensure_rule(db, account)
         is_new = (account.platform, account.external_id) not in existing
         if rule is not None and _needs_setup(rule, is_new):
             needs_setup.append(account)
-    if not return_path:
+    if not return_path and not read_only_tiktok:
         kinds.enqueue_plan_workspace(db, ctx.workspace.id)
     db.commit()
     names = ", ".join(a.display_name or a.external_id for a in accounts)
@@ -215,6 +223,8 @@ def _save_accounts(
     )
     if return_path:
         return RedirectResponse(return_path, status_code=303)
+    if read_only_tiktok:
+        return RedirectResponse(f"/accounts/{accounts[0].id}/videos", status_code=303)
     if not needs_setup:
         return RedirectResponse("/accounts", status_code=303)
     if purpose == "tiktok":

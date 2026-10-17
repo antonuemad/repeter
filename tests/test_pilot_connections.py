@@ -122,12 +122,13 @@ def test_drive_and_tiktok_connect_import_prepare_without_any_publication(
             },
         )
         params = _start(web_owner, "tiktok")
+        assert params["scope"] == ["user.info.basic,video.list"]
         destination = _finish(web_owner, "tiktok", params["state"][0])
         creator = db.scalar(select(ConnectedAccount).where(ConnectedAccount.platform == Platform.TIKTOK))
         assert creator and load_tokens(creator).access_token == "synthetic-tiktok-access"
-        assert destination == f"/rules/{creator.id}"
+        assert destination == f"/accounts/{creator.id}/videos"
         creator_rule = db.scalar(select(RotationRule).where(RotationRule.connected_account_id == creator.id))
-        assert creator_rule and not creator_rule.enabled
+        assert creator_rule is None
 
         response = post(
             web_owner,

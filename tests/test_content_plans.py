@@ -31,7 +31,7 @@ from repeater.platforms import override
 from repeater.platforms.base import RemoteVideo
 from repeater.sources import drive, importer
 from repeater.timeutil import utcnow
-from tests.test_web_oauth import FakeProvider, _meta_accounts
+from tests.test_web_oauth import FakeProvider, _meta_accounts, _tiktok_account
 from tests.test_web_support import post, set_lang
 
 pytest_plugins = ["tests.test_web_support"]
@@ -190,12 +190,14 @@ def test_browse_folder_pagination_escapes_names_without_import(
 
 
 @pytest.mark.parametrize("outcome", ["success", "cancel", "missing_code"])
-def test_oauth_returns_to_exact_plan_and_preserves_ownership(web_owner, db, outcome):
+@pytest.mark.parametrize("provider", ["meta", "tiktok"])
+def test_oauth_returns_to_exact_plan_and_preserves_ownership(web_owner, db, outcome, provider):
     p = create_plan(web_owner, db)
-    fake = FakeProvider("meta", False, _meta_accounts())
+    accounts = _meta_accounts() if provider == "meta" else [_tiktok_account()]
+    fake = FakeProvider(provider, False, accounts)
     path = f"/plans/{p.id}/edit"
-    with override("oauth", "meta", fake):
-        response = web_owner.get("/connect/meta", params={"return_to": path}, follow_redirects=False)
+    with override("oauth", provider, fake):
+        response = web_owner.get(f"/connect/{provider}", params={"return_to": path}, follow_redirects=False)
         state = parse_qs(urlparse(response.headers["location"]).query)["state"][0]
         assert db.get(OAuthState, state).return_path == path
         params = {"state": state}
@@ -203,7 +205,7 @@ def test_oauth_returns_to_exact_plan_and_preserves_ownership(web_owner, db, outc
             params["code"] = "fake"
         elif outcome == "cancel":
             params["error"] = "access_denied"
-        response = web_owner.get("/oauth/meta/callback", params=params, follow_redirects=False)
+        response = web_owner.get(f"/oauth/{provider}/callback", params=params, follow_redirects=False)
     assert response.headers["location"] == path
     assert db.scalar(select(func.count()).select_from(Job)) == 0
     assert all(a.profile_id is None for a in db.scalars(select(ConnectedAccount)))

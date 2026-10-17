@@ -277,3 +277,11 @@ plan preview or initial setup. Opening or refreshing the list does not import me
 publishing jobs, publish content or upload drafts. The existing global publishing lock remains
 `REPEATER_PUBLISHING_ENABLED=false`. Route acceptance uses mocked provider HTTP and synthetic
 accounts; the independent UI finish verdict is ship, with no material fixes required.
+
+## TikTok read-only external review (2026-10-17)
+
+The owner selected an initial Login Kit + user.info.basic/video.list submission. New TikTok
+authorizations request only these scopes regardless of publishing/audit settings, exchange code
+without creator_info, and return to the read view without a publishing rule or planning job. A
+reconnect stops any legacy rule. Content Posting API and its posting/draft scopes are deferred;
+read approval does not authorize publishing or imply Content Posting API audit completion.

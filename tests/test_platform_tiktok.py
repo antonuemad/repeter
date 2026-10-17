@@ -83,7 +83,7 @@ def ctx(
             refresh_token=refresh,
             expires_at=utcnow() + expires_in,
             refresh_expires_at=refresh_expires_at or utcnow() + timedelta(days=300),
-            scopes=list(tt.SCOPES),
+            scopes=list(tt.SCOPES + tt.PUBLISHING_SCOPES),
             extra={"open_id": "open-123"},
         ),
         extra=extra,
@@ -199,7 +199,11 @@ def test_module_objects_satisfy_protocols():
 # --------------------------------------------------------------------------- OAuth
 
 
-def test_authorize_url_has_documented_params():
+@pytest.mark.parametrize("publishing_enabled", [False, True])
+def test_authorize_url_has_only_read_scopes_regardless_of_global_lock(monkeypatch, publishing_enabled):
+    from repeater.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "publishing_enabled", publishing_enabled)
     url = tt.oauth.authorize_url(
         state="st-1",
         redirect_uri="https://rotator.test/oauth/tiktok/callback",
@@ -212,7 +216,7 @@ def test_authorize_url_has_documented_params():
     assert q == {
         "client_key": "tt-key",
         "response_type": "code",
-        "scope": "user.info.basic,video.list,video.publish,video.upload",
+        "scope": "user.info.basic,video.list",
         "redirect_uri": "https://rotator.test/oauth/tiktok/callback",
         "state": "st-1",
     }
@@ -243,7 +247,7 @@ TOKEN_RESPONSE = {
 }
 
 
-def test_exchange_code_returns_account_with_username(router):
+def test_exchange_code_reads_profile_without_creator_info_even_with_legacy_scopes(router):
     token = router.post(tt.TOKEN_URL).mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
     user = router.get(tt.USER_INFO_URL).mock(
         return_value=ok(
@@ -279,13 +283,13 @@ def test_exchange_code_returns_account_with_username(router):
     user_req = user.calls.last.request
     assert user_req.url.params["fields"] == "open_id,union_id,avatar_url,display_name"
     assert user_req.headers["authorization"] == "Bearer act.NEW-access"
-    assert creator.calls.last.request.headers["authorization"] == "Bearer act.NEW-access"
+    assert not creator.called
 
     assert acc.platform == Platform.TIKTOK
     assert acc.external_id == "open-123"
     assert acc.display_name == "Magic Lap"
     assert acc.avatar_url == "https://p16.tiktokcdn.com/a.jpg"
-    assert acc.extra == {"open_id": "open-123", "username": "magiclap"}
+    assert acc.extra == {"open_id": "open-123"}
     t = acc.tokens
     assert t.access_token == "act.NEW-access" and t.refresh_token == "rft.NEW-refresh"
     assert timedelta(hours=23, minutes=59) < t.expires_at - before <= timedelta(hours=24, seconds=5)
@@ -433,7 +437,7 @@ def test_refresh_keeps_old_refresh_token_when_not_returned(router):
     tokens = tt.oauth.refresh(account)
     assert tokens.refresh_token == REFRESH
     assert tokens.refresh_expires_at == account.tokens.refresh_expires_at
-    assert tokens.scopes == list(tt.SCOPES)
+    assert tokens.scopes == list(tt.SCOPES + tt.PUBLISHING_SCOPES)
 
 
 @pytest.mark.parametrize(

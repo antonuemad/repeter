@@ -75,7 +75,10 @@ INBOX_INIT_URL = f"{API_BASE}/v2/post/publish/inbox/video/init/"
 STATUS_URL = f"{API_BASE}/v2/post/publish/status/fetch/"
 VIDEO_LIST_URL = f"{API_BASE}/v2/video/list/"
 
-SCOPES = ("user.info.basic", "video.list", "video.publish", "video.upload")
+# External review currently covers identity and public metadata only. Keep posting
+# permissions out of every new authorization until a later, separately approved phase.
+SCOPES = ("user.info.basic", "video.list")
+PUBLISHING_SCOPES = ("video.publish", "video.upload")
 USER_FIELDS = "open_id,union_id,avatar_url,display_name"
 VIDEO_FIELDS = "id,create_time,cover_image_url,share_url,video_description,duration,height,width,title"
 
@@ -480,19 +483,6 @@ def _user_info(access_token: str) -> dict[str, Any]:
     return user if isinstance(user, dict) else {}
 
 
-def _username_if_available(tokens: OAuthTokens, open_id: str) -> str | None:
-    """`username` needs the user.info.profile scope, which Repeater does not request; the
-    creator_info endpoint (video.publish) returns it as creator_username instead."""
-    if "video.publish" not in tokens.scopes:
-        return None
-    ctx = AccountContext(account_id=0, platform=Platform.TIKTOK, external_id=open_id, tokens=tokens)
-    try:
-        return creator_info(ctx).username
-    except PlatformError as exc:
-        log.info("TikTok username lookup skipped after connect: %s", exc.code or type(exc).__name__)
-        return None
-
-
 def read_profile(account: AccountContext) -> dict[str, Any]:
     """Read the authorized identity without invoking any publishing endpoint."""
     user = _user_info(account.tokens.access_token)
@@ -543,14 +533,11 @@ class TikTokOAuth:
             raise PermanentError("TikTok did not return the account id (open_id).", code="missing_open_id")
         tokens.extra["open_id"] = open_id
         extra: dict[str, Any] = {"open_id": open_id}
-        username = _username_if_available(tokens, open_id)
-        if username:
-            extra["username"] = username
         return [
             ConnectedAccountData(
                 platform=Platform.TIKTOK,
                 external_id=open_id,
-                display_name=str(user.get("display_name") or username or "TikTok account"),
+                display_name=str(user.get("display_name") or "TikTok account"),
                 tokens=tokens,
                 avatar_url=user.get("avatar_url") or None,
                 extra=extra,

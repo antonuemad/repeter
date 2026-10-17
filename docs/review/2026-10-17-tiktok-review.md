@@ -1,100 +1,93 @@
-# TikTok external review preparation — 17 October 2026
+# TikTok read-only external review request — 17 October 2026
 
-Status: **prepared, not submitted or approved**. App `7697431346871896082` (Repeater),
-Individual ownership. Saved Sandbox `7697391841217841159` (Repeater pilot locked).
-Production settings and the partial walkthrough attachment were saved as a draft and verified
-after reopening the portal. No Submit for review action was taken.
-Production and Sandbox credentials are separate and excluded from Git.
+App `7697431346871896082` (Repeater), Individual ownership. Sandbox
+`7697391841217841159` (Repeater pilot locked). The owner explicitly authorized submitting
+**Login Kit with `user.info.basic` and `video.list` only**. Content Posting API,
+`video.publish` and `video.upload` are deferred and excluded from the production request.
 
-## Current evidence and its limits
+Submission and approval status must be read from the portal and the dated execution receipt.
+A saved draft is not evidence of submission; submission is not approval. Production credentials
+remain separate from the Sandbox credentials currently used by the running application.
 
-| Requested permission / product | Evidence | Remaining gap |
+## Scope and application behavior
+
+| Permission | Implemented use | Evidence boundary |
 | --- | --- | --- |
-| Login Kit / `user.info.basic` | Owner completed Sandbox consent; live identity read succeeds. Accounts UI identifies the connected account. | A walkthrough assembled from genuine UI captures is an edited recording, not a continuous consent recording. Password/OTP steps are excluded. |
-| `video.list` | Live public metadata list succeeds. Current account returns zero public videos; UI explicitly shows that result. | No populated real public list is claimed. Original files cannot be downloaded through this API. |
-| `video.publish` / Direct Post | Implementation and mocked tests exist; global publication gate is closed. | No real post, private post, container creation, status polling or end-to-end publishing evidence is produced. |
-| `video.upload` / upload-to-inbox | Implementation and mocked tests exist; global publication gate is closed. | No draft upload or completion evidence is produced. |
-| Rotation | Separate, clearly labelled synthetic originals in a personal library; account selection, local schedule, repeat interval and preview. | Preview is not a posted or queued publication. Plan remains disabled and workspace paused. |
+| `user.info.basic` | Show the authorized creator identity and verify its open_id. | The owner completes any login/consent; credentials and OTPs are excluded. |
+| `video.list` | Display up to 20 latest public video metadata entries and safe viewing links. | The real Sandbox account currently returns zero public videos. No populated real list or original download is claimed. |
 
-The walkthrough is partial evidence for connection, reading and scheduling preview only.
-Do not submit it as proof that all four scopes have been demonstrated. Do not attest that
-publication or draft upload succeeded. Do not imply that this Sandbox enables outside customers.
+Every new TikTok authorization requests exactly these two scopes, independently of the global
+publishing flag or audit flag. Code exchange reads the basic profile without creator_info even
+if a legacy token response includes older publishing scopes. The callback opens the account's
+read view, creates no publishing rule or planning job, and stops an existing legacy rule when
+reconnecting. A validated setup-wizard return path is preserved.
 
-## Prepared walkthrough
+The separate person's library contains clearly labelled synthetic originals uploaded only to
+Repeater. Its rotation preview is a calculation, not a publication queue. All plans/rules stay
+disabled, workspaces paused and the global publication gate closed. TikTok video.list supplies
+metadata, not the original file; owned originals come from Drive or manual library upload.
 
-`repeater-tiktok-read-and-rotation-walkthrough.mp4`: 119 seconds, H.264, 1920 × 1200,
-1,528,411 bytes. It is an edited sequence of genuine UI captures with English captions;
-the earlier owner consent capture is explicitly labelled. SHA256:
-`44ffa5a55d987a1a1d3615f3c70636f9f3c33cbc73b1f6d998a011c5fbec5851`.
-The portal draft retains this attachment and an explicit explanation of its evidence gaps.
+## Submission fields
 
-## Submission copy (truthful draft)
-
-**Name:** Repeater. **Category:** Productivity. **Platform:** Web.
-
-**Description:** Organize your own videos, connect your accounts, and preview scheduled content rotation.
-
-**Website:** https://repeater.magic-lap.com/about  
-**Privacy:** https://repeater.magic-lap.com/privacy  
-**Terms:** https://repeater.magic-lap.com/terms  
-**Redirect:** https://repeater.magic-lap.com/oauth/tiktok/callback
+- Name: Repeater. Category: Productivity. Platform: Web.
+- Website: https://repeater.magic-lap.com/about
+- Privacy: https://repeater.magic-lap.com/privacy
+- Terms: https://repeater.magic-lap.com/terms
+- Redirect: https://repeater.magic-lap.com/oauth/tiktok/callback
+- Products: Login Kit. Display API reading is selected through video.list in this portal.
+- Requested scopes: user.info.basic, video.list. No Content Posting API or posting scopes.
 
 **Review explanation:**
 
-Repeater is a web service for independent creators to organize their own original media in a
-personal library, connect their own accounts, select destinations, review platform settings and
-preview a rotation schedule. Login Kit and user.info.basic identify the authorized creator.
-video.list reads public video metadata and viewing links, not downloadable originals. Original
-media is supplied by the creator through an authorized folder or manual upload. The attached
-walkthrough shows a saved Sandbox connection, successful live reads and a preview using clearly
-labelled synthetic originals. The connected account currently returns no public videos. Publishing
-and draft uploads remain disabled during this invited pilot. video.publish and video.upload have
-mocked tests only and are not demonstrated end to end. This package is a preparation draft and
-must not be represented as a completed four-scope submission.
+This submission requests Login Kit with user.info.basic and video.list ONLY. Each creator signs
+into Repeater, chooses Connect TikTok and authorizes their own account through TikTok.
+user.info.basic displays the connected creator identity; video.list reads public metadata and
+viewing links. TikTok does not provide downloadable originals through this API. The current
+Sandbox account returns zero public videos, shown honestly. Separate synthetic originals show
+a personal library and rotation preview inside Repeater, which creates no posts. Content Posting
+API, video.publish and video.upload are excluded and deferred. Global publishing is disabled;
+no real post or draft upload is performed. The attached walkthrough is an edited sequence of
+genuine Sandbox UI captures, with authentication completed by the owner separately.
 
-## Reviewer walkthrough
+## Reviewer walkthrough and video
 
-1. Open the public About page and inspect Terms and Privacy links.
-2. Use a dedicated invited reviewer account supplied securely when the submission is ready.
-   Do not embed working credentials or invite/reset tokens in Git, video or review notes.
-3. In Accounts choose TikTok. The account owner completes login, scope choice and consent.
-   Passwords, OTPs and legal confirmations are performed by the owner.
-4. Return to Accounts; inspect connected identity and choose View TikTok videos.
-5. Refresh the list. A successful empty response must remain empty; an API failure must show
-   recovery guidance instead. Private videos and drafts are not included by video.list.
-6. Open the demonstration person's setup: originals, destination, schedule, repeat interval,
-   preview. Library clips are explicitly synthetic and were uploaded only to Repeater.
-7. Confirm the global publication lock. Do not enable the plan, resume the workspace, publish,
-   upload a draft, or try even a private test publication.
+1. Open the public About page and its Privacy/Terms links.
+2. Open Accounts and choose Connect TikTok. Only identity and public video reading are requested.
+   The owner performs any login, OTP or consent step. Never expose credentials in the recording.
+3. Inspect the callback to the account-specific read view and refresh the list. Show the actual
+   empty result as empty; connection errors have separate recovery guidance.
+4. Inspect the separate synthetic library, selected destination, daily schedule, seven-day repeat
+   interval and draft preview. Originals are stored in Repeater, not imported from TikTok.
+5. Finish on the stopped plan and global publication lock. Do not enable any plan, resume the
+   workspace, create a media container, publish or upload a draft, including private content.
 
-## What must be resolved before external submission
+Use the read-only revision of the walkthrough rather than the earlier four-scope preparation
+video. Its filename, source captures, transcript, exact explanation, checksums and portal receipt
+are retained outside Git in the dated `tiktok-readonly-20261017` deployment artifacts. Disclose
+that the walkthrough is edited; do not present synthetic metadata as a genuine provider response.
+A reviewer can request further continuous recording or a populated public account demonstration.
 
-- TikTok requires a fully developed external-facing product; development/testing applications
-  are not approved under the current review guidelines. Resolve this product-readiness gate.
-- Every requested product and scope needs a genuine demonstration, using Sandbox for a first
-  submission. The present no-publication instruction prevents evidence for publishing scopes.
-  Only the owner can explicitly change that restriction. Do not lift it merely for review.
-- An initial read-only Login Kit + video.list submission could avoid the publishing evidence
-  gap if the portal/product configuration supports it. It would not authorize publishing.
-  Do not silently remove products/scopes from the app or claim that route has been approved.
-- Preserve creator choice for privacy, interactions, commercial disclosure and music consent.
-  No unattended, unlimited, cross-platform download or approval promises are made.
-- Final review credentials, refreshed continuous consent recording if requested, attachments
-  and any portal attestations must be completed before clicking Submit.
+## Approval boundaries and later work
 
-## Official references checked on 17 October 2026
+TikTok requires a developed external-facing product and evidence for all requested scopes.
+The present request does not claim posting capability or approval. Existing Sandbox grants may
+still list older permissions; this change does not silently revoke the owner's grant. New OAuth
+requests are limited to the two read scopes and the lock prevents publication everywhere.
 
-- [App review guidelines](https://developers.tiktok.com/doc/app-review-guidelines): complete
-  product, Sandbox first demo, every product/scope visible, up to five videos, 50 MB per video.
-- [Content sharing guidelines](https://developers.tiktok.com/doc/content-sharing-guidelines):
-  authentic original content, creator controls, broad audience, no internal-only uploader.
-- [Content Posting API setup](https://developers.tiktok.com/doc/content-posting-api-get-started):
-  application approval and user consent are separate requirements.
+A later Content Posting API request requires a separate owner decision, creator-controlled
+privacy/interactions/commercial disclosure, actual evidence accepted by TikTok and the necessary
+approval. Do not enable `REPEATER_TIKTOK_AUDITED` when only Login Kit/video.list are approved.
+Do not lift the owner's publication restriction to obtain review evidence.
+
+## References checked on 17 October 2026
+
+- [App review guidelines](https://developers.tiktok.com/doc/app-review-guidelines)
+- [Display API setup](https://developers.tiktok.com/doc/display-api-get-started/)
+- [Login Kit for Web](https://developers.tiktok.com/doc/login-kit-web)
 
 ## Operational verification
 
-Keep `REPEATER_PUBLISHING_ENABLED=false` and `REPEATER_TIKTOK_AUDITED=false` in web and worker.
-No enabled rotation rule, enabled person plan, resumed workspace or confirmed publication is
-permitted for this demonstration. Read-only checks allow identity/video-list endpoints only;
-publication tests use mocked HTTP and synthetic accounts. Final video, source captures, subtitle
-track, checksums and runtime receipts are stored outside Git under the dated deployment artifacts.
+Both web and worker retain `REPEATER_PUBLISHING_ENABLED=false` and
+`REPEATER_TIKTOK_AUDITED=false`. Tests use synthetic accounts and mocked HTTP. Runtime verification
+checks exact source hashes, no enabled plans/rules, paused workspaces, zero scheduled/confirmed
+publications and live identity/list reads through a strict read-endpoint allowlist.
