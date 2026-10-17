@@ -50,12 +50,13 @@ def _finish(client, provider, state):
     return response.headers["location"]
 
 
+@pytest.mark.parametrize("tiktok_audited", [False, True])
 def test_drive_and_tiktok_connect_import_prepare_without_any_publication(
-    web_owner, db, workspace, make_account, sample_video, monkeypatch
+    web_owner, db, workspace, make_account, sample_video, monkeypatch, tiktok_audited
 ):
     settings = get_settings()
     monkeypatch.setattr(settings, "publishing_enabled", False)
-    monkeypatch.setattr(settings, "tiktok_audited", False)
+    monkeypatch.setattr(settings, "tiktok_audited", tiktok_audited)
     monkeypatch.setattr(settings, "encode_preset", "ultrafast")
     set_lang(web_owner, "en")
     youtube = make_account("youtube")
@@ -112,7 +113,9 @@ def test_drive_and_tiktok_connect_import_prepare_without_any_publication(
                 "data": {
                     "creator_username": "pilot_creator",
                     "creator_nickname": "Pilot creator",
-                    "privacy_level_options": ["SELF_ONLY"],
+                    "privacy_level_options": ["PUBLIC_TO_EVERYONE", "SELF_ONLY"]
+                    if tiktok_audited
+                    else ["SELF_ONLY"],
                     "max_video_post_duration_sec": 300,
                 },
                 "error": {"code": "ok"},
