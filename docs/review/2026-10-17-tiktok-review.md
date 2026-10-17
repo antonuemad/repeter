@@ -2,7 +2,8 @@
 
 Status: **prepared, not submitted or approved**. App `7697431346871896082` (Repeater),
 Individual ownership. Saved Sandbox `7697391841217841159` (Repeater pilot locked).
-Production settings remain a draft; a demo attachment is required by the portal before saving.
+Production settings and the partial walkthrough attachment were saved as a draft and verified
+after reopening the portal. No Submit for review action was taken.
 Production and Sandbox credentials are separate and excluded from Git.
 
 ## Current evidence and its limits
@@ -18,6 +19,14 @@ Production and Sandbox credentials are separate and excluded from Git.
 The walkthrough is partial evidence for connection, reading and scheduling preview only.
 Do not submit it as proof that all four scopes have been demonstrated. Do not attest that
 publication or draft upload succeeded. Do not imply that this Sandbox enables outside customers.
+
+## Prepared walkthrough
+
+`repeater-tiktok-read-and-rotation-walkthrough.mp4`: 119 seconds, H.264, 1920 × 1200,
+1,528,411 bytes. It is an edited sequence of genuine UI captures with English captions;
+the earlier owner consent capture is explicitly labelled. SHA256:
+`44ffa5a55d987a1a1d3615f3c70636f9f3c33cbc73b1f6d998a011c5fbec5851`.
+The portal draft retains this attachment and an explicit explanation of its evidence gaps.
 
 ## Submission copy (truthful draft)
 
