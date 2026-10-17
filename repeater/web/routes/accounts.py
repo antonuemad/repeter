@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
@@ -11,9 +12,12 @@ from sqlalchemy.orm import Session
 
 from repeater import accounts as account_service
 from repeater.config import get_settings
+from repeater.crypto import CryptoError
 from repeater.jobs import kinds
-from repeater.models import PROVIDER_FOR_PLATFORM, AccountStatus, ConnectedAccount, Platform
-from repeater.platforms import provider_name_for_account
+from repeater.models import PROVIDER_FOR_PLATFORM, AccountStatus, ConnectedAccount, ContentPlan, Platform
+from repeater.platforms import provider_name_for_account, tiktok
+from repeater.platforms.base import AuthError, PlatformError
+from repeater.timeutil import utcnow
 from repeater.web.auth import CurrentWorkspace, WorkspaceContext, require_owner
 from repeater.web.deps import DB, Form
 from repeater.web.routes.oauth import PLATFORM_PURPOSES, PURPOSE_PROVIDERS
@@ -72,6 +76,72 @@ def _get_account(db: Session, ctx: WorkspaceContext, account_id: int) -> Connect
     if account is None or account.workspace_id != ctx.workspace.id:
         raise HTTPException(status_code=404)
     return account
+
+
+def _tiktok_link(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        parsed = urlsplit(value)
+        host = parsed.hostname or ""
+        valid = parsed.scheme == "https" and (host == "tiktok.com" or host.endswith(".tiktok.com"))
+        return value if valid and not parsed.username and not parsed.password else None
+    except ValueError:
+        return None
+
+
+@router.get("/accounts/{account_id}/videos")
+def tiktok_videos(request: Request, db: DB, ctx: CurrentWorkspace, account_id: int) -> Response:
+    account = _get_account(db, ctx, account_id)
+    if account.platform != Platform.TIKTOK:
+        raise HTTPException(404)
+    context: dict[str, Any] = {
+        "nav": "accounts",
+        "account": account,
+        "videos": [],
+        "checked_at": None,
+        "error": None,
+        "reconnect": False,
+        "can_reconnect": ctx.is_owner,
+        "profile_name": account.display_name,
+        "plan": db.scalar(
+            select(ContentPlan).where(
+                ContentPlan.workspace_id == ctx.workspace.id,
+                ContentPlan.profile_id == account.profile_id,
+            )
+        )
+        if account.profile_id
+        else None,
+    }
+    if not get_settings().platform_configured("tiktok"):
+        context["error"] = "tiktok_read.not_configured"
+    elif account.status == AccountStatus.DISABLED or not account.token_enc:
+        context.update(error="tiktok_read.reconnect", reconnect=True)
+    elif not {"user.info.basic", "video.list"}.issubset(set(account.scopes.split())):
+        context.update(error="tiktok_read.scopes", reconnect=True)
+    else:
+        try:
+            authorized = account_service.fresh_context(db, account)
+            db.commit()  # Persist a rotated refresh token before making the read requests.
+            profile = tiktok.read_profile(authorized)
+            videos = tiktok.lister.list_recent(authorized, limit=20)
+            context.update(
+                profile_name=profile.get("display_name") or account.display_name,
+                videos=[{"item": video, "link": _tiktok_link(video.permalink)} for video in videos],
+                checked_at=utcnow(),
+            )
+        except account_service.AccountUnavailable:
+            db.commit()
+            context.update(error="tiktok_read.reconnect", reconnect=True)
+        except (AuthError, CryptoError):
+            db.rollback()
+            context.update(error="tiktok_read.reconnect", reconnect=True)
+        except PlatformError:
+            db.rollback()
+            context["error"] = "tiktok_read.unavailable"
+    response = render(request, "account_tiktok_videos.html", context)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @router.get("/accounts/{account_id}/disconnect")

@@ -39,6 +39,9 @@
         </div>
       </div>
       <div class="actions">
+        {% if a.platform == 'tiktok' and a.status != 'disabled' %}
+        <a class="button small secondary" href="/accounts/{{ a.id }}/videos">{{ t('tiktok_read.open') }}</a>
+        {% endif %}
         {% if configured[a.id] and a.status != 'active' %}
         <a class="button small" href="/connect/{{ purposes[a.id] }}">{{ t('accounts.reconnect') }}</a>
         {% endif %}

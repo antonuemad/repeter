@@ -2,7 +2,7 @@
 version: 1
 slug: "repeater-web-templates-base-html"
 primary_target: "repeater/web/templates/base.html"
-related_targets: ["repeater/web/templates/overview.html","repeater/web/templates/login.html","repeater/web/templates/library.html","repeater/web/templates/schedule.html","repeater/web/templates/accounts.html","repeater/web/templates/sources.html","repeater/web/templates/rules.html","repeater/web/templates/activity.html","repeater/web/templates/settings_workspace.html","repeater/web/templates/settings_members.html","repeater/web/templates/settings_nav.html","repeater/web/templates/admin_customers.html","repeater/web/templates/admin_recovery.html","repeater/web/templates/access_open.html","repeater/web/templates/access_password.html","repeater/web/templates/access_forgot.html","repeater/web/templates/access_issued.html","repeater/web/static/app.css","repeater/web/static/app.js","repeater/web/templates/plans/index.html","repeater/web/templates/plans/start.html","repeater/web/templates/plans/wizard.html","repeater/web/templates/calendar.html","repeater/web/templates/calendar_edit.html","repeater/web/templates/billing.html","repeater/web/templates/admin_billing.html","repeater/web/templates/operations.html"]
+related_targets: ["repeater/web/templates/overview.html","repeater/web/templates/login.html","repeater/web/templates/library.html","repeater/web/templates/schedule.html","repeater/web/templates/accounts.html","repeater/web/templates/account_tiktok_videos.html","repeater/web/templates/sources.html","repeater/web/templates/rules.html","repeater/web/templates/activity.html","repeater/web/templates/settings_workspace.html","repeater/web/templates/settings_members.html","repeater/web/templates/settings_nav.html","repeater/web/templates/admin_customers.html","repeater/web/templates/admin_recovery.html","repeater/web/templates/access_open.html","repeater/web/templates/access_password.html","repeater/web/templates/access_forgot.html","repeater/web/templates/access_issued.html","repeater/web/static/app.css","repeater/web/static/app.js","repeater/web/templates/plans/index.html","repeater/web/templates/plans/start.html","repeater/web/templates/plans/wizard.html","repeater/web/templates/calendar.html","repeater/web/templates/calendar_edit.html","repeater/web/templates/billing.html","repeater/web/templates/admin_billing.html","repeater/web/templates/operations.html"]
 ---
 
 # Repeater application shell and operational routes
@@ -54,3 +54,26 @@ Native forms work without JavaScript; the page filter remains a progressive enha
 Local Chrome QA covered a synthetic person, selected page, manual text and seven-day repeat preview,
 Arabic/English, light/dark, 390/768/1440 widths and no document overflow. OAuth/folder branches and
 errors were exercised by mocked HTTP acceptance tests. No real content was imported or published.
+
+2026-10-17 TikTok reading: `GET /accounts/{account_id}/videos` extends Accounts with the incumbent
+Magic Lap heading, refresh action, task card and flat account rows. Non-disabled TikTok accounts
+expose the entry link. Verify the connected identity before listing up to 20 latest public videos;
+show titles, local dates, duration and validated HTTPS TikTok links. Account and video names resolve
+their own text direction. Preserve English/Arabic parity, native links and the shared responsive
+shell. A successful check carries its timestamp; a successful empty list has its own explanation.
+Permission/authentication errors offer owner reconnection or an editor's owner-help message, while
+temporary provider failure offers refresh recovery. The authenticated response uses `no-store`.
+
+Keep the originals explanation beside the account result: this view reads metadata and supplies no
+media download. Manual uploads and Drive remain the paths for owned original files. A separate
+secondary action below the result opens the person's plan preview, or setup when no plan exists.
+Reading/refreshing does not create imports, publishing jobs or drafts, and this route has no
+publication or draft-upload controls. Production publishing remains explicitly locked false.
+
+TikTok read-view finish evidence (2026-10-17): the independent verdict is ship, with no material
+fixes required. Final desktop English and mobile Arabic captures are
+`/Users/mac/dev/repeter-deploy/tiktok-review-20261017/read-desktop-en-final.png` and
+`/Users/mac/dev/repeter-deploy/tiktok-review-20261017/read-mobile-ar-final.png`. Provider route
+acceptance uses mocked HTTP and synthetic accounts. The UI verdict does not establish live
+publication acceptance. This surface reuses the existing visual system; DESIGN.md and its sidecar
+need no new tokens or reusable component guidance.

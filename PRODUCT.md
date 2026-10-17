@@ -259,3 +259,21 @@ workflow for its actual latest result; an on-host page cannot establish that ext
 monitoring or its separately configured email alerts succeeded. This implementation has
 synthetic and mocked verification; live mail delivery and Linux CI remain separate checks.
 The final independent UI verdict is ship, with all four material findings resolved.
+
+## TikTok account reading (2026-10-17)
+
+The Accounts page now links non-disabled TikTok connections to an account-specific public-video
+view. This updates the earlier deferred TikTok notes for account verification and public listing
+only. The authenticated route requires `user.info.basic` and `video.list`, verifies that the
+returned TikTok identity matches the connected account, and shows up to 20 latest public videos
+with their title, date, duration and available TikTok link. Workspace owners and editors can read;
+reconnection is an owner action. A successful empty result is distinct from missing permissions,
+an unverified connection or a temporary provider failure. English and Arabic are supported, and
+the response is marked `no-store`.
+
+TikTok supplies metadata here, not downloadable original files. The view explains that owned
+originals enter the library through manual upload or Drive, then links separately to the person's
+plan preview or initial setup. Opening or refreshing the list does not import media, create
+publishing jobs, publish content or upload drafts. The existing global publishing lock remains
+`REPEATER_PUBLISHING_ENABLED=false`. Route acceptance uses mocked provider HTTP and synthetic
+accounts; the independent UI finish verdict is ship, with no material fixes required.

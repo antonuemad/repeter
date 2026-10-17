@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('tiktok_read.title') }}{% endblock %}
+{% block content %}
+<!-- THESIS: An account-specific read view, with no import or publication action.
+OWN-WORLD: Existing Magic Lap type, blue controls and restrained surfaces.
+STORY: Verify the identity, inspect public video metadata, then prepare a separate rotation.
+FIRST VIEWPORT: Account heading and refresh above an explicit result or recovery state.
+FORM: Narrow extension of Accounts; no new visual world or concept seed.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md -->
+<a href="/accounts">{{ t('tiktok_read.back') }}</a>
+<div class="page-heading"><h1>{{ t('tiktok_read.title') }}</h1><a class="button secondary" href="/accounts/{{ account.id }}/videos">{{ t('tiktok_read.refresh') }}</a></div>
+<p class="muted plan-measure">{{ t('tiktok_read.intro') }}</p>
+<section class="card">
+  <h2 dir="auto">{{ profile_name }}</h2>
+  <p class="plan-measure">{{ t('tiktok_read.originals') }}</p>
+  {% if error %}
+  <p role="status">{{ t(error) }}</p>
+  {% if reconnect and can_reconnect %}<a class="button" href="/connect/tiktok">{{ t('accounts.reconnect') }}</a>{% elif reconnect %}<p class="muted">{{ t('tiktok_read.owner') }}</p>{% endif %}
+  {% else %}
+  <p class="muted">{{ t('tiktok_read.checked', at=fmt_dt(checked_at, zone)) }}</p>
+  {% if videos %}
+  <p>{{ t('tiktok_read.count', count=videos|length) }}</p>
+  <ol class="account-list">
+  {% for row in videos %}{% set video = row.item %}
+    <li class="account"><div class="account-body"><strong dir="auto">{{ video.title or video.caption or t('tiktok_read.untitled') }}</strong><p class="small muted">{{ fmt_dt(video.created_at, zone, 'date') }} · {{ fmt_duration(video.duration_s) }}</p></div>{% if row.link %}<a class="button small secondary" href="{{ row.link }}" target="_blank" rel="noopener noreferrer">{{ t('tiktok_read.watch') }}</a>{% endif %}</li>
+  {% endfor %}
+  </ol>
+  {% else %}
+  <div class="empty-state">{{ m.icon('library', 32) }}<h3>{{ t('tiktok_read.empty') }}</h3><p>{{ t('tiktok_read.empty_help') }}</p></div>
+  {% endif %}
+  {% endif %}
+</section>
+<div class="actions"><a class="button secondary" href="{{ '/plans/' ~ plan.id if plan else '/setup' }}">{{ t('plan.preview') if plan else t('tiktok_read.setup') }}</a></div>
+{% endblock %}

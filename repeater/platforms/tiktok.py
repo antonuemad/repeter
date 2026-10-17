@@ -493,6 +493,16 @@ def _username_if_available(tokens: OAuthTokens, open_id: str) -> str | None:
         return None
 
 
+def read_profile(account: AccountContext) -> dict[str, Any]:
+    """Read the authorized identity without invoking any publishing endpoint."""
+    user = _user_info(account.tokens.access_token)
+    if user.get("open_id") != account.external_id:
+        raise AuthError(
+            "TikTok returned a different account; reconnect this account.", code="identity_mismatch"
+        )
+    return user
+
+
 class TikTokOAuth:
     name = "tiktok"
     # Login Kit for Web uses a server-side code exchange; code_verifier is documented as
