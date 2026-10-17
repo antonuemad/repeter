@@ -150,12 +150,12 @@ def test_foreign_or_missing_person_cannot_create_rich_content(web_owner, db):
     db.add(person)
     db.commit()
     for value in (person.id, "", "invalid", "9999999999"):
-        assert upload(web_owner, value, raster()).headers["location"] == "/library"
+        assert upload(web_owner, value, raster()).headers["location"] == "/library?profile_id=0"
         assert (
             post(
                 web_owner, "/library/text", {"profile_id": str(value), "title": "x", "caption": "private"}
             ).headers["location"]
-            == "/library"
+            == "/library?profile_id=0"
         )
     assert db.scalar(select(func.count()).select_from(Video)) == 0
     assert list(storage.uploads_dir().glob("*.part")) == []

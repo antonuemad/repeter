@@ -91,8 +91,8 @@ COPY = {
     "plan.slot_filled": ("{n}/{total} pages with content", "{n}/{total} صفحة بمحتوى"),
     "nav.plans": ("People & plans", "الأشخاص والخطط"),
     "plan.intro": (
-        "A person, their content library and the pages they want to keep active.",
-        "شخص، ومكتبة محتواه، والصفحات اللي عايز يفضل نشط عليها.",
+        "Keep each person's videos, images and text posts with their pages and schedule.",
+        "اجمع محتوى كل شخص من فيديوهات وصور وبوستات نصية مع صفحاته وجدوله.",
     ),
     "plan.new": ("Add a person or brand", "إضافة شخص أو علامة تجارية"),
     "plan.name": ("Person or brand name", "اسم الشخص أو العلامة التجارية"),
