@@ -501,6 +501,8 @@ class Video(TimestampMixin, Base):
     encoded_size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     thumbnail_path: Mapped[str | None] = mapped_column(Text)  # relative to media_root
     sha256: Mapped[str | None] = mapped_column(String(64))
+    # Images use sha256 for canonical pixel deduplication; raw-file recovery uses this digest.
+    original_sha256: Mapped[str | None] = mapped_column(String(64))
     # Perceptual fingerprint: space-separated hex pHash of sampled frames.
     phash: Mapped[str | None] = mapped_column(Text)
 

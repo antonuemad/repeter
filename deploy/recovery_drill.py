@@ -40,7 +40,10 @@ def verify_media(root, rows, *, require_media=False):
             with path.open("rb") as stream:
                 for block in iter(lambda: stream.read(1024 * 1024), b""):
                     digest.update(block)
-            if key == "original_path" and row.get("sha256") and digest.hexdigest() != row["sha256"]:
+            expected_hash = row.get("original_sha256") or (
+                row.get("sha256") if row.get("media_kind") != "image" else None
+            )
+            if key == "original_path" and expected_hash and digest.hexdigest() != expected_hash:
                 raise RuntimeError("Restored original checksum does not match the database")
             expected = (
                 row.get("size_bytes" if key == "original_path" else "encoded_size_bytes")
@@ -298,7 +301,8 @@ def main(argv=None):
             rows = [
                 json.loads(line)
                 for line in sql(
-                    "SELECT row_to_json(v) FROM (SELECT original_path,encoded_path,thumbnail_path,sha256,size_bytes,encoded_size_bytes FROM videos) v"
+                    "SELECT row_to_json(item) FROM (SELECT original_path,encoded_path,thumbnail_path,sha256,media_kind,"
+                    "to_jsonb(v)->>'original_sha256' AS original_sha256,size_bytes,encoded_size_bytes FROM videos v) item"
                 ).splitlines()
             ]
             receipt = {

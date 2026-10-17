@@ -72,6 +72,54 @@ def test_empty_database_is_not_a_complete_media_recovery(tmp_path):
         drill.verify_media(tmp_path, [{"original_path": None}], require_media=True)
 
 
+def test_image_recovery_uses_raw_checksum_without_changing_visual_deduplication(tmp_path):
+    from PIL import Image
+
+    from repeater.media import images, storage
+
+    drill = load_script("recovery_drill")
+    folder = storage.ensure_video_dir(999, 999)
+    original = folder / "original.png"
+    Image.new("RGB", (120, 160), "blue").save(original)
+    item = Video(id=999, workspace_id=999, profile_id=999, media_kind="image")
+    images.prepare(item, original)
+    assert item.original_sha256 == hashlib.sha256(original.read_bytes()).hexdigest()
+    assert item.sha256 != item.original_sha256
+    row = {
+        key: getattr(item, key)
+        for key in (
+            "media_kind",
+            "sha256",
+            "original_sha256",
+            "size_bytes",
+            "encoded_path",
+            "encoded_size_bytes",
+            "thumbnail_path",
+        )
+    }
+    row["original_path"] = storage.rel_path(original)
+    assert (
+        drill.verify_media(storage.media_root(), [row], require_media=True)["referenced_files_verified"] == 3
+    )
+    data = bytearray(original.read_bytes())
+    data[-1] ^= 1
+    original.write_bytes(data)
+    with pytest.raises(RuntimeError, match="checksum"):
+        drill.verify_media(storage.media_root(), [row])
+
+
+def test_legacy_image_visual_hash_is_not_mistaken_for_a_file_hash(tmp_path):
+    original = tmp_path / "image.png"
+    original.write_bytes(b"synthetic image")
+    row = {
+        "media_kind": "image",
+        "original_path": "image.png",
+        "sha256": "pixel-hash",
+        "size_bytes": original.stat().st_size,
+    }
+    assert load_script("recovery_drill").verify_media(tmp_path, [row])["referenced_files_verified"] == 1
+
+
 def test_mail_drill_reads_only_the_expected_message_without_marking_it_read(monkeypatch):
     from email.message import EmailMessage
     from types import SimpleNamespace

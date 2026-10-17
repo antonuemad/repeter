@@ -56,6 +56,17 @@ def test_access_migration_roundtrip_preserves_existing_accounts():
                         "INSERT INTO videos (id,workspace_id,title,caption,status,overrides) VALUES (1,1,'Existing video','','ready','{}') ON CONFLICT DO NOTHING"
                     )
                 )
+            command.upgrade(cfg, "0008")
+            with engine.begin() as conn:
+                conn.execute(text("UPDATE videos SET sha256=:digest WHERE id=1"), {"digest": "a" * 64})
+                conn.execute(
+                    text(
+                        "INSERT INTO videos (id,workspace_id,profile_id,title,caption,status,overrides,media_kind,content_format,sha256) "
+                        "VALUES (3,1,1,'Existing image','','ready','{}','image','post',:digest) "
+                        "ON CONFLICT (id) DO UPDATE SET profile_id=1,media_kind='image',content_format='post',sha256=:digest"
+                    ),
+                    {"digest": "b" * 64},
+                )
             command.upgrade(cfg, "head")
             with engine.connect() as conn:
                 assert conn.execute(
@@ -74,6 +85,13 @@ def test_access_migration_roundtrip_preserves_existing_accounts():
                     text("SELECT media_kind,content_format,status FROM videos WHERE id=1")
                 ).one() == ("video", "reel", "ready")
                 assert compare_metadata(MigrationContext.configure(conn), Base.metadata) == []
+                assert (
+                    conn.execute(text("SELECT original_sha256 FROM videos WHERE id=1")).scalar_one()
+                    == "a" * 64
+                )
+                assert (
+                    conn.execute(text("SELECT original_sha256 FROM videos WHERE id=3")).scalar_one() is None
+                )
             with engine.begin() as conn:
                 conn.execute(
                     text(

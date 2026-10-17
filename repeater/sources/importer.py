@@ -717,6 +717,7 @@ def import_video(session: Session, video_id: int, payload: dict[str, Any] | None
     video.original_path = storage.rel_path(path)
     video.size_bytes = path.stat().st_size
     video.sha256 = None  # fingerprints of an earlier original (retry) do not describe this file
+    video.original_sha256 = None
     video.phash = None
     if still_importing:
         video.status = VideoStatus.PROCESSING
@@ -893,6 +894,7 @@ def _process(session: Session, video: Video, original: Path, payload: dict[str, 
             session.rollback()  # archived (or deleted) while it was being fingerprinted
             return
         video.sha256 = sha256
+        video.original_sha256 = sha256
         video.phash = pack(fp.frames, fp.audio)
         video.size_bytes = original.stat().st_size
         video.duration_s = info.duration_s

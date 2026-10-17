@@ -54,6 +54,8 @@ def prepare(item: Video, original: Path, image: Image.Image | None = None) -> No
     image.save(output, "JPEG", quality=90)
     item.width, item.height = image.size
     item.sha256 = hashlib.sha256(image.tobytes() + str(image.size).encode()).hexdigest()
+    with original.open("rb") as stream:
+        item.original_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
     item.encoded_path = storage.rel_path(output)
     item.encoded_size_bytes = output.stat().st_size
     image.thumbnail((640, 640), Image.Resampling.LANCZOS)
