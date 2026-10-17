@@ -367,14 +367,13 @@ def test_upload_encode_plan_publish_on_all_platforms(web_owner, db, workspace, s
     db.expire_all()
     accounts = {a.platform: a for a in db.execute(select(ConnectedAccount)).scalars()}
     assert set(accounts) == set(ALL_PLATFORMS)
-    # A single new account goes straight to its own settings; a Meta login brings two (a Page and
-    # its Instagram account), so it goes to the rules list.
-    assert tiktok_redirect == f"/rules/{accounts[Platform.TIKTOK].id}"
+    # TikTok currently connects for reading only; the other providers retain rule setup.
+    assert tiktok_redirect == f"/accounts/{accounts[Platform.TIKTOK].id}/videos"
     assert youtube_redirect == f"/rules/{accounts[Platform.YOUTUBE].id}"
     assert meta_redirect == "/rules"
-    # Connecting never starts publishing: every rule exists, switched off.
+    # TikTok creates no rule. Connecting the other providers creates stopped rules.
     rules = {r.platform: r for r in db.execute(select(RotationRule)).scalars()}
-    assert set(rules) == set(ALL_PLATFORMS)
+    assert set(rules) == set(ALL_PLATFORMS) - {Platform.TIKTOK}
     assert not any(r.enabled for r in rules.values())
     assert rules[Platform.YOUTUBE].settings["self_declared_made_for_kids"] is None  # no default answer
     ws = db.get(Workspace, workspace.id)
@@ -383,7 +382,13 @@ def test_upload_encode_plan_publish_on_all_platforms(web_owner, db, workspace, s
     assert scheduler.plan_workspace(db, workspace.id, now=utcnow() - timedelta(hours=49)) == []
     db.rollback()
 
-    # 4. The owner reviews each account's settings and turns publishing on through the rule form.
+    # 4. Exercise the deferred publishing pipeline with a synthetic TikTok rule only.
+    # This is fake-adapter coverage, not behavior granted by the read-only OAuth submission.
+    from repeater.engine.rules import ensure_rule
+
+    ensure_rule(db, accounts[Platform.TIKTOK])
+    db.commit()
+    # The synthetic owner reviews each account's settings through the real rule form.
     html = web_owner.get(f"/rules/{accounts[Platform.YOUTUBE].id}").text
     assert not re.search(r'name="made_for_kids" value="(yes|no)"[^>]*checked', html)
     refused = post(  # YouTube's audience question has no default: it must be answered explicitly
