@@ -73,6 +73,12 @@ def test_bulk_all_or_one_platform_only(web_owner, db, workspace, make_account, f
         selected = scope == "all" or account.platform == scope
         assert (account.status == AccountStatus.DISABLED) == selected
         assert (account.token_enc is None) == selected
+    html = web_owner.get("/accounts").text
+    for account in rows:
+        assert (account.display_name in html) == (scope != "all" and account.platform != scope)
+    if scope == "all":
+        assert 'class="account-list"' not in html
+        assert '<details class="card account-connections" open>' in html
     assert foreign.status == AccountStatus.ACTIVE and foreign.token_enc
     jobs = list(db.scalars(select(Job)))
     assert len(jobs) == 1 and jobs[0].kind == "plan_workspace"

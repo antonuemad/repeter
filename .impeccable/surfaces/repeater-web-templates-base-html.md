@@ -114,3 +114,20 @@ tokens were introduced, so DESIGN.md and its sidecar remain unchanged.
 Asset follow-up (2026-10-18): content-hashed CSS/JS URLs prevent cached assets from hiding the
 shipped UI after updates and restore the reviewed bulk controls. Final local verification now
 passes 120 tests, including asset-version regressions; follow-up CI/deployment is not yet established.
+
+Disconnected-account visibility (2026-10-18): Connected accounts excludes explicitly disabled
+accounts after either single or batch disconnection; active accounts and accounts needing
+reconnection remain visible. When none remain, the Arabic/English “No accounts connected” state
+points below to the open “Connect another account” provider choices. Reconnecting through the
+same provider restores the retained account and person association. Hiding a row does not delete
+its record or change the library; the existing seven-day retention policy still applies. The
+connection-management guide reflects this behavior. Reuse the incumbent shell and controls;
+this change introduces no reusable visual rule, so DESIGN.md and its sidecar remain unchanged.
+
+Visibility finish evidence (2026-10-18): the independent review returned ship across all five
+sections with no material findings. Synthetic captures in
+`/Users/mac/dev/repeter-preview/disconnected-hidden-20261018/` are `mixed-desktop-ar.png`,
+`empty-desktop-ar.png`, `empty-mobile-ar.png` and `empty-mobile-en.png`. Local verification passed
+127 tests covering owner/editor access, Arabic/English, single/batch hiding and mocked OAuth
+reconnection. QA made no real account changes, publications or drafts; the publishing lock remains
+active. CI and deployment are pending; this evidence does not establish live-provider acceptance.

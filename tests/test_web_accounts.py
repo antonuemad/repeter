@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import select
 
 from repeater.config import get_settings
@@ -53,6 +54,67 @@ def test_accounts_list_and_reconnect(web_owner, db, make_account):
     assert html.count('href="/connect/meta"') == 2  # the connect card and this account's reconnect
 
 
+@pytest.mark.parametrize("client_fixture", ["web_owner", "web_editor"])
+@pytest.mark.parametrize("lang", ["ar", "en"])
+def test_account_list_hides_disconnected_but_keeps_expired_connections(
+    request, db, make_account, client_fixture, lang
+):
+    client = request.getfixturevalue(client_fixture)
+    disconnected = make_account("facebook", display_name="Explicitly disconnected page")
+    disconnected.status, disconnected.token_enc = AccountStatus.DISABLED, None
+    expired = make_account("youtube", display_name="Channel needing renewed authorization")
+    expired.status = AccountStatus.NEEDS_RECONNECT
+    active = make_account("instagram", display_name="Connected Instagram")
+    db.commit()
+    set_lang(client, lang)
+    html = client.get("/accounts").text
+    assert disconnected.display_name not in html
+    assert expired.display_name in html and active.display_name in html
+    assert 'href="/connect/youtube"' in html
+    db.refresh(disconnected)
+    assert disconnected.status == AccountStatus.DISABLED  # Hidden, not deleted early.
+
+
+@pytest.mark.parametrize("lang", ["ar", "en"])
+def test_only_disconnected_accounts_show_empty_state_and_open_connection_choices(
+    web_owner, db, make_account, lang
+):
+    account = make_account("tiktok", display_name="Disconnected synthetic creator")
+    account.status, account.token_enc = AccountStatus.DISABLED, None
+    db.commit()
+    set_lang(web_owner, lang)
+    html = web_owner.get("/accounts").text
+    assert account.display_name not in html
+    assert 'class="account-list"' not in html and 'class="account-bulk-controls"' not in html
+    assert '<details class="card account-connections" open>' in html
+    assert ("لا توجد حسابات مربوطة" if lang == "ar" else "No accounts connected") in html
+    assert 'href="/connect/tiktok"' in html
+    assert db.get(ConnectedAccount, account.id) is not None
+
+
+def test_hidden_account_can_be_connected_again_from_platform_choices(web_owner, db, make_account):
+    from repeater.models import CreatorProfile
+    from tests.test_web_oauth import FakeProvider, _meta_accounts, _start
+
+    account = make_account("facebook", external_id="page-1", display_name="Hidden old page")
+    person = CreatorProfile(workspace_id=account.workspace_id, name="Synthetic owner")
+    db.add(person)
+    db.flush()
+    account.profile_id = person.id
+    account.status, account.token_enc = AccountStatus.DISABLED, None
+    db.commit()
+    assert account.display_name not in web_owner.get("/accounts").text
+    with override("oauth", "meta", FakeProvider("meta", False, accounts=_meta_accounts())):
+        _, state = _start(web_owner, "meta")
+        response = web_owner.get(f"/oauth/meta/callback?code=synthetic&state={state}", follow_redirects=False)
+    assert response.status_code == 303
+    db.refresh(account)
+    assert account.status == AccountStatus.ACTIVE and account.token_enc
+    assert account.profile_id == person.id and "_disconnected_at" not in account.extra
+    assert account.display_name in web_owner.get("/accounts").text
+    assert all(job.kind not in ("publish_post", "poll_post") for job in db.scalars(select(Job)))
+
+
 def test_owner_disconnects_with_confirmation(web_owner, db, workspace, make_account):
     account = make_account("tiktok", display_name="Magic TikTok")
     db.add(
@@ -77,7 +139,10 @@ def test_owner_disconnects_with_confirmation(web_owner, db, workspace, make_acco
     assert refreshed.status == AccountStatus.DISABLED and refreshed.token_enc is None
     assert db.execute(select(RotationRule)).scalar_one().enabled is False
     assert db.execute(select(Job).where(Job.kind == "plan_workspace")).scalars().first() is not None
-    assert "Magic TikTok was disconnected." in web_owner.get("/accounts").text
+    html = web_owner.get("/accounts").text
+    assert "Magic TikTok was disconnected." in html
+    assert 'class="account-list"' not in html
+    assert f'href="/accounts/{account.id}/disconnect"' not in html
     # Disconnecting twice is harmless.
     resp = post(web_owner, f"/accounts/{account.id}/disconnect", page="/accounts")
     assert resp.status_code == 303

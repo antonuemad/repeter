@@ -179,8 +179,8 @@ CHAPTERS = (
                 "To remove a page from a plan, uncheck it in Pages and save. This does not disconnect the platform or automatically reassign the page to someone else.",
             ),
             (
-                "لفصل الاتصال نفسه يحتاج المالك فتح «فصل الربط»، وقراءة أثره ثم التأكيد. استخدمه فقط إذا كنت تقصد إيقاف استخدام هذا الاتصال.",
-                "To disconnect the platform itself, the owner opens Disconnect, reads the consequences and confirms. Use it only when you intend to stop using that connection.",
+                "لفصل الاتصال نفسه يحتاج المالك فتح «فصل الربط»، وقراءة أثره ثم التأكيد. بعدها يختفي الحساب من قائمة الحسابات المربوطة مع الاحتفاظ بالمحتوى المستورد. لإعادته اختر نفس المنصة من «ربط حساب جديد» واربطه مجددًا. الحساب الذي انتهت صلاحيته فقط يظل ظاهرًا لإعادة الربط.",
+                "To disconnect the platform itself, the owner opens Disconnect, reads the consequences and confirms. The account then disappears from Connected accounts while imported content is kept. To restore it, connect the same platform under Connect another account. Accounts that only need renewed authorization stay visible for reconnection.",
             ),
             (
                 "لفصل عدة حسابات معًا، اختر «كل المنصات» أو منصة واحدة من «فصل الحسابات دفعة واحدة». اضغط «مراجعة الفصل»، وراجع العدد وأسماء الحسابات والأثر، ثم أكّد أو ألغِ. الإجراء يخص مساحة العمل الحالية فقط ويحتفظ بالمحتوى المستورد.",

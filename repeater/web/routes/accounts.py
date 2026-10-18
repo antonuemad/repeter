@@ -107,11 +107,14 @@ def accounts_page(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
     rows = list(
         db.execute(
             select(ConnectedAccount)
-            .where(ConnectedAccount.workspace_id == ctx.workspace.id)
+            .where(
+                ConnectedAccount.workspace_id == ctx.workspace.id,
+                ConnectedAccount.status != AccountStatus.DISABLED,
+            )
             .order_by(ConnectedAccount.display_name, ConnectedAccount.id)
         ).scalars()
     )
-    rows.sort(key=lambda a: (PLATFORM_ORDER.index(Platform(a.platform)), a.status == AccountStatus.DISABLED))
+    rows.sort(key=lambda a: PLATFORM_ORDER.index(Platform(a.platform)))
     buttons = [
         {
             "purpose": purpose,
@@ -132,17 +135,8 @@ def accounts_page(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
         },
         "configured": {a.id: settings.platform_configured(provider_name_for_account(a)) for a in rows},
         "can_disconnect": ctx.is_owner,
-        "disconnect_count": sum(a.status != AccountStatus.DISABLED or bool(a.token_enc) for a in rows),
-        "disconnect_platforms": [
-            (
-                p.value,
-                sum(
-                    a.platform == p and (a.status != AccountStatus.DISABLED or bool(a.token_enc))
-                    for a in rows
-                ),
-            )
-            for p in PLATFORM_ORDER
-        ],
+        "disconnect_count": len(rows),
+        "disconnect_platforms": [(p.value, sum(a.platform == p for a in rows)) for p in PLATFORM_ORDER],
         "people": {
             row.id: row
             for row in db.execute(
