@@ -8,8 +8,8 @@
   {% block robots %}<meta name="robots" content="noindex, nofollow">{% endblock %}
   <title>{% block title %}{{ t('app.name') }}{% endblock %} · Repeater</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/app.css">
-  <script src="/static/app.js" defer></script>
+  <link rel="stylesheet" href="/static/app.css?v={{ asset_versions['app.css'] }}">
+  <script src="/static/app.js?v={{ asset_versions['app.js'] }}" defer></script>
 </head>
 <body data-theme="{{ theme }}" class="{{ 'app-shell' if user and workspace else 'public-shell' }}">
   <!-- THESIS: A publishing workspace in the approved Magic Lap product family.

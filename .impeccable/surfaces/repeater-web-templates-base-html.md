@@ -110,3 +110,7 @@ Local verification passed 118 tests, including a 150-account synthetic batch. No
 were disconnected in QA; production remains `REPEATER_PUBLISHING_ENABLED=false`. These results
 do not establish CI, deployment or live-provider acceptance. No new reusable design rules or
 tokens were introduced, so DESIGN.md and its sidecar remain unchanged.
+
+Asset follow-up (2026-10-18): content-hashed CSS/JS URLs prevent cached assets from hiding the
+shipped UI after updates and restore the reviewed bulk controls. Final local verification now
+passes 120 tests, including asset-version regressions; follow-up CI/deployment is not yet established.

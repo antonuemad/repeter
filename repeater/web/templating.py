@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
@@ -75,6 +76,12 @@ def _build_env() -> jinja2.Environment:
         fmt_duration=fmt_duration,
         platform_name=platform_name,
         may_be_live=may_be_live,
+        # A new deployment must not reuse cached CSS/JS from an older release. Compute once
+        # per process from the shipped bytes, including when file sizes/timestamps match.
+        asset_versions={
+            name: hashlib.sha256((STATIC_DIR / name).read_bytes()).hexdigest()[:16]
+            for name in ("app.css", "app.js")
+        },
     )
     return env
 
