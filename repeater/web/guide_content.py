@@ -182,6 +182,10 @@ CHAPTERS = (
                 "لفصل الاتصال نفسه يحتاج المالك فتح «فصل الربط»، وقراءة أثره ثم التأكيد. استخدمه فقط إذا كنت تقصد إيقاف استخدام هذا الاتصال.",
                 "To disconnect the platform itself, the owner opens Disconnect, reads the consequences and confirms. Use it only when you intend to stop using that connection.",
             ),
+            (
+                "لفصل عدة حسابات معًا، اختر «كل المنصات» أو منصة واحدة من «فصل الحسابات دفعة واحدة». اضغط «مراجعة الفصل»، وراجع العدد وأسماء الحسابات والأثر، ثم أكّد أو ألغِ. الإجراء يخص مساحة العمل الحالية فقط ويحتفظ بالمحتوى المستورد.",
+                "To disconnect accounts together, choose All platforms or one platform under Disconnect accounts together. Select Review disconnection, review the count, names and consequences, then confirm or cancel. This affects only the current workspace and keeps imported content.",
+            ),
         ),
         (
             "فصل الربط لا يحذف منشورًا من المنصة ولا يثبت محو محتواها. لو حساب TikTok غير متاح لعميل، راجع قيود التطبيق أو Sandbox مع المسؤول؛ لا تطلب صلاحيات نشر لتجربة القراءة.",

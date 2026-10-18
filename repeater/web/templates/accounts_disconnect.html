@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('accounts.bulk_title') }}{% endblock %}
+{% block content %}
+<section class="card account-bulk-confirm stack">
+  <h1>{{ t('accounts.bulk_title') }}</h1>
+  {% if changed %}<p class="flash flash-warning" role="alert">{{ t('accounts.bulk_changed') }}</p>{% endif %}
+  {% if accounts %}
+  <p>{{ t('accounts.bulk_summary', count=accounts|length, platform=t('accounts.bulk_all') if scope == 'all' else platform_name(scope)) }}</p>
+  <details class="account-bulk-list">
+    <summary>{{ t('accounts.bulk_show', count=accounts|length) }}</summary>
+    <ul class="plain">
+      {% for account in accounts %}
+      <li>{{ m.platform(account.platform) }} <strong dir="auto">{{ account.display_name }}</strong></li>
+      {% endfor %}
+    </ul>
+  </details>
+  <p>{{ t('accounts.bulk_body') }}</p>
+  <p class="muted small">{{ t('accounts.bulk_shared') }}</p>
+  {% if has_meta %}<p class="muted small">{{ t('accounts.disconnect_meta_note') }}</p>{% endif %}
+  {% if has_instagram %}<p class="muted small">{{ t('accounts.disconnect_instagram_note') }}</p>{% endif %}
+  {% if has_google %}<p class="muted small">{{ t('accounts.disconnect_google_note') }} <a href="https://myaccount.google.com/permissions" rel="noopener noreferrer" target="_blank">myaccount.google.com/permissions</a></p>{% endif %}
+  <form method="post" action="/accounts/disconnect" class="actions">
+    {{ m.csrf() }}
+    <input type="hidden" name="confirmation" value="{{ confirmation }}">
+    <button type="submit" class="button danger">{{ t('accounts.bulk_confirm', count=accounts|length) }}</button>
+    <a class="button secondary" href="/accounts">{{ t('common.cancel') }}</a>
+  </form>
+  {% else %}
+  <p>{{ t('accounts.bulk_empty') }}</p>
+  <a class="button secondary" href="/accounts">{{ t('accounts.bulk_back') }}</a>
+  {% endif %}
+</section>
+{% endblock %}

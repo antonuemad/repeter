@@ -7,6 +7,21 @@
 
 <section class="card">
   <h2>{{ t('accounts.connected') }}</h2>
+  {% if can_disconnect and disconnect_count %}
+  <form method="get" action="/accounts/disconnect" class="account-bulk-controls">
+    <label for="disconnect-scope">{{ t('accounts.bulk_label') }}
+      <select id="disconnect-scope" name="scope" required aria-describedby="disconnect-help">
+        <option value="" disabled selected>{{ t('accounts.bulk_choose') }}</option>
+        <option value="all">{{ t('accounts.bulk_all') }} ({{ disconnect_count }})</option>
+        {% for platform, count in disconnect_platforms %}{% if count %}
+        <option value="{{ platform }}">{{ platform_name(platform) }} ({{ count }})</option>
+        {% endif %}{% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="button secondary">{{ t('accounts.bulk_review') }}</button>
+    <p id="disconnect-help" class="muted small">{{ t('accounts.bulk_help') }}</p>
+  </form>
+  {% endif %}
   {% if accounts %}
   <ul class="account-list">
     {% for a in accounts %}

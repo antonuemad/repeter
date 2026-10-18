@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
-from sqlalchemy import select
+from itsdangerous import BadSignature, URLSafeTimedSerializer
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from repeater import accounts as account_service
@@ -26,7 +29,7 @@ from repeater.platforms import provider_name_for_account, tiktok
 from repeater.platforms.base import AuthError, PlatformError
 from repeater.timeutil import utcnow
 from repeater.web.auth import CurrentWorkspace, WorkspaceContext, require_owner
-from repeater.web.deps import DB, Form
+from repeater.web.deps import DB, Form, form_str
 from repeater.web.routes.oauth import PLATFORM_PURPOSES, PURPOSE_PROVIDERS
 from repeater.web.templating import flash, render
 
@@ -41,6 +44,61 @@ CONNECT_BUTTONS = (
     ("gdrive", ("gdrive",)),
 )
 PLATFORM_ORDER = (Platform.TIKTOK, Platform.YOUTUBE, Platform.INSTAGRAM, Platform.FACEBOOK, Platform.GDRIVE)
+BULK_CONFIRM_SECONDS = 15 * 60
+
+
+def _bulk_signer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(get_settings().secret_key, salt="account-bulk-disconnect-v1")
+
+
+def _bulk_scope(value: str) -> str:
+    if value != "all" and value not in {p.value for p in PLATFORM_ORDER}:
+        raise HTTPException(400)
+    return value
+
+
+def _bulk_accounts(db: Session, workspace_id: int, scope: str) -> list[ConnectedAccount]:
+    query = select(ConnectedAccount).where(
+        ConnectedAccount.workspace_id == workspace_id,
+        or_(ConnectedAccount.status != AccountStatus.DISABLED, ConnectedAccount.token_enc.isnot(None)),
+    )
+    if scope != "all":
+        query = query.where(ConnectedAccount.platform == Platform(scope))
+    return list(db.scalars(query.order_by(ConnectedAccount.id)))
+
+
+def _bulk_digest(accounts: list[ConnectedAccount]) -> str:
+    # Never expose account tokens in the signed (readable) confirmation payload. Include their
+    # ciphertext in the digest so a reconnect after review requires a fresh confirmation too.
+    snapshot = [(a.id, a.platform, a.status, a.token_enc, a.updated_at.isoformat()) for a in accounts]
+    return hashlib.sha256(json.dumps(snapshot).encode()).hexdigest()
+
+
+def _bulk_confirmation(
+    request: Request,
+    ctx: WorkspaceContext,
+    rows: list[ConnectedAccount],
+    scope: str,
+    *,
+    changed: bool = False,
+) -> Response:
+    response = render(
+        request,
+        "accounts_disconnect.html",
+        {
+            "nav": "accounts",
+            "accounts": rows,
+            "scope": scope,
+            "changed": changed,
+            "confirmation": _bulk_signer().dumps([ctx.workspace.id, ctx.user.id, scope, _bulk_digest(rows)]),
+            "has_meta": any(provider_name_for_account(a) == "meta" for a in rows),
+            "has_instagram": any(provider_name_for_account(a) == "instagram" for a in rows),
+            "has_google": any(a.platform in (Platform.YOUTUBE, Platform.GDRIVE) for a in rows),
+        },
+        status_code=409 if changed else 200,
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @router.get("/accounts")
@@ -74,6 +132,17 @@ def accounts_page(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
         },
         "configured": {a.id: settings.platform_configured(provider_name_for_account(a)) for a in rows},
         "can_disconnect": ctx.is_owner,
+        "disconnect_count": sum(a.status != AccountStatus.DISABLED or bool(a.token_enc) for a in rows),
+        "disconnect_platforms": [
+            (
+                p.value,
+                sum(
+                    a.platform == p and (a.status != AccountStatus.DISABLED or bool(a.token_enc))
+                    for a in rows
+                ),
+            )
+            for p in PLATFORM_ORDER
+        ],
         "people": {
             row.id: row
             for row in db.execute(
@@ -84,6 +153,45 @@ def accounts_page(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
         },
     }
     return render(request, "accounts.html", context)
+
+
+@router.get("/accounts/disconnect")
+def confirm_bulk_disconnect(request: Request, db: DB, ctx: CurrentWorkspace, scope: str = "all") -> Response:
+    require_owner(ctx)
+    scope = _bulk_scope(scope)
+    return _bulk_confirmation(request, ctx, _bulk_accounts(db, ctx.workspace.id, scope), scope)
+
+
+@router.post("/accounts/disconnect")
+def bulk_disconnect(request: Request, db: DB, ctx: CurrentWorkspace, form: Form) -> Response:
+    require_owner(ctx)
+    try:
+        payload = _bulk_signer().loads(
+            form_str(form, "confirmation", max_len=2000), max_age=BULK_CONFIRM_SECONDS
+        )
+    except BadSignature:
+        payload = None
+    if (
+        not isinstance(payload, list)
+        or len(payload) != 4
+        or payload[:2] != [ctx.workspace.id, ctx.user.id]
+        or not isinstance(payload[2], str)
+    ):
+        flash(request, "warning", "accounts.bulk_expired")
+        return RedirectResponse("/accounts", status_code=303)
+    scope = _bulk_scope(payload[2])
+    rows = _bulk_accounts(db, ctx.workspace.id, scope)
+    if payload[3] != _bulk_digest(rows):
+        return _bulk_confirmation(request, ctx, rows, scope, changed=True)
+    if not rows:
+        return RedirectResponse("/accounts", status_code=303)
+    for account in rows:
+        account_service.disconnect(db, account, actor=ctx.actor, revoke=not shares_grant(db, account))
+        db.flush()  # The next shared-grant check must see tokens already removed in this batch.
+    kinds.enqueue_plan_workspace(db, ctx.workspace.id)
+    db.commit()
+    flash(request, "success", "accounts.bulk_disconnected", count=len(rows))
+    return RedirectResponse("/accounts", status_code=303)
 
 
 def _get_account(db: Session, ctx: WorkspaceContext, account_id: int) -> ConnectedAccount:

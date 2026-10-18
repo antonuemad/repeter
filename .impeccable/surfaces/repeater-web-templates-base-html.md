@@ -2,7 +2,7 @@
 version: 1
 slug: "repeater-web-templates-base-html"
 primary_target: "repeater/web/templates/base.html"
-related_targets: ["repeater/web/templates/overview.html","repeater/web/templates/login.html","repeater/web/templates/library.html","repeater/web/templates/schedule.html","repeater/web/templates/accounts.html","repeater/web/templates/account_tiktok_videos.html","repeater/web/templates/sources.html","repeater/web/templates/rules.html","repeater/web/templates/activity.html","repeater/web/templates/settings_workspace.html","repeater/web/templates/settings_members.html","repeater/web/templates/settings_nav.html","repeater/web/templates/admin_customers.html","repeater/web/templates/admin_recovery.html","repeater/web/templates/access_open.html","repeater/web/templates/access_password.html","repeater/web/templates/access_forgot.html","repeater/web/templates/access_issued.html","repeater/web/static/app.css","repeater/web/static/app.js","repeater/web/templates/plans/index.html","repeater/web/templates/plans/start.html","repeater/web/templates/plans/wizard.html","repeater/web/templates/calendar.html","repeater/web/templates/calendar_edit.html","repeater/web/templates/billing.html","repeater/web/templates/admin_billing.html","repeater/web/templates/operations.html"]
+related_targets: ["repeater/web/templates/overview.html","repeater/web/templates/login.html","repeater/web/templates/library.html","repeater/web/templates/schedule.html","repeater/web/templates/accounts.html","repeater/web/templates/accounts_disconnect.html","repeater/web/templates/account_tiktok_videos.html","repeater/web/templates/sources.html","repeater/web/templates/rules.html","repeater/web/templates/activity.html","repeater/web/templates/settings_workspace.html","repeater/web/templates/settings_members.html","repeater/web/templates/settings_nav.html","repeater/web/templates/admin_customers.html","repeater/web/templates/admin_recovery.html","repeater/web/templates/access_open.html","repeater/web/templates/access_password.html","repeater/web/templates/access_forgot.html","repeater/web/templates/access_issued.html","repeater/web/static/app.css","repeater/web/static/app.js","repeater/web/templates/plans/index.html","repeater/web/templates/plans/start.html","repeater/web/templates/plans/wizard.html","repeater/web/templates/calendar.html","repeater/web/templates/calendar_edit.html","repeater/web/templates/billing.html","repeater/web/templates/admin_billing.html","repeater/web/templates/operations.html"]
 ---
 
 # Repeater application shell and operational routes
@@ -86,3 +86,27 @@ an add-provider disclosure. Shared content forms, compact library controls, prog
 schedule options and actionable preview entries follow DESIGN.md's customer-journey
 section. Desktop/mobile confirmation used synthetic data with the publishing lock active;
 no new visual world, font system or animation was introduced.
+
+
+Accounts batch disconnection (2026-10-18): owners choose All platforms or one platform with
+current counts, then open Review disconnection. The confirmation repeats scope and count,
+discloses account names, explains token removal, cancellation of unstarted posts, stopped rules
+and account sources, seven-day record/history deletion, retained imported library content and
+existing platform posts, and applicable provider caveats. Confirm names the account count;
+Cancel returns to Accounts. Existing single-account disconnection remains available. Reuse the
+incumbent controls, semantic tokens and native forms/disclosures in Arabic and English, without
+requiring JavaScript.
+
+The signed confirmation binds the reviewed account snapshot to the current workspace and user
+for 15 minutes. A changed selection or connection requires a fresh review before disconnection.
+Other platforms/workspaces stay outside the selection; shared Google/TikTok authorization is
+retained while another connected account needs it, and provider revocation is best effort.
+
+Batch-disconnection finish evidence (2026-10-18): a fresh independent review returned ship across
+all five review sections with no material fixes. Synthetic captures are in
+`/Users/mac/dev/repeter-preview/bulk-disconnect-20261018/`: `accounts-desktop-ar.png`,
+`accounts-mobile-ar.png`, `confirm-desktop-en-dark.png` and `confirm-mobile-ar.png`.
+Local verification passed 118 tests, including a 150-account synthetic batch. No real accounts
+were disconnected in QA; production remains `REPEATER_PUBLISHING_ENABLED=false`. These results
+do not establish CI, deployment or live-provider acceptance. No new reusable design rules or
+tokens were introduced, so DESIGN.md and its sidecar remain unchanged.
