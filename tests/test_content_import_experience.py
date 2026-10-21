@@ -319,3 +319,22 @@ def test_completed_empty_scan_explains_mode_and_keeps_flash(web_owner, db, make_
     response = web_owner.get(f"/people/{plan.profile_id}?section=content")
     assert "تم حفظ الفولدر" in response.text  # background refresh did not consume the flash
     assert not db.scalar(select(func.count()).select_from(ScheduledPost))
+
+
+@pytest.mark.parametrize("hub", [False, True])
+@pytest.mark.parametrize("failure", [False, True])
+def test_preferences_after_folder_post_return_to_readable_content(
+    web_owner, db, make_account, isolated, hub, failure
+):
+    plan = create_plan(web_owner, db)
+    account = make_account(Platform.GDRIVE)
+    isolated.get(f"{drive.API_BASE}/files").respond(503 if failure else 200, json={"files": []})
+    data = {"drive_id": account.id, "wizard_step": "content", **({"person_hub": "1"} if hub else {})}
+    response = post(web_owner, f"/plans/{plan.id}/folders", data)
+    expected = f"/people/{plan.profile_id}?section=content" if hub else f"/plans/{plan.id}/setup/content"
+    assert response.status_code == (422 if failure else 200)
+    assert response.text.count(f'name="next" value="{expected}"') == 2
+    for endpoint, options in [("/lang", {"lang": "en"}), ("/theme", {"theme": "dark"})]:
+        result = post(web_owner, endpoint, {**options, "next": expected})
+        assert result.status_code == 303 and result.headers["location"] == expected
+        assert web_owner.get(expected).status_code == 200

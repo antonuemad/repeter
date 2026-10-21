@@ -182,6 +182,8 @@ def _edit(request, db, ctx, plan, *, error=None, submitted=None, **extra):
     data = _context(db, ctx, plan)
     remember_person(request, data["person"], plan)
     data.update(error=error, submitted=submitted or {}, **extra)
+    if request.method == "POST":
+        data["preference_return"] = f"/plans/{plan.id}/edit"
     data["person_hub"] = data["submitted"].get("person_hub") == "1"
     if data["submitted"].get("wizard_step") in WIZARD_STEPS:
         return _wizard(request, db, ctx, plan, data["submitted"]["wizard_step"], data=data)
@@ -203,6 +205,8 @@ def _wizard(request, db, ctx, plan, step, *, data=None, page="1"):
     data["setup_urls"] = {
         s: person_url(plan, s) if hub else f"/plans/{plan.id}/setup/{s}" for s in WIZARD_STEPS
     }
+    if request.method == "POST":
+        data["preference_return"] = data["setup_urls"][step]
     if hub:
         data["readiness"] = progress(db, ctx.workspace.id, [plan])[plan.id]
         data["recent_items"] = list(

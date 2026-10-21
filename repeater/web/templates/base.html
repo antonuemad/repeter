@@ -57,13 +57,13 @@
         <div class="top-actions">
           <form method="post" action="/lang" class="inline">
             {{ m.csrf() }}
-            <input type="hidden" name="next" value="{{ request.url.path }}{{ '?' ~ request.url.query if request.url.query else '' }}">
+            <input type="hidden" name="next" value="{{ preference_return if preference_return is defined else request.url.path ~ ('?' ~ request.url.query if request.url.query else '') }}">
             {% if lang == 'ar' %}<button type="submit" name="lang" value="en" class="utility-button" lang="en">{{ m.icon('globe', 17) }} English</button>
             {% else %}<button type="submit" name="lang" value="ar" class="utility-button" lang="ar">{{ m.icon('globe', 17) }} العربية</button>{% endif %}
           </form>
           <form method="post" action="/theme" class="inline">
             {{ m.csrf() }}
-            <input type="hidden" name="next" value="{{ request.url.path }}{{ '?' ~ request.url.query if request.url.query else '' }}">
+            <input type="hidden" name="next" value="{{ preference_return if preference_return is defined else request.url.path ~ ('?' ~ request.url.query if request.url.query else '') }}">
             <button type="submit" name="theme" value="{{ 'light' if theme == 'dark' else 'dark' }}" class="utility-button icon-button" aria-label="{{ t('shell.light_theme') if theme == 'dark' else t('shell.dark_theme') }}" title="{{ t('shell.light_theme') if theme == 'dark' else t('shell.dark_theme') }}">{{ m.icon('sun' if theme == 'dark' else 'moon', 18) }}</button>
           </form>
           {% if user %}
