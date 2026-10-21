@@ -167,7 +167,9 @@ def test_folder_browser_errors_and_pagination_stay_in_content(web_owner, db, mak
     )
     assert response.status_code == 200
     assert "&lt;unsafe&gt;" in response.text and "next-page" in response.text
-    assert response.text.count('name="wizard_step" value="content"') >= 3
+    folder_form = response.text.split('class="stack folder-search"', 1)[1].split("</form>", 1)[0]
+    assert 'name="wizard_step" value="content"' in folder_form
+    assert 'name="folder"' in folder_form and 'name="page_token"' in folder_form
     folder_mock(no_external_http, status=403)
     response = save(
         web_owner,

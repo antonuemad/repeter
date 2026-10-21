@@ -354,3 +354,17 @@ selection. All validation uses synthetic identities, local media and mocked prov
 Production publishing and TikTok publication auditing remain disabled; no real posts or drafts
 are part of acceptance. Folder-picker improvements, bulk library management and richer visual
 calendar guidance remain later usability work.
+
+## Content preparation usability (2026-10-21)
+
+The person's Content section offers a native Drive folder search by name, a paged result list,
+and an optional pasted-link fallback. One form carries image/backfill choices through searching,
+paging and selecting. Selection checks access and saves a paused source; starting imports remains
+an explicit separate action. Only direct supported children are imported, never subfolders.
+
+Source progress distinguishes queued checks, discovery, downloading, preparation, paused monitoring,
+empty/new-only scans, source errors and reconnect requirements. Counts and failed-item examples
+belong to that source and person. A database-only status fragment refreshes visible pages every
+10 seconds for up to 20 minutes, stops on errors, and supports manual refresh and no-JS navigation.
+It also refreshes the person's library summary. Last-scan counts advance only after a successful
+complete listing. No percentage or time estimate is invented, and refresh never starts a job.

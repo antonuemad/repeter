@@ -30,13 +30,15 @@ from repeater.models import (
     Video,
 )
 from repeater.platforms import provider_name_for_account
-from repeater.platforms.base import PlatformError
+from repeater.platforms.base import AuthError, PermanentError, PlatformError, RateLimitedError
 from repeater.sources.drive import browse_folders, folder_details, parse_folder_id
 from repeater.timeutil import utcnow
+from repeater.web import i18n
 from repeater.web.auth import CurrentWorkspace
 from repeater.web.deps import DB, Form, FormError, Page, form_bool, form_int, form_str, query_int
+from repeater.web.import_progress import source_progress
 from repeater.web.journey import person_url, progress, remember_person
-from repeater.web.templating import flash, render
+from repeater.web.templating import flash, render, templates
 
 router = APIRouter()
 IMPORT_PLATFORMS = (Platform.FACEBOOK, Platform.INSTAGRAM)
@@ -128,7 +130,9 @@ def _context(db, ctx, plan):
     ):
         source_counts.setdefault(source_id, {})[status.value] = count
     used = {s.connected_account_id for s in social_sources}
+    source = _source(db, plan)
     return {
+        "import_progress": source_progress(db, plan, [source, *social_sources]),
         "social_sources": social_sources,
         "source_counts": source_counts,
         "import_accounts": [
@@ -142,7 +146,7 @@ def _context(db, ctx, plan):
         "nav": "plans",
         "plan": plan,
         "person": db.get(CreatorProfile, plan.profile_id),
-        "source": _source(db, plan),
+        "source": source,
         "selected": {a.id for a in targets(db, plan)},
         "accounts": [
             a
@@ -169,6 +173,7 @@ def _context(db, ctx, plan):
         "folders": None,
         "folder_drive_id": None,
         "folder_page": "",
+        "folder_search": "",
         "setup_urls": {s: f"/plans/{plan.id}/setup/{s}" for s in WIZARD_STEPS},
     }
 
@@ -332,7 +337,8 @@ def folders(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, form:
     try:
         account = _drive(db, ctx, form)
         page = form_str(form, "page_token", max_len=2000)
-        items, next_page = browse_folders(fresh_context(db, account), page_token=page)
+        search = form_str(form, "folder_search", max_len=200)
+        items, next_page = browse_folders(fresh_context(db, account), page_token=page, search=search)
         db.commit()  # persist a refreshed credential, if any
         return _edit(
             request,
@@ -343,12 +349,64 @@ def folders(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, form:
             folders=items,
             folder_drive_id=account.id,
             folder_page=next_page,
+            folder_search=search,
         )
-    except (PlatformError, AccountUnavailable):
+    except (PlatformError, AccountUnavailable) as exc:
         db.commit()
-        return _edit(request, db, ctx, plan, error=FormError("plan.drive_failed"), submitted=dict(form))
+        return _edit(request, db, ctx, plan, error=_drive_error(exc), submitted=dict(form))
     except FormError as exc:
         return _edit(request, db, ctx, plan, error=exc, submitted=dict(form))
+
+
+def _drive_error(exc):
+    if isinstance(exc, (AuthError, AccountUnavailable)):
+        return FormError("import.drive_reconnect")
+    if isinstance(exc, RateLimitedError):
+        return FormError("import.drive_rate")
+    if getattr(exc, "status", None) in (403, 404) or getattr(exc, "code", None) == "notAFolder":
+        return FormError("import.drive_access")
+    return FormError("import.drive_retry")
+
+
+@router.get("/plans/{plan_id}/import-status")
+def import_status(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int) -> Response:
+    plan = get_plan(db, ctx, plan_id)
+    sources = list(
+        db.scalars(
+            select(Source)
+            .where(
+                Source.workspace_id == ctx.workspace.id,
+                Source.profile_id == plan.profile_id,
+                Source.kind.in_((SourceKind.DRIVE, SourceKind.PLATFORM_API)),
+            )
+            .order_by(Source.id)
+        )
+    )
+    # A fragment never consumes flashes or changes import settings/plan revisions.
+    counts = dict(
+        db.execute(
+            select(Video.status, func.count())
+            .where(
+                Video.workspace_id == ctx.workspace.id,
+                Video.profile_id == plan.profile_id,
+            )
+            .group_by(Video.status)
+        ).all()
+    )
+    return templates.TemplateResponse(
+        request,
+        "plans/import_progress.html",
+        {
+            "t": i18n.Translator(i18n.request_lang(request)),
+            "plan": plan,
+            "person": db.get(CreatorProfile, plan.profile_id),
+            "import_progress": source_progress(db, plan, sources),
+            "content_url": person_url(plan, "content"),
+            "readiness": progress(db, ctx.workspace.id, [plan])[plan.id],
+            "library_counts": counts,
+        },
+        headers={"Cache-Control": "no-store", "X-Repeater-Import-Status": "1"},
+    )
 
 
 @router.post("/plans/{plan_id}/execution")
@@ -411,7 +469,12 @@ def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section:
             _add_platform_source(db, ctx, plan, form)
         elif section == "source":
             account = _drive(db, ctx, form)
-            folder_id = parse_folder_id(form_str(form, "folder", max_len=1000, required=True))
+            try:
+                folder_id = parse_folder_id(
+                    form_str(form, "folder", max_len=1000) or form_str(form, "folder_link", max_len=1000)
+                )
+            except PermanentError:
+                raise FormError("import.drive_link") from None
             backfill = form_int(form, "backfill", minimum=0, maximum=200, default=30)
             source = _source(db, plan)
             if source is not None:
@@ -546,7 +609,17 @@ def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section:
             plan.enabled = False
         plan.revision += 1
         db.commit()
-        flash(request, "success", "plan.saved")
+        flash(
+            request,
+            "success",
+            "import.folder_saved"
+            if section == "source"
+            else "import.started"
+            if section == "imports" and form.get("action") == "start"
+            else "import.pause_saved"
+            if section == "imports"
+            else "plan.saved",
+        )
         if wizard_step:
             next_step = {"targets": "content", "schedule": "preview"}.get(section, wizard_step)
             if form.get("person_hub") == "1":
@@ -558,7 +631,7 @@ def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section:
             else f"/plans/{plan.id}/edit#{section}",
             303,
         )
-    except (PlatformError, AccountUnavailable):
+    except (PlatformError, AccountUnavailable) as exc:
         # Only credential refresh can have changed persistent state before Drive lookup fails.
         # Keep rotated credentials rather than rolling them back to an invalid refresh token.
         db.commit()
@@ -567,7 +640,7 @@ def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section:
             db,
             ctx,
             get_plan(db, ctx, plan_id),
-            error=FormError("plan.drive_failed"),
+            error=_drive_error(exc),
             submitted=dict(form),
         )
     except FormError as exc:

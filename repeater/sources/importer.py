@@ -212,6 +212,8 @@ def poll_source(session: Session, source_id: int, *, now: datetime | None = None
         session.commit()
         return PollOutcome("failed", message=message)
     source.last_success_at = now
+    # Report only a completed listing. Never advance these on a failed/partial scan.
+    source.config = {**source.config, "last_listed_count": len(remotes), "last_created_count": created}
     source.last_error = None
     source.consecutive_failures = 0
     session.commit()

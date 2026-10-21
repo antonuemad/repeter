@@ -596,6 +596,180 @@ COPY.update(
     }
 )
 
+COPY.update(
+    {
+        "import.search": ("Search folders by name", "ابحث باسم الفولدر"),
+        "import.search_help": (
+            "Search folders accessible to the selected Google account. Or leave the name blank to browse.",
+            "ابحث عن فولدر متاح لحساب Google المختار، أو اترك الاسم فارغًا لعرض الفولدرات.",
+        ),
+        "import.paste": ("Have a folder link?", "معاك رابط الفولدر؟"),
+        "import.paste_help": (
+            "Paste the folder link, then check and save it. Nothing is downloaded yet.",
+            "الصق رابط الفولدر ثم تحقّق منه واحفظه. لن يتم تنزيل ملفات في هذه الخطوة.",
+        ),
+        "import.folder_saved": (
+            "Folder saved. Review it below, then start importing. Publishing remains separate.",
+            "تم حفظ الفولدر. راجعه ثم اضغط بدء الاستيراد. النشر خطوة منفصلة.",
+        ),
+        "import.started": (
+            "Import requested. Progress appears in the import status below; no content is published.",
+            "تم طلب الاستيراد. تابع حالته بالأسفل؛ لا يتم نشر أي محتوى.",
+        ),
+        "import.pause_saved": (
+            "Folder monitoring paused. Files already being prepared may finish.",
+            "تم إيقاف متابعة الفولدر. الملفات التي بدأ تجهيزها قد تكمل المعالجة.",
+        ),
+        "import.scope": (
+            "Only supported files directly inside this folder are imported. Subfolders are not included.",
+            "يتم استيراد الملفات المدعومة داخل الفولدر مباشرةً. الفولدرات الفرعية غير مشمولة.",
+        ),
+        "import.no_matches": (
+            "No matching folders on this page. Try another name, check the Google account, or paste a folder link.",
+            "لا توجد فولدرات مطابقة في هذه الصفحة. جرّب اسمًا آخر أو راجع حساب Google أو الصق رابط الفولدر.",
+        ),
+        "import.results": (
+            "Choose one folder. Selection checks access and saves it; importing starts only when you ask.",
+            "اختَر فولدرًا واحدًا. الاختيار يتحقق من الوصول ويحفظه؛ الاستيراد يبدأ بطلب منك فقط.",
+        ),
+        "import.selected": ("Selected folder", "الفولدر المختار"),
+        "import.open_drive": ("Open folder in Drive", "افتح الفولدر في Drive"),
+        "import.choose_help": (
+            "Choose the folder, then start importing below. Your originals stay in Drive.",
+            "اختَر الفولدر ثم ابدأ الاستيراد بالأسفل. ملفاتك الأصلية تفضل في Drive.",
+        ),
+        "import.title": ("Import progress", "حالة الاستيراد"),
+        "import.refresh": ("Refresh status", "تحديث الحالة"),
+        "import.auto": (
+            "Status updates automatically while this page is visible. No publishing takes place.",
+            "الحالة تتحدث تلقائيًا والصفحة مفتوحة. لا يتم نشر أي محتوى.",
+        ),
+        "import.refresh_failed": (
+            "Status could not update. Use Refresh status or reload the page.",
+            "تعذّر تحديث الحالة. اضغط تحديث الحالة أو أعد تحميل الصفحة.",
+        ),
+        "import.saved": ("Ready to import", "جاهز لبدء الاستيراد"),
+        "import.saved_help": (
+            "Folder saved; importing has not started. Use Start importing in the Google Drive section.",
+            "الفولدر محفوظ والاستيراد لم يبدأ. اضغط بدء الاستيراد في قسم Google Drive.",
+        ),
+        "import.queued": ("Waiting for the worker", "في انتظار بدء الفحص"),
+        "import.queued_help": (
+            "The check is queued. File counts appear after the folder has been checked.",
+            "تمت إضافة طلب الفحص للطابور. أعداد الملفات تظهر بعد انتهاء فحص الفولدر.",
+        ),
+        "import.scheduled": ("Next check scheduled", "الفحص القادم مجدول"),
+        "import.scheduled_help": (
+            "The next check is scheduled. Ready files remain available in the library.",
+            "هناك فحص قادم مجدول. الملفات الجاهزة تفضل متاحة في المكتبة.",
+        ),
+        "import.checking": ("Checking for files", "جاري فحص الملفات"),
+        "import.checking_help": (
+            "The source is being checked. The final number of files is not known yet.",
+            "جاري فحص المصدر. العدد النهائي للملفات غير معروف بعد.",
+        ),
+        "import.importing": ("Downloading files", "جاري تنزيل الملفات"),
+        "import.importing_help": (
+            "Files are entering this person’s library. They still need preparation before preview.",
+            "الملفات تدخل مكتبة الشخص. تحتاج تجهيزًا قبل ظهورها في معاينة الجدول.",
+        ),
+        "import.processing": ("Preparing files", "جاري تجهيز الملفات"),
+        "import.processing_help": (
+            "Downloaded files are being checked and prepared. Large videos can take longer.",
+            "يتم فحص وتجهيز الملفات التي نزلت. الفيديوهات الكبيرة قد تحتاج وقتًا أطول.",
+        ),
+        "import.watching": ("Up to date", "المكتبة محدثة"),
+        "import.watching_help": (
+            "Ready items are in the library. Monitoring continues for new supported files.",
+            "العناصر الجاهزة في المكتبة. المتابعة مستمرة للملفات الجديدة المدعومة.",
+        ),
+        "import.empty": ("No ready items yet", "لا توجد عناصر جاهزة بعد"),
+        "import.empty_help": (
+            "Review the import mode and counts below. Check that supported originals are directly in the folder.",
+            "راجع وضع الاستيراد والأعداد بالأسفل، وتأكد أن الملفات الأصلية المدعومة داخل الفولدر مباشرةً.",
+        ),
+        "import.empty_scan": (
+            "The last completed check found no supported files. Add videos or supported images directly to this folder; subfolders are not scanned.",
+            "آخر فحص مكتمل لم يجد ملفات مدعومة. أضف فيديوهات أو صورًا مدعومة داخل الفولدر مباشرةً؛ الفولدرات الفرعية لا تُفحص.",
+        ),
+        "import.new_only_help": (
+            "New files only: existing files were skipped. Add a new supported file to import it.",
+            "تم اختيار الملفات الجديدة فقط: الملفات الموجودة سابقًا لم تُستورد. أضف ملفًا جديدًا مدعومًا لاستيراده.",
+        ),
+        "import.paused_help": (
+            "New checks are stopped. Files already downloading or processing may still finish.",
+            "تم إيقاف الفحوصات الجديدة. الملفات التي بدأ تنزيلها أو تجهيزها قد تكمل المعالجة.",
+        ),
+        "import.failed": ("Some files need attention", "بعض الملفات تحتاج مراجعة"),
+        "import.failed_help": (
+            "Open a failed item to see the reason and retry it. Other ready items remain usable.",
+            "افتح العنصر الذي فشل لمعرفة السبب وإعادة المحاولة. العناصر الجاهزة الأخرى تفضل متاحة.",
+        ),
+        "import.error": ("Source check failed", "تعذّر فحص المصدر"),
+        "import.error_help": (
+            "Check access to the folder or source account, then retry using the import control below. Ready files are preserved.",
+            "راجع الوصول للفولدر أو حساب المصدر، ثم أعد المحاولة من زر الاستيراد بالأسفل. الملفات الجاهزة محفوظة.",
+        ),
+        "import.reconnect": ("Reconnect required", "محتاج إعادة ربط"),
+        "import.reconnect_help": (
+            "The source account is disconnected or its access expired. Reconnect it, then resume importing.",
+            "حساب المصدر مفصول أو انتهت صلاحيته. أعد ربطه ثم استأنف الاستيراد.",
+        ),
+        "import.reconnect_action": ("Review source accounts", "مراجعة حسابات المصادر"),
+        "import.details": ("Technical details", "تفاصيل الخطأ"),
+        "import.counts": (
+            "{total} tracked · {ready} ready · {importing} downloading · {processing} preparing",
+            "الإجمالي: {total} · جاهز: {ready} · تنزيل: {importing} · تجهيز: {processing}",
+        ),
+        "import.failed_count": ("{n} failed", "فشل: {n}"),
+        "import.duplicate_count": ("{n} duplicates", "مكرر: {n}"),
+        "import.archived_count": ("{n} archived", "مؤرشف: {n}"),
+        "import.counts_help": (
+            "Counts belong to this source only. Repeated checks do not add the same item again.",
+            "الأعداد تخص المصدر ده فقط. تكرار الفحص لا يضيف نفس العنصر مرة أخرى.",
+        ),
+        "import.failed_item": ("Review failed item", "مراجعة عنصر فشل"),
+        "import.last_success": ("Last completed check: {at}", "آخر فحص مكتمل: {at}"),
+        "import.last_scan": (
+            "Last check: {listed} supported files found; {created} new items added.",
+            "آخر فحص: {listed} ملف مدعوم؛ تمت إضافة {created} عنصر جديد.",
+        ),
+        "import.drive_reconnect": (
+            "Google Drive access expired. Reconnect Google Drive below, then try again. Your folder entry is kept.",
+            "انتهت صلاحية الوصول إلى Google Drive. أعد ربطه بالأسفل ثم حاول مجددًا. اختيار الفولدر لم يضِع.",
+        ),
+        "import.drive_rate": (
+            "Google Drive is limiting requests. Wait a few minutes, then search or save again.",
+            "Google Drive يحدّ الطلبات مؤقتًا. انتظر دقائق ثم أعد البحث أو الحفظ.",
+        ),
+        "import.drive_access": (
+            "This folder is unavailable to the selected Google account. Check the account and folder link, and ask its owner for access if needed.",
+            "الفولدر غير متاح لحساب Google المختار. راجع الحساب ورابط الفولدر، واطلب من مالكه صلاحية الوصول عند الحاجة.",
+        ),
+        "import.drive_retry": (
+            "Could not reach Google Drive. Your choices are kept. Retry the search or save shortly.",
+            "تعذّر الاتصال بـ Google Drive. اختياراتك محفوظة هنا. أعد البحث أو الحفظ بعد قليل.",
+        ),
+    }
+)
+
+COPY.update(
+    {
+        "import.paused": ("Monitoring paused", "المتابعة متوقفة"),
+        "import.auto_stopped": (
+            "Automatic updates paused after 20 minutes. Refresh status to continue.",
+            "التحديث التلقائي اتوقف بعد ٢٠ دقيقة. اضغط تحديث الحالة للمتابعة.",
+        ),
+    }
+)
+COPY.update(
+    {
+        "import.drive_link": (
+            "Choose a folder from the search results or paste its Google Drive folder link.",
+            "اختَر فولدرًا من نتائج البحث أو الصق رابط الفولدر من Google Drive.",
+        )
+    }
+)
 COPY.update(MEDIA_COPY)
 EN = {k: v[0] for k, v in COPY.items()}
 AR = {k: v[1] for k, v in COPY.items()}

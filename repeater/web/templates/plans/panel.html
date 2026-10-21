@@ -17,7 +17,7 @@
       <h3>{{ t('wizard.pages_title') }}</h3><p class="muted small">{{ t('wizard.pages_help') }}</p>
       {% include "plans/targets_form.html" %}
     {% elif wizard_step == 'content' %}
-      <p class="library-readiness" role="status">{{ t('wizard.library_status', ready=library_counts.get('ready', 0), processing=library_counts.get('processing', 0) + library_counts.get('importing', 0), failed=library_counts.get('failed', 0)) }} <a href="/library?profile_id={{ person.id }}">{{ t('simple.open_library') }}</a></p>
+      <p class="library-readiness" role="status"><span data-library-summary>{{ t('wizard.library_status', ready=library_counts.get('ready', 0), processing=library_counts.get('processing', 0) + library_counts.get('importing', 0), failed=library_counts.get('failed', 0)) }}</span> <a href="/library?profile_id={{ person.id }}">{{ t('simple.open_library') }}</a></p>
       {% set profile = person %}{% set setup_plan_id = plan.id %}{% set open_upload = false %}
       {% include "plans/content_forms.html" %}
       <details class="content-choice"{% if source or folders is not none or (error and not draft) %} open{% endif %}><summary><strong>{{ t('simple.drive') }}</strong><span class="small muted">{{ t('simple.drive_hint') }}</span></summary>
@@ -32,15 +32,19 @@
         </details>
       {% endif %}
       {% if source %}
-      <div class="wizard-import"><h3>{{ t('wizard.import_title') }}</h3><p class="muted plan-measure">{{ t('wizard.import_help') }}</p>
-        <p>{{ t('wizard.library_status', ready=library_counts.get('ready', 0), processing=library_counts.get('processing', 0) + library_counts.get('importing', 0), failed=library_counts.get('failed', 0)) }}</p>
-        {% if source.last_polled_at %}<p class="muted small">{{ t('wizard.last_check', at=fmt_dt(source.last_polled_at, plan.timezone)) }}</p>{% endif %}
-        {% if source.last_error %}<p role="status">{{ m.error_text(source.last_error, 300, source.last_error_info) }}</p>{% endif %}
-        <form method="post" action="/plans/{{ plan.id }}/imports" class="actions">{{ revision() }}<button name="action" value="{{ 'pause' if source.enabled else 'start' }}" class="button secondary">{{ t('plan.import_pause') if source.enabled else t('plan.import_start') }}</button><a href="{{ setup_urls.content }}">{{ t('wizard.refresh') }}</a></form>
+      <div class="wizard-import"><p class="muted plan-measure">{{ t('wizard.import_help') }}</p>
+        <form method="post" action="/plans/{{ plan.id }}/imports" class="actions">{{ revision() }}<button name="action" value="{{ 'pause' if source.enabled else 'start' }}" class="button{{ ' secondary' if source.enabled else '' }}">{{ t('plan.import_pause') if source.enabled else t('plan.import_start') }}</button></form>
       </div>
       {% endif %}
       </details>
       <details class="content-choice"{% if social_sources or (error and submitted.get("source_account_id")) %} open{% endif %}><summary><strong>{{ t("simple.platform_import") }}</strong><span class="small muted">{{ t("simple.platform_hint") }}</span></summary>{% include "plans/platform_sources.html" %}</details>
+      {% if import_progress %}<section class="import-progress" aria-labelledby="import-progress-title" data-import-progress="/plans/{{ plan.id }}/import-status">
+        <div class="page-heading"><h2 id="import-progress-title">{{ t('import.title') }}</h2><div class="actions"><button class="button small secondary" type="button" data-import-refresh hidden>{{ t('import.refresh') }}</button><a href="{{ setup_urls.content }}" data-import-fallback>{{ t('wizard.refresh') }}</a></div></div>
+        <p class="small muted" data-import-auto hidden>{{ t('import.auto') }}</p>
+        <p class="small" role="status" data-import-notice data-error="{{ t('import.refresh_failed') }}" data-paused="{{ t('import.auto_stopped') }}"></p>
+        <div data-import-rows aria-live="polite">{% include "plans/import_progress.html" %}</div>
+        <p class="small muted">{{ t('import.counts_help') }}</p>
+      </section>{% endif %}
       <div class="wizard-actions"><a class="button" href="{{ setup_urls.schedule }}">{{ t('wizard.to_schedule') }}</a><a href="{{ setup_urls.accounts }}">{{ t('wizard.back') }}</a></div>
       {% if not library_counts.get('ready', 0) %}<p class="small muted">{{ t('wizard.empty_help') }}</p>{% endif %}
     {% elif wizard_step == 'schedule' %}

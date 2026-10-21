@@ -624,3 +624,29 @@ th { font-size: 12px; background: var(--surface-alt); }
   .activity-table td:nth-child(4) { line-height: 1.75; }
   .activity-table td:last-child { overflow-wrap: anywhere; text-align: start; font-size: 12px; }
 }
+
+/* Folder choice and source-specific progress within the person home. */
+.folder-selected { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 24px; padding-block: 8px 20px; }
+.folder-selected strong { display: block; overflow-wrap: anywhere; }
+.folder-selected p { margin-block: 4px 0; }
+.folder-search-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px; }
+.folder-search > details { padding-block: 8px; }
+.folder-search details > label { margin-block: 12px; }
+.plan-folder-row > span { min-inline-size: 0; overflow-wrap: anywhere; }
+.folder-id { display: block; font-size: 11px; font-weight: 400; overflow-wrap: anywhere; margin-block-start: 4px; }
+.folder-empty { padding-block: 16px; max-inline-size: 70ch; }
+.import-progress { margin-block-start: 32px; border-block-start: 1px solid var(--border); padding-block-start: 24px; }
+.import-progress .page-heading { margin-block-end: 8px; }
+.import-source { padding-block: 20px; border-block-end: 1px solid var(--border); }
+.import-source-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.import-source-heading h3 { margin: 0; overflow-wrap: anywhere; }
+.import-counts { font-variant-numeric: tabular-nums; line-height: 1.9; }
+.import-failures li { padding-block: 8px; }
+.import-failures p { margin-block: 4px 0; }
+[data-import-notice]:empty { display: none; }
+@media (max-width: 600px) {
+  .folder-search-controls { grid-template-columns: minmax(0, 1fr); }
+  .folder-search-controls .button { inline-size: 100%; }
+  .plan-folder-row { align-items: start; gap: 12px; }
+  .import-progress .page-heading { align-items: start; }
+}

@@ -211,12 +211,12 @@ CHAPTERS = (
                 "Review Drive read and download access on Google's screen and authorize it yourself if appropriate.",
             ),
             (
-                "اختر حساب Drive ثم تصفّح الفولدرات، أو الصق رابط الفولدر. فعّل استيراد الصور إذا أردتها، ثم احفظ الاختيار.",
-                "Choose the Drive account and browse folders, or paste a folder link. Include images if wanted, then save the choice.",
+                "اختر حساب Drive وابحث باسم الفولدر ثم اختَره من النتائج، أو افتح «معاك رابط الفولدر؟». راجع خيارات استيراد الصور وعدد الملفات الحالية قبل الحفظ.",
+                "Choose the Drive account, search by folder name and select a result, or expand Have a folder link? Review images and the existing-file count before saving.",
             ),
             (
-                "اضغط بدء الاستيراد بشكل منفصل. الحفظ وحده لا ينزّل الملفات. بعد ذلك حدّث حالة المكتبة حتى تظهر العناصر «جاهزة».",
-                "Start importing separately. Saving alone does not download files. Refresh the library status until items are Ready.",
+                "اضغط بدء الاستيراد بشكل منفصل. تابع «حالة الاستيراد»: الفحص ثم التنزيل والتجهيز والعناصر الجاهزة. الحالة تتحدث تلقائيًا، وتقدر تحدثها يدويًا. افتح أي عنصر فشل لمعرفة السبب وإعادة المحاولة.",
+                "Start importing separately. Follow Import progress through checking, downloading, preparation and Ready. Status refreshes automatically or manually. Open a failed item to see its reason and retry.",
             ),
             (
                 "لإيقاف متابعة الفولدر اضغط إيقاف الاستيراد. العناصر التي بدأت معالجتها قد تكمل التجهيز.",

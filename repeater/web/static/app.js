@@ -228,3 +228,58 @@ document.querySelectorAll('[data-plan-targets]').forEach((form) => {
     form.querySelector('[data-plan-no-matches]').hidden = visible !== 0;
   });
 });
+
+// Source progress is a read-only, same-origin fragment. Never starts an import or a publication.
+document.querySelectorAll('[data-import-progress]').forEach((panel) => {
+  const refresh = panel.querySelector('[data-import-refresh]');
+  const notice = panel.querySelector('[data-import-notice]');
+  const rows = panel.querySelector('[data-import-rows]');
+  let timer, busy = false, attempts = 0, lastHTML = '';
+  refresh.hidden = false;
+  panel.querySelector('[data-import-fallback]').hidden = true;
+  panel.querySelector('[data-import-auto]').hidden = false;
+  function schedule() {
+    clearTimeout(timer);
+    if (!document.hidden && attempts < 120) timer = setTimeout(update, 10000);
+  }
+  async function update() {
+    if (busy || document.hidden) return;
+    busy = true;
+    refresh.disabled = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    try {
+      attempts += 1;
+      const response = await fetch(panel.dataset.importProgress, {
+        credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal: controller.signal,
+      });
+      if (!response.ok || response.headers.get('X-Repeater-Import-Status') !== '1') throw new Error('status');
+      const html = await response.text();
+      // Do not move focus or repeatedly announce unchanged text to screen readers.
+      if (lastHTML !== html && !rows.contains(document.activeElement)) {
+        rows.innerHTML = html;
+        lastHTML = html;
+      }
+      const overview = rows.querySelector('[data-import-overview]');
+      if (overview) {
+        [['[data-person-summary]', 'summary'], ['[data-library-summary]', 'library'], ['small[data-content-status]', 'contentStatus']].forEach(([selector, key]) => {
+          const target = document.querySelector(selector);
+          if (target && target.textContent !== overview.dataset[key]) target.textContent = overview.dataset[key];
+        });
+      }
+      notice.textContent = attempts >= 120 ? notice.dataset.paused : '';
+    } catch (_) {
+      notice.textContent = notice.dataset.error;
+      // A disconnected session/network needs an explicit retry, not endless requests.
+      attempts = 120;
+    } finally {
+      clearTimeout(timeout);
+      refresh.disabled = false;
+      busy = false;
+      schedule();
+    }
+  }
+  refresh.addEventListener('click', () => { attempts = 0; clearTimeout(timer); update(); });
+  document.addEventListener('visibilitychange', schedule);
+  schedule();
+});

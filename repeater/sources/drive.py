@@ -371,7 +371,9 @@ def folder_details(account: AccountContext, folder_id: str) -> dict:
     return {"id": folder_id, "name": str(meta.get("name") or folder_id)[:200]}
 
 
-def browse_folders(account: AccountContext, *, page_token: str = "") -> tuple[list[dict], str]:
+def browse_folders(
+    account: AccountContext, *, page_token: str = "", search: str = ""
+) -> tuple[list[dict], str]:
     """One bounded page of accessible folders, including shared Drives; caller controls pagination."""
     params = {
         "q": f"mimeType = '{FOLDER_MIME}' and trashed = false",
@@ -381,6 +383,10 @@ def browse_folders(account: AccountContext, *, page_token: str = "") -> tuple[li
         "supportsAllDrives": "true",
         "includeItemsFromAllDrives": "true",
     }
+    if search:
+        # Drive query literals escape backslashes first, then apostrophes.
+        literal = search[:200].replace("\\", "\\\\").replace("'", "\\'")
+        params["q"] += f" and name contains '{literal}'"
     if page_token:
         params["pageToken"] = page_token
     with http.client(timeout=API_TIMEOUT) as c:
