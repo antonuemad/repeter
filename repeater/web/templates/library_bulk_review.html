@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+{% block title %}{{ t('bulk.review_title') }}{% endblock %}
+{% block content %}
+<section class="library-bulk-review stack">
+  <div><h1>{{ t('bulk.review_title') }}</h1><p><bdi>{{ profile.name if profile else t('plan.unassigned') }}</bdi> · <strong>{{ t('bulk.action_' ~ bulk.action) }}</strong>{% if bulk.action in ['exclude', 'include'] %} · {{ t('bulk.all') if bulk.scope == 'all' else platform_name(bulk.scope) }}{% endif %}</p></div>
+  <p>{{ t('bulk.review_count', count=items|length, changed=changed_count) }}</p>
+  <p class="measure">{{ t('bulk.help_' ~ bulk.action) }}</p>
+  <ul class="plain bulk-review-items">{% for item in items %}<li><a href="/library/{{ item.id }}" dir="auto">{{ m.video_title(item) }}</a>{{ m.badge('video_status', item.status) }}<span class="small muted">{{ t('media.' ~ item.media_kind ~ '_' ~ item.content_format) }}</span></li>{% endfor %}</ul>
+  <p class="measure muted">{{ t('bulk.safety') if changed_count else t('bulk.no_change') }}</p>
+  <form method="post" action="/library/bulk/apply" class="actions">
+    {{ m.csrf() }}<input type="hidden" name="confirmation" value="{{ confirmation }}">
+    {% for key, value in state.items() %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+    <input type="hidden" name="action" value="{{ bulk.action }}"><input type="hidden" name="scope" value="{{ bulk.scope }}">{% for item in items %}<input type="hidden" name="video_ids" value="{{ item.id }}">{% endfor %}
+    <button class="button" type="submit">{{ t('bulk.confirm') }}</button><button class="button secondary" type="submit" formaction="/library/bulk/review" name="edit" value="1">{{ t('bulk.edit_selection') }}</button><a href="{{ back }}">{{ t('common.cancel') }}</a>
+  </form>
+</section>
+{% endblock %}

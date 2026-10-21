@@ -1,5 +1,6 @@
 """Copy for the person-led draft planning flow; kept together in both supported languages."""
 
+from repeater.web.library_i18n import COPY as LIBRARY_COPY
 from repeater.web.media_i18n import COPY as MEDIA_COPY
 from repeater.web.schedule_i18n import COPY as SCHEDULE_COPY
 
@@ -785,6 +786,7 @@ COPY.update(
         )
     }
 )
+COPY.update(LIBRARY_COPY)
 COPY.update(SCHEDULE_COPY)
 COPY.update(MEDIA_COPY)
 EN = {k: v[0] for k, v in COPY.items()}

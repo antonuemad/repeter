@@ -389,3 +389,27 @@ A filtered person's Calendar uses their plan time zone, including date boundarie
 empty days before start, outside the preview, unselected weekdays, elapsed times and daylight-saving
 gaps. The combined Calendar retains workspace time. Neither publishing eligibility nor safety
 holds are relaxed. Both publishing and TikTok publication-audit flags remain false.
+
+## Library management usability (2026-10-21)
+
+Library management stays within the selected person, with literal title/caption search (including
+saved overrides), preserved search/filter pagination and an Excluded view. Compact previews retain
+full media thumbnails without cropping. Native per-card checkboxes associate with one separate
+form, so existing per-item forms remain valid. Selection is limited to 24 explicit items and the
+current page; changing page, person or filters clears it. Optional JavaScript adds select-page,
+clear, an announced count and a sticky action bar after selection. Preparing/duplicate items
+explain their unavailable bulk state. No JavaScript is required to select and review.
+
+Bulk exclusion/removal targets one supported platform or all, preserving other preferences.
+Archive keeps files and removes items from rotation; bulk restore accepts archived ready files
+or person text, preserves exclusions, and leaves preparation recovery to existing item details.
+A separate review lists names, scope and actual change count before confirmation. Signed, timed,
+actor/session/workspace-bound confirmation rechecks row snapshots and plan revisions under locks;
+changed selections require fresh review. Actual changes stop the person's plan for review and
+cancel untouched reservations. Published, started and uncertain attempts remain in history.
+No-op choices do not pause plans or add logs. No files, content history or remote content are deleted.
+
+These operations enqueue no jobs, request no publication or draft upload, and do not alter
+provider access or the two production publishing/audit flags. Cancellation metadata and saved
+platform preferences are local preparation changes only. Safety guards for format compatibility,
+source accounts, pending outcomes and repeat intervals continue to apply after removing exclusions.

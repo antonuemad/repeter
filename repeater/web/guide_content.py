@@ -303,8 +303,8 @@ CHAPTERS = (
         ),
         (
             (
-                "افتح تبويب «المحتوى» عند الشخص ثم «إدارة كل المحتوى»، واستخدم تصفية الحالة للوصول للعنصر. المكتبة غير المخصصة متاحة ضمن الأدوات المتقدمة.",
-                "Open the person’s Content section, then Manage all content. Use the status filters to find an item. The unassigned library remains under Advanced tools.",
+                "افتح تبويب «المحتوى» عند الشخص ثم «إدارة كل المحتوى»، وابحث بالعنوان أو النص واستخدم فلاتر الحالة، ومنها مستبعد. المكتبة غير المخصصة متاحة ضمن الأدوات المتقدمة.",
+                "Open the person’s Content section, then Manage all content. Search titles or captions and use status filters, including Excluded. The unassigned library remains under Advanced tools.",
             ),
             (
                 "افتح العنصر لمعاينته وتعديل العنوان والوصف والمنصات المتاحة وشكل المحتوى.",
@@ -317,6 +317,14 @@ CHAPTERS = (
             (
                 "راجع أسباب عدم التوافق الظاهرة. ستوري Instagram يحتاج حساب Business معروف النوع، والستوريز في التجربة تحتاج محتوى رأسيًا بنسبة 9:16.",
                 "Read any compatibility reasons. Instagram Stories need a known Business account type; pilot stories require vertical 9:16 media.",
+            ),
+            (
+                "للإدارة الجماعية، حدّد العناصر من مربعات التحديد أو اختَر تحديد عناصر الصفحة. التحديد للصفحة الحالية فقط، بحد أقصى ٢٤ عنصرًا، ولا ينتقل عند تغيير الصفحة أو الفلاتر.",
+                "For bulk changes, use the checkboxes or Select this page. Selection covers this page only, up to 24 items, and clears when changing page or filters.",
+            ),
+            (
+                "اختَر استبعادًا من منصة أو كل المنصات، أو أرشفة، ثم مراجعة التغييرات. راجع أسماء العناصر والنطاق وأكّد. لإلغاء الاستبعاد استخدم فلتر مستبعد، وللاستعادة استخدم فلتر مؤرشف؛ العناصر المحتاجة تجهيزًا تُستعاد منفردة من تفاصيلها.",
+                "Choose exclusion from one or all platforms, or Archive, then Review changes. Check item names and scope before confirming. Use Excluded to remove exclusions, or Archived to restore ready items. Items needing preparation are restored individually from their details.",
             ),
             (
                 "احفظ التعديل ثم حدّث المعاينة لترى تأثيره على المواعيد القادمة. لإبعاد عنصر عن منصة، ألغِ اختيارها في إعدادات العنصر ثم احفظ.",

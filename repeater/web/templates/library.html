@@ -3,20 +3,37 @@
 {% block title %}{{ t('nav.library') }}{% endblock %}
 {% block content %}
 <div class="page-heading"><div><h1>{{ t('nav.library') }}{% if profile %} · <bdi>{{ profile.name }}</bdi>{% endif %}</h1><p>{{ t('simple.library_help') }}</p></div>{% if plan %}<a class="button" href="/people/{{ plan.profile_id }}?section=preview">{{ t('plan.preview') }}</a>{% endif %}</div>
-<form method="get" class="person-switch"><label>{{ t('simple.library_for') }}<select name="profile_id"><option value="0"{% if not profile %} selected{% endif %}>{{ t('plan.unassigned') }}</option>{% for person in profiles %}<option value="{{ person.id }}"{% if profile_id == person.id %} selected{% endif %}>{{ person.name }}</option>{% endfor %}</select></label><button class="button secondary">{{ t('simple.open_library') }}</button>{% if plan %}<a href="/people/{{ plan.profile_id }}?section=content">{{ t('wizard.resume') }}</a>{% endif %}</form>
-{% set open_upload = not videos or request.query_params.get('upload') == '1' %}
+<div class="library-tools"><form method="get" class="person-switch"><label>{{ t('simple.library_for') }}<select name="profile_id"><option value="0"{% if not profile %} selected{% endif %}>{{ t('plan.unassigned') }}</option>{% for person in profiles %}<option value="{{ person.id }}"{% if profile_id == person.id %} selected{% endif %}>{{ person.name }}</option>{% endfor %}</select></label><button class="button secondary">{{ t('simple.open_library') }}</button>{% if plan %}<a href="/people/{{ plan.profile_id }}?section=content">{{ t('wizard.resume') }}</a>{% endif %}</form>
+<form method="get" class="library-search">
+  <input type="hidden" name="profile_id" value="{{ profile_id or 0 }}"><input type="hidden" name="status" value="{{ status_filter }}">
+  <label>{{ t('bulk.search') }}<input type="search" name="q" maxlength="200" value="{{ q }}" placeholder="{{ t('bulk.search_hint') }}"></label><button class="button secondary">{{ t('bulk.find') }}</button>{% if q %}<a href="/library?profile_id={{ profile_id or 0 }}&amp;status={{ status_filter }}">{{ t('bulk.clear_search') }}</a>{% endif %}
+</form>
+</div>
+{% set open_upload = (not videos and not q and status_filter == 'active') or request.query_params.get('upload') == '1' %}
 <div class="library-add-options">{% include "plans/content_forms.html" %}</div>
-<nav class="tabs" aria-label="{{ t('library.filter') }}">
+
+<nav class="tabs library-filters" aria-label="{{ t('library.filter') }}">
   {% for f in status_filters %}
-  <a href="/library?status={{ f }}{{ "&profile_id=" ~ profile_id if profile_id else "&profile_id=0" }}"{% if f == status_filter %} aria-current="page"{% endif %}>{{ t('library.filter_' ~ f) }}</a>
+  <a href="/library?status={{ f }}{{ "&profile_id=" ~ profile_id if profile_id else "&profile_id=0" }}{{ "&q=" ~ (q|urlencode) if q else "" }}"{% if f == status_filter %} aria-current="page"{% endif %}>{{ t('library.filter_' ~ f) }}</a>
   {% endfor %}
 </nav>
 
+{% if bulk_error %}<p class="flash flash-error" role="alert">{{ t(bulk_error.key, **bulk_error.params) }}</p>{% endif %}
 {% if videos %}
+<form id="library-bulk" class="library-bulk" method="post" action="/library/bulk/review" data-library-bulk>
+  {{ m.csrf() }}<input type="hidden" name="profile_id" value="{{ profile_id or 0 }}"><input type="hidden" name="status" value="{{ status_filter }}"><input type="hidden" name="page" value="{{ pager.number }}"><input type="hidden" name="q" value="{{ q }}">
+  <fieldset><legend>{{ t('bulk.manage') }}</legend>
+    <div class="bulk-selection"><span role="status" aria-live="polite" data-selection-count data-template="{{ t('bulk.selected', count='{count}') }}">{{ t('bulk.selected', count=bulk_draft.get('selected', [])|length) }}</span><button type="button" class="button secondary small" data-select-page hidden>{{ t('bulk.select_page') }}</button><button type="button" class="button secondary small" data-clear-selection hidden>{{ t('bulk.clear') }}</button></div>
+    <p class="muted small" id="bulk-selection-help">{{ t('bulk.selection_help') }}</p>
+    <div class="bulk-controls" data-bulk-controls><label>{{ t('bulk.action') }}<select name="action" required><option value="">{{ t('bulk.choose') }}</option>{% for action in ['exclude', 'archive', 'include', 'restore'] %}<option value="{{ action }}"{% if bulk_draft.get('action') == action %} selected{% endif %}>{{ t('bulk.choice_' ~ action) }}</option>{% endfor %}</select></label>
+    <label data-bulk-scope>{{ t('bulk.scope') }}<select name="scope"><option value="all">{{ t('bulk.all_short') }}</option>{% for p in bulk_platforms %}<option value="{{ p }}"{% if bulk_draft.get('scope') == p %} selected{% endif %}>{{ platform_name(p) }}</option>{% endfor %}</select></label><button class="button" type="submit" data-bulk-review>{{ t('bulk.review') }}</button></div>
+  </fieldset>
+</form>
 <div class="video-grid">
   {% for v in videos %}
   {% set vposts = posts.get(v.id, {}) %}
   <article class="video-card">
+    <label class="library-select"><input form="library-bulk" type="checkbox" name="video_ids" value="{{ v.id }}" aria-describedby="bulk-selection-help"{% if v.id in bulk_draft.get('selected', []) %} checked{% endif %}{% if v.status in ['importing', 'processing', 'duplicate'] %} disabled{% endif %}>{{ t('bulk.select') }} <span class="visually-hidden">{{ m.video_title(v) }}</span></label>
     <a href="/library/{{ v.id }}" class="thumb" aria-hidden="true" tabindex="-1">
       {% if v.thumbnail_path %}
       <img src="/library/{{ v.id }}/thumb.jpg" alt="" loading="lazy">
@@ -32,6 +49,8 @@
         {% if v.source_platform %}{{ m.platform(v.source_platform) }}{% else %}<span class="platform">{{ t('library.manual') }}</span>{% endif %}
         <span class="muted">{{ fmt_dt(v.created_at, zone, 'date') }}</span>
       </div>
+      {% if video_exclusions[v.id] %}<p class="library-excluded small">{{ t('bulk.excluded_all') if bulk_platforms|sort == video_exclusions[v.id]|sort else t('bulk.excluded', platforms=video_exclusion_names[v.id]|join('، ')) }}</p>{% endif %}
+      {% if v.status in ['importing', 'processing', 'duplicate'] %}<p class="small muted">{{ t('bulk.unselectable') }}</p>{% endif %}
       {% if accounts %}
       <ul class="post-status">
         {% for a in accounts %}
@@ -47,7 +66,7 @@
         {% if publishing_enabled and v.status == 'ready' and accounts %}
         <form method="post" action="/library/{{ v.id }}/publish-now" class="inline publish-now" data-confirm="{{ t('library.publish_now_confirm') }}">
           {{ m.csrf() }}
-          <input type="hidden" name="next" value="/library?status={{ status_filter }}&page={{ pager.number }}{{ "&profile_id=" ~ profile_id if profile_id else "&profile_id=0" }}">
+          <input type="hidden" name="next" value="/library?status={{ status_filter }}&page={{ pager.number }}{{ "&profile_id=" ~ profile_id if profile_id else "&profile_id=0" }}{{ "&q=" ~ (q|urlencode) if q else "" }}">
           <label class="visually-hidden" for="acc-{{ v.id }}">{{ t('library.publish_to') }}</label>
           <select name="account_id" id="acc-{{ v.id }}" required>
             <option value="">{{ t('library.publish_to') }}</option>
@@ -60,12 +79,12 @@
         {% endif %}
         {% if v.status == 'archived' %}
         <form method="post" action="/library/{{ v.id }}/restore" class="inline">
-          {{ m.csrf() }}<input type="hidden" name="next" value="/library?status={{ status_filter }}&page={{ pager.number }}{{ "&profile_id=" ~ profile_id if profile_id else "&profile_id=0" }}">
+          {{ m.csrf() }}<input type="hidden" name="next" value="/library?status={{ status_filter }}&page={{ pager.number }}{{ "&profile_id=" ~ profile_id if profile_id else "&profile_id=0" }}{{ "&q=" ~ (q|urlencode) if q else "" }}">
           <button type="submit" class="button small secondary">{{ t('library.restore') }}</button>
         </form>
         {% elif v.status not in ['importing', 'duplicate'] %}
         <form method="post" action="/library/{{ v.id }}/archive" class="inline" data-confirm="{{ t('library.archive_confirm') }}">
-          {{ m.csrf() }}<input type="hidden" name="next" value="/library?status={{ status_filter }}&page={{ pager.number }}{{ "&profile_id=" ~ profile_id if profile_id else "&profile_id=0" }}">
+          {{ m.csrf() }}<input type="hidden" name="next" value="/library?status={{ status_filter }}&page={{ pager.number }}{{ "&profile_id=" ~ profile_id if profile_id else "&profile_id=0" }}{{ "&q=" ~ (q|urlencode) if q else "" }}">
           <button type="submit" class="button small secondary">{{ t('library.archive') }}</button>
         </form>
         {% endif %}
@@ -74,7 +93,8 @@
   </article>
   {% endfor %}
 </div>
-{{ m.pager(pager, '/library', {'status': status_filter, 'profile_id': profile_id|string if profile_id else '0'}) }}
+{{ m.pager(pager, '/library', {'status': status_filter, 'profile_id': profile_id|string if profile_id else '0', 'q': q}) }}
+{% elif q or status_filter != 'active' %}<section class="card"><p>{{ t('bulk.no_matches') }}</p><a href="/library?profile_id={{ profile_id or 0 }}">{{ t('bulk.show_active') }}</a></section>
 {% else %}
 <section class="card"><div class="empty-state">{{ m.icon('library', 32) }}<h3>{{ t('library.empty_title') }}</h3><p>{{ t('media.empty_help') if profile else t('library.empty_help') }}</p><a href="{{ '/people/' ~ plan.profile_id ~ '?section=content' if plan else '/plans' if profile else '/sources' }}">{{ t('wizard.add_content') if plan else t('nav.plans') if profile else t('nav.sources') }}</a></div></section>
 {% endif %}

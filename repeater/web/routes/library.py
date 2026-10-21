@@ -9,13 +9,14 @@ import mimetypes
 import secrets
 from pathlib import Path
 from typing import Any, BinaryIO
+from urllib.parse import urlencode
 
 import anyio.to_thread
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from python_multipart.exceptions import FormParserError
 from python_multipart.multipart import MultipartParser, parse_options_header
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 from starlette.concurrency import run_in_threadpool
 
@@ -23,6 +24,7 @@ from repeater.activity import log_activity
 from repeater.config import get_settings
 from repeater.engine import actions, captions
 from repeater.engine import rules as engine_rules
+from repeater.engine.captions import platform_name
 from repeater.jobs import kinds
 from repeater.media import content, storage
 from repeater.messages import Message
@@ -65,6 +67,7 @@ PAGE_SIZE = 24
 STATUS_FILTERS: dict[str, tuple[VideoStatus, ...]] = {
     "active": tuple(s for s in VideoStatus if s not in (VideoStatus.ARCHIVED, VideoStatus.DUPLICATE)),
     "ready": (VideoStatus.READY,),
+    "excluded": (VideoStatus.READY, VideoStatus.FAILED),
     "processing": (VideoStatus.IMPORTING, VideoStatus.PROCESSING),
     "failed": (VideoStatus.FAILED,),
     "duplicate": (VideoStatus.DUPLICATE,),
@@ -154,6 +157,7 @@ def library(
     status: str = "active",
     page: str = "1",
     profile_id: int | None = None,
+    q: str = "",
 ) -> Response:
     if profile_id is None:
         selected = getattr(request.state, "active_person", None)
@@ -168,10 +172,23 @@ def library(
                 .limit(1)
             )
         )
-    return _library_page(request, db, ctx, status, page, profile_id or None)
+    return _library_page(request, db, ctx, status, page, profile_id or None, q=q)
 
 
-def _library_page(request, db, ctx, status="active", page="1", profile_id=None, *, draft=None) -> Response:
+def _library_page(
+    request,
+    db,
+    ctx,
+    status="active",
+    page="1",
+    profile_id=None,
+    *,
+    draft=None,
+    q="",
+    bulk_draft=None,
+    bulk_error=None,
+    response_status=None,
+) -> Response:
     statuses = STATUS_FILTERS.get(status) or STATUS_FILTERS["active"]
     status = status if status in STATUS_FILTERS else "active"
     profiles = list(
@@ -189,8 +206,32 @@ def _library_page(request, db, ctx, status="active", page="1", profile_id=None, 
         Video.status.in_(statuses),
         Video.profile_id.is_not_distinct_from(profile_id),
     )
+    q = q[:200].strip()
+    if status == "excluded":
+        where += (
+            or_(*(Video.overrides["exclude_platforms"].contains([p.value]) for p in PUBLISH_PLATFORMS)),
+        )
+    if q:
+        pattern = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        where += (
+            or_(
+                *(
+                    field.ilike(pattern, escape="\\")
+                    for field in (
+                        Video.title,
+                        Video.caption,
+                        Video.overrides["title"].astext,
+                        Video.overrides["caption"].astext,
+                    )
+                )
+            ),
+        )
     total = int(db.execute(select(func.count()).select_from(Video).where(*where)).scalar_one())
-    pager = Page(number=query_int(page, default=1), size=PAGE_SIZE, total=total)
+    pager = Page(
+        number=min(query_int(page, default=1), max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)),
+        size=PAGE_SIZE,
+        total=total,
+    )
     videos = list(
         db.execute(
             select(Video)
@@ -203,6 +244,16 @@ def _library_page(request, db, ctx, status="active", page="1", profile_id=None, 
     accounts = [] if profile_id is not None else target_accounts(db, ctx.workspace.id)
     context = {
         "draft": draft or {},
+        "q": q,
+        "bulk_draft": bulk_draft or {},
+        "bulk_error": bulk_error,
+        "preference_return": "/library?"
+        + urlencode({"profile_id": profile_id or 0, "status": status, "page": pager.number, "q": q}),
+        "bulk_platforms": [p.value for p in PUBLISH_PLATFORMS],
+        "video_exclusions": {v.id: sorted(_excluded_platforms(v)) for v in videos},
+        "video_exclusion_names": {
+            v.id: [platform_name(p) for p in sorted(_excluded_platforms(v))] for v in videos
+        },
         "plan": db.scalar(
             select(ContentPlan).where(
                 ContentPlan.workspace_id == ctx.workspace.id, ContentPlan.profile_id == profile_id
@@ -225,7 +276,7 @@ def _library_page(request, db, ctx, status="active", page="1", profile_id=None, 
     }
     if profile and context["plan"]:
         remember_person(request, profile, context["plan"])
-    return render(request, "library.html", context, status_code=422 if draft else 200)
+    return render(request, "library.html", context, status_code=response_status or (422 if draft else 200))
 
 
 @router.get("/library/{video_id}")

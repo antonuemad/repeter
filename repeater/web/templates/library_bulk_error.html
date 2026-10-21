@@ -1,0 +1,3 @@
+{% extends "base.html" %}
+{% block title %}{{ t('bulk.review_title') }}{% endblock %}
+{% block content %}<section class="library-bulk-review stack"><h1>{{ t('bulk.review_title') }}</h1><p role="alert">{{ t(error, **(error_params|default({}))) }}</p><a class="button secondary" href="{{ back }}">{{ t('bulk.back') }}</a></section>{% endblock %}

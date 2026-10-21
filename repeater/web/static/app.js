@@ -304,3 +304,29 @@ document.querySelectorAll('[data-schedule-form]').forEach((form) => {
   form.addEventListener('change', update);
   update();
 });
+
+// Bulk selection is page-local. Native checkboxes also submit without JavaScript.
+document.querySelectorAll('[data-library-bulk]').forEach((form) => {
+  const checks = [...document.querySelectorAll(`input[type="checkbox"][form="${form.id}"][name="video_ids"]`)];
+  const count = form.querySelector('[data-selection-count]');
+  const all = form.querySelector('[data-select-page]');
+  const clear = form.querySelector('[data-clear-selection]');
+  all.hidden = false;
+  clear.hidden = false;
+  function update() {
+    const selected = checks.filter(input => input.checked && !input.disabled).length;
+    count.textContent = count.dataset.template.replace('{count}', selected);
+    form.classList.toggle('has-selection', selected > 0);
+    form.querySelector('[data-bulk-controls]').hidden = selected === 0;
+    form.querySelector('[data-bulk-review]').disabled = selected === 0;
+    clear.disabled = selected === 0;
+    all.disabled = !checks.some(input => !input.disabled && !input.checked);
+    form.querySelector('[data-bulk-scope]').hidden = ['archive', 'restore'].includes(form.elements.action.value);
+    checks.forEach(input => input.closest('.video-card').classList.toggle('is-selected', input.checked));
+  }
+  checks.forEach(input => input.addEventListener('change', update));
+  form.addEventListener('change', update);
+  all.addEventListener('click', () => { checks.forEach(input => { if (!input.disabled) input.checked = true; }); update(); });
+  clear.addEventListener('click', () => { checks.forEach(input => { input.checked = false; }); update(); });
+  update();
+});
