@@ -31,5 +31,5 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
   {% endif %}
   {% endif %}
 </section>
-<div class="actions"><a class="button secondary" href="{{ '/plans/' ~ plan.id if plan else '/setup' }}">{{ t('plan.preview') if plan else t('tiktok_read.setup') }}</a></div>
+<div class="actions"><a class="button secondary" href="{{ '/people/' ~ plan.profile_id ~ '?section=preview' if plan else '/setup' }}">{{ t('plan.preview') if plan else t('tiktok_read.setup') }}</a></div>
 {% endblock %}

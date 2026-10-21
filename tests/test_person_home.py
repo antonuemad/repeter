@@ -296,3 +296,28 @@ def test_mixed_disconnected_selection_needs_review_and_expired_page_has_recovery
     assert f"/connect/youtube?return_to=/people/{plan.profile_id}%3Fsection%3Daccounts" in html
     assert f'name="targets" value="{second.id}" checked disabled' in html
     safe(db)
+
+
+def test_secondary_content_entries_return_to_person_home(web_owner, db, make_account, locked_simulation):
+    from tests.test_tiktok_read_view import api, reader
+
+    plan = create_plan(web_owner, db)
+    empty = web_owner.get(f"/library?profile_id={plan.profile_id}").text.split('class="empty-state"', 1)[1]
+    assert f'href="{hub(plan, "content")}"' in empty
+    account = make_account("facebook")
+    save(web_owner, db, plan, "platforms", {"source_account_id": account.id, "import_mode": "latest30"})
+    source = db.scalar(select(Source))
+    assert web_owner.get(f"/sources/{source.id}/edit", follow_redirects=False).headers["location"] == hub(
+        plan, "content"
+    )
+    assert f'href="{hub(plan, "content")}"' in web_owner.get("/sources").text
+    tiktok = reader(db, make_account)
+    tiktok.profile_id = plan.profile_id
+    db.commit()
+    api(locked_simulation, tiktok)
+    response = web_owner.get(f"/accounts/{tiktok.id}/videos")
+    assert response.status_code == 200 and f'href="{hub(plan, "preview")}"' in response.text
+    assert all(
+        str(call.request.url).startswith("https://open.tiktokapis.com/") for call in locked_simulation.calls
+    )
+    safe(db)

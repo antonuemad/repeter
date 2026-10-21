@@ -76,6 +76,6 @@
 </div>
 {{ m.pager(pager, '/library', {'status': status_filter, 'profile_id': profile_id|string if profile_id else '0'}) }}
 {% else %}
-<section class="card"><div class="empty-state">{{ m.icon('library', 32) }}<h3>{{ t('library.empty_title') }}</h3><p>{{ t('media.empty_help') if profile else t('library.empty_help') }}</p><a href="{{ '/plans/' ~ plan.id ~ '/setup/content' if plan else '/plans' if profile else '/sources' }}">{{ t('wizard.add_content') if plan else t('nav.plans') if profile else t('nav.sources') }}</a></div></section>
+<section class="card"><div class="empty-state">{{ m.icon('library', 32) }}<h3>{{ t('library.empty_title') }}</h3><p>{{ t('media.empty_help') if profile else t('library.empty_help') }}</p><a href="{{ '/people/' ~ plan.profile_id ~ '?section=content' if plan else '/plans' if profile else '/sources' }}">{{ t('wizard.add_content') if plan else t('nav.plans') if profile else t('nav.sources') }}</a></div></section>
 {% endif %}
 {% endblock %}

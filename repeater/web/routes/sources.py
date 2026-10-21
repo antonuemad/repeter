@@ -113,15 +113,6 @@ def sources_page(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
             "nav": "sources",
             "sources": sources,
             "kinds": [k.value for k in EDITABLE_KINDS],
-            "source_plans": dict(
-                db.execute(
-                    select(Source.id, ContentPlan.id)
-                    .join(ContentPlan, ContentPlan.profile_id == Source.profile_id)
-                    .where(
-                        ContentPlan.workspace_id == ctx.workspace.id, Source.workspace_id == ctx.workspace.id
-                    )
-                ).all()
-            ),
         },
     )
 
@@ -142,8 +133,8 @@ def new_source(request: Request, db: DB, ctx: CurrentWorkspace, kind: str = "pla
 
 @router.get("/sources/{source_id}/edit")
 def edit_source(request: Request, db: DB, ctx: CurrentWorkspace, source_id: int) -> Response:
-    plan_id = db.scalar(
-        select(ContentPlan.id)
+    person_id = db.scalar(
+        select(ContentPlan.profile_id)
         .join(Source, Source.profile_id == ContentPlan.profile_id)
         .where(
             Source.id == source_id,
@@ -151,9 +142,8 @@ def edit_source(request: Request, db: DB, ctx: CurrentWorkspace, source_id: int)
             ContentPlan.workspace_id == ctx.workspace.id,
         )
     )
-    if plan_id:
-        section = "platforms" if db.get(Source, source_id).kind == SourceKind.PLATFORM_API else "source"
-        return RedirectResponse(f"/plans/{plan_id}/edit#{section}", 303)
+    if person_id:
+        return RedirectResponse(f"/people/{person_id}?section=content", 303)
     return _form_page(request, db, ctx, _get_source(db, ctx, source_id), is_new=False)
 
 

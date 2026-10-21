@@ -523,11 +523,11 @@ def test_plan_owned_sources_use_plan_controls_and_keep_folder(web_owner, db, mak
     db.refresh(p)
     assert (
         web_owner.get(f"/sources/{p.source_id}/edit", follow_redirects=False).headers["location"]
-        == f"/plans/{p.id}/edit#source"
+        == f"/people/{p.profile_id}?section=content"
     )
     assert post(web_owner, f"/sources/{p.source_id}/toggle").status_code == 404
     html = web_owner.get("/sources").text
-    assert f'href="/plans/{p.id}/edit#source"' in html
+    assert f'href="/people/{p.profile_id}?section=content"' in html
     assert f'action="/sources/{p.source_id}/toggle"' not in html
     source = db.get(Source, p.source_id)
     source.last_polled_at = utcnow()

@@ -87,9 +87,9 @@ def test_save_and_control_are_explicit_idempotent_and_safe(
     assert count(db, ScheduledPost) == 0 and not mock_network.calls
     assert (
         web_owner.get(f"/sources/{s.id}/edit", follow_redirects=False).headers["location"]
-        == f"/plans/{p.id}/edit#platforms"
+        == f"/people/{p.profile_id}?section=content"
     )
-    assert f"/plans/{p.id}/edit#platforms" in web_owner.get("/sources").text
+    assert f"/people/{p.profile_id}?section=content" in web_owner.get("/sources").text
     assert (
         save(web_owner, db, p, "platforms", {"source_account_id": a.id, "import_mode": "new"}).status_code
         == 422

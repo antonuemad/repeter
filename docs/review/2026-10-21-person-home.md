@@ -37,3 +37,8 @@ No real account was connected/disconnected and no production media or plan was e
 The production deployment must retain publishing=false, TikTok audited=false and the protected
 environment unchanged. CI and deployed source hashes are recorded against the delivered commit.
 This is interface verification; it does not replace usability sessions with novice customers.
+
+Final entry-point review also routes empty-library help, person-owned source errors and the
+TikTok read-view preview action back into the same person home. Calendar account-recovery
+links do the same. The unassigned legacy library remains findable under Advanced tools.
+A separate simulated acceptance case covers these entry points; no real TikTok request occurs.

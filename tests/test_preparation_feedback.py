@@ -226,7 +226,7 @@ def test_preview_heading_and_calendar_explain_the_actual_blocker(web_owner, db, 
     calendar = web_owner.get("/calendar", params={"day": at.date().isoformat(), "person": plan.profile_id})
     assert calendar.status_code == 200 and expected in calendar.text
     if reason.startswith("account_"):
-        assert f'href="/plans/{plan.id}/setup/accounts"' in calendar.text
+        assert f'href="/people/{plan.profile_id}?section=accounts"' in calendar.text
     assert db.scalar(select(func.count()).select_from(Job)) == original_jobs
     assert db.scalar(select(func.count()).select_from(ScheduledPost)) == original_posts
 
