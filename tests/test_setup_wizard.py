@@ -76,7 +76,7 @@ def test_guided_flow_keeps_context_and_never_publishes(web_owner, db, make_accou
     assert not db.get(Source, plan.source_id).enabled
     item = video(db, plan, "Synthetic first item")
     db.commit()
-    assert f"/plans/{plan.id}/setup/content" in web_owner.get(f"/library/{item.id}").text
+    assert f"/people/{plan.profile_id}?section=content" in web_owner.get(f"/library/{item.id}").text
     response = save(web_owner, db, plan, "schedule", schedule_data())
     assert response.headers["location"] == f"/plans/{plan.id}/setup/preview"
     for step in ("accounts", "content", "schedule", "preview"):
@@ -88,7 +88,10 @@ def test_guided_flow_keeps_context_and_never_publishes(web_owner, db, make_accou
     assert "Synthetic first item" in preview.text
     assert f"/plans/{plan.id}/setup/preview?page=2" in preview.text
     assert web_owner.get(f"/plans/{plan.id}/setup/preview?page=2").status_code == 200
-    assert f"/plans/{plan.id}/setup/content" in web_owner.get(f"/library?profile_id={plan.profile_id}").text
+    assert (
+        f"/people/{plan.profile_id}?section=content"
+        in web_owner.get(f"/library?profile_id={plan.profile_id}").text
+    )
     db.refresh(plan)
     assert plan.times == ["10:00"] and plan.repeat_after_days == 7 and not plan.enabled
     assert not db.scalar(select(func.count()).select_from(Job))

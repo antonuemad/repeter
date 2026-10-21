@@ -265,6 +265,8 @@ class ContentPlan(TimestampMixin, Base):
     revision: Mapped[int] = mapped_column(Integer, default=1)
     enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
+    schedule_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
 
 class PlanTarget(Base):
     __tablename__ = "plan_targets"

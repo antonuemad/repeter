@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 
 from repeater import access
 from repeater.activity import log_activity
+from repeater.config import get_settings
 from repeater.models import (
     ActivityLevel,
     RecoveryRequest,
@@ -38,7 +39,14 @@ def _private(response: Response) -> Response:
 
 
 def _page(request: Request, template: str, context: dict | None = None, *, status: int = 200) -> Response:
-    return _private(render(request, template, context, status_code=status))
+    return _private(
+        render(
+            request,
+            template,
+            {"automatic_recovery": get_settings().mail_configured, **(context or {})},
+            status_code=status,
+        )
+    )
 
 
 def _operator(ctx) -> None:

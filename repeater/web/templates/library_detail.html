@@ -3,7 +3,7 @@
 {% block title %}{{ m.video_title(video) }}{% endblock %}
 {% block content %}
 <p><a href="/library{{ '?profile_id=' ~ video.profile_id if video.profile_id else '?profile_id=0' }}">{{ t('common.back_arrow') }} {{ t('library.back') }}</a></p>
-<div class="page-heading"><h1 dir="auto">{{ m.video_title(video) }}</h1>{% if person_plan %}<a class="button secondary" href="/plans/{{ person_plan.id }}/setup/content">{{ t('wizard.resume') }}</a>{% endif %}</div>
+<div class="page-heading"><h1 dir="auto">{{ m.video_title(video) }}</h1>{% if person_plan %}<a class="button secondary" href="/people/{{ person_plan.profile_id }}?section=content">{{ t('wizard.resume') }}</a>{% endif %}</div>
 
 <div class="grid-2">
   <section class="card">
@@ -96,7 +96,9 @@
     <fieldset>
       <legend>{{ t('media.platforms') if video.profile_id else t('library.platforms') }}</legend>
       {% for p in publish_platforms %}
-      <label class="check"><input type="checkbox" name="platform_{{ p }}" value="1"{% if p not in excluded %} checked{% endif %}> {{ platform_name(p) }}</label>
+      {% if not video.profile_id or p in format_platforms %}<label class="check"><input type="checkbox" name="platform_{{ p }}" value="1"{% if p not in excluded %} checked{% endif %}> {{ platform_name(p) }}</label>{% else %}
+      {% if p not in excluded %}<input type="hidden" name="platform_{{ p }}" value="1">{% endif %}
+      <p class="small muted">{{ platform_name(p) }} · {{ t('hub.unsupported_format') }}</p>{% endif %}
       {% endfor %}
     </fieldset>
     <button type="submit" class="button">{{ t('common.save') }}</button>

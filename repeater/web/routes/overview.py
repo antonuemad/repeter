@@ -29,6 +29,7 @@ from repeater.models import (
     Video,
     VideoStatus,
 )
+from repeater.platforms import provider_name_for_account
 from repeater.timeutil import utcnow
 from repeater.web.auth import CurrentWorkspace
 from repeater.web.deps import DB
@@ -61,6 +62,14 @@ def overview(request: Request, db: DB, ctx: CurrentWorkspace) -> Response:
         # Only owners can act on the server's backup job.
         "backup_stale_hours": backups.stale_hours() if ctx.is_owner else None,
         "activity": _recent_activity(db, ws_id),
+    }
+    context["reconnect_purposes"] = {
+        a.id: a.platform.value if provider_name_for_account(a) == "google" else provider_name_for_account(a)
+        for a in context["reconnect_accounts"]
+    }
+    context["reconnect_returns"] = {
+        a.id: f"/people/{a.profile_id}?section=accounts" if a.profile_id else ""
+        for a in context["reconnect_accounts"]
     }
     return render(request, "overview.html", context)
 
@@ -204,6 +213,7 @@ def _incomplete_rules(db: Session, ws_id: int) -> list[tuple[RotationRule, list[
             RotationRule.workspace_id == ws_id,
             RotationRule.enabled.is_(True),
             ConnectedAccount.status == AccountStatus.ACTIVE,
+            ConnectedAccount.profile_id.is_(None),
         )
         .order_by(RotationRule.id)
     ).scalars()

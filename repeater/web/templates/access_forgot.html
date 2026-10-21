@@ -4,8 +4,8 @@
 {% block content %}
 <section class="card access-card">
   <h1>{{ t('access.forgot') }}</h1>
-  <p class="muted">{{ t('access.manual_recovery') }}</p>
-  {% if submitted %}<div class="flash flash-success" role="status">{{ t('access.request_received') }}</div>
+  <p class="muted">{{ t('hub.recovery_help') if automatic_recovery else t('access.manual_recovery') }}</p>
+  {% if submitted %}<div class="flash flash-success" role="status">{{ t('hub.recovery_received') if automatic_recovery else t('access.request_received') }}</div>
   {% else %}
   {% if error %}<div class="flash flash-error" role="alert">{{ t(error) }}</div>{% endif %}
   <form method="post" action="/forgot-password" class="stack">

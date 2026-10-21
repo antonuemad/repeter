@@ -329,3 +329,28 @@ pagination and permission checks remain intact. Missing account type clears stal
 type metadata rather than implying Business/Story eligibility. Direct Instagram Login keeps
 its separate supported account-type read. Acceptance uses synthetic OAuth and mocked HTTP;
 no real customer authorization or publication is performed by this fix.
+
+## Unified person home (2026-10-21)
+
+Customer creation and default task links now enter `/people/{profile_id}` with Pages, Content,
+Times and Preview sections. Supported Facebook/Instagram source setup stays inside Content;
+folder saving and starting monitoring remain distinct explicit actions. OAuth and upload/text
+errors retain the owned-person context. Existing setup/advanced routes and unassigned libraries
+remain available. The primary rail is Home, People, Content, Calendar and User guide; global
+accounts, activity, workspace settings and legacy tools are secondary settings destinations.
+
+Preparation uses selected active owned pages and compatible, non-excluded original content for
+each active page. A saved target that is disconnected or reassigned requires page review.
+Default daily times require explicit review/save. Migration 0010 adds a nullable review timestamp
+and preserves existing schedule-save evidence from the matching workspace's activity log; it does
+not change saved times, media, targets, execution state or provider access. Preview warnings no
+longer depend on unrelated legacy publishing rules. Preparation readiness does not establish
+publication approval or complete calendar coverage.
+
+Recovery instructions follow whether SMTP is configured, without revealing whether an email is
+registered. Instagram reconnect uses the saved login method, while Google reconnect distinguishes
+YouTube and Drive. Format-incompatible destinations are explained without offering an unsupported
+selection. All validation uses synthetic identities, local media and mocked provider HTTP.
+Production publishing and TikTok publication auditing remain disabled; no real posts or drafts
+are part of acceptance. Folder-picker improvements, bulk library management and richer visual
+calendar guidance remain later usability work.

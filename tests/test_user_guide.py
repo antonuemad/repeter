@@ -141,12 +141,12 @@ def test_unknown_or_restricted_topic_does_not_leak_admin_content(web_owner, topi
 def test_selected_person_is_retained_in_task_links_and_never_accepted_from_query(web_owner, db):
     first = create_plan(web_owner, db, "First synthetic person")
     second = create_plan(web_owner, db, "Second synthetic person")
-    web_owner.get(f"/plans/{first.id}/setup/content")
+    web_owner.get(f"/people/{first.profile_id}?section=content")
     for topic, destination in {
-        "accounts": f"/plans/{first.id}/setup/accounts",
-        "drive": f"/plans/{first.id}/setup/content",
-        "rotation": f"/plans/{first.id}/setup/schedule",
-        "preview": f"/plans/{first.id}/setup/preview",
+        "accounts": f"/people/{first.profile_id}?section=accounts",
+        "drive": f"/people/{first.profile_id}?section=content",
+        "rotation": f"/people/{first.profile_id}?section=schedule",
+        "preview": f"/people/{first.profile_id}?section=preview",
         "library": f"/library?profile_id={first.profile_id}",
         "calendar": f"/calendar?person={first.profile_id}",
         "connection-management": "/accounts",

@@ -1,10 +1,10 @@
 <section class="card"><h2>{{ t('plan.draft') }}</h2>
 <p><strong>{{ t('plan.coverage', ready=preview.ready, filled=preview.filled, empty=preview.empty) }}</strong></p>
 <p class="muted">{{ t('plan.saved_pages', n=preview.accounts|length) }} · <bdi>{{ plan.timezone }}</bdi>{% if plan.rotation_mode == 'repeat' %} · {{ t('plan.rotation_summary', days=plan.repeat_after_days) }}{% endif %}</p>
-{% if not preview.ready %}<p><a href="/plans/{{ plan.id }}/setup/content">{{ t('plan.no_videos') }}</a></p>{% endif %}
+{% if not preview.ready %}<p><a href="{{ setup_urls.content }}">{{ t('plan.no_videos') }}</a></p>{% endif %}
 <details><summary>{{ t('simple.preview_details') }}</summary>
 <p class="muted">{{ t('plan.sources_summary', n=social_sources|length + (1 if source else 0)) }} · {{ t('plan.' ~ plan.ordering) }}</p>
-<p>{{ t('plan.mode_' ~ plan.rotation_mode) }} · <a href="/plans/{{ plan.id }}/setup/schedule">{{ t('simple.times') }}</a></p>
+<p>{{ t('plan.mode_' ~ plan.rotation_mode) }} · <a href="{{ setup_urls.schedule }}">{{ t('simple.times') }}</a></p>
 {% if plan.rotation_mode == 'repeat' %}<p>{{ t('plan.rotation_counts', repeated=preview.repeated, waiting=preview.waiting) }}</p>{% endif %}
 {% if preview.blocked %}<p>{{ t('plan.pending_uses', n=preview.blocked) }}</p>{% endif %}
 {% if preview.excluded %}<p>{{ t('plan.excluded', n=preview.excluded) }}</p>{% endif %}{% if preview.truncated %}<p>{{ t('plan.truncated') }}</p>{% endif %}
@@ -22,8 +22,8 @@
 <ul class="plan-slot-targets">{% for entry in row.entries %}<li><span><bdi>{{ entry.account.display_name }}</bdi> {{ m.platform(entry.account.platform) }}</span>
 <div class="plan-entry-content">{% if entry.video %}<a href="/library/{{ entry.video.id }}" dir="auto">{{ m.video_title(entry.video) }}</a><span class="small muted">{{ t('media.' ~ entry.video.media_kind ~ '_' ~ entry.video.content_format) }}</span><span class="small muted">{{ t('plan.repeat_use') if entry.repeated else t('plan.first_use') }}</span>{% if entry.repeated %}<span class="small muted">{{ t('plan.previous_preview' if entry.previous_is_preview else 'plan.previous_actual', at=fmt_dt(entry.previous_at, plan.timezone)) }}</span>{% endif %}
 {% else %}<span>{{ t('plan.reason_' ~ entry.reason) }}</span>{% if entry.available_at %}<span class="small muted">{{ t('plan.eligible_after', at=fmt_dt(entry.available_at, plan.timezone)) }}</span>{% endif %}
-{% if entry.reason in ['account_disconnected', 'account_reconnect', 'account_unavailable'] %}<a href="/plans/{{ plan.id }}/setup/accounts">{{ t('plan.review_pages') }}</a>{% endif %}{% endif %}
+{% if entry.reason in ['account_disconnected', 'account_reconnect', 'account_unavailable'] %}<a href="{{ setup_urls.accounts }}">{{ t('plan.review_pages') }}</a>{% endif %}{% endif %}
 <a href="/calendar/{{ plan.id }}/{{ entry.account.id }}/edit?slot={{ (entry.original_at or row.at).isoformat()|urlencode }}">{{ t('calendar.edit') }}</a></div></li>{% endfor %}</ul></details>
 </li>{% endfor %}</ol>
-{{ m.pager(pager, preview_path, {}) }}
+{{ m.pager(pager, preview_path, {'section': 'preview'} if person_hub is defined and person_hub else {}) }}
 {% endif %}

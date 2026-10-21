@@ -7,6 +7,7 @@
     {{ m.csrf() }}
     {% if profile %}<input type="hidden" name="profile_id" value="{{ profile.id }}">{% endif %}
     {% if setup_plan_id is defined %}<input type="hidden" name="setup_plan_id" value="{{ setup_plan_id }}">{% endif %}
+    {% if person_hub is defined and person_hub %}<input type="hidden" name="person_hub" value="1">{% endif %}
     {% if profile %}<label>{{ t('media.format') }}<select name="format">{% for format in ['video_reel', 'image_post', 'image_story', 'video_story'] %}<option value="{{ format }}"{% if draft.get('form') == 'upload' and draft.get('format') == format %} selected{% endif %}>{{ t('media.' ~ format) }}</option>{% endfor %}</select></label>{% endif %}
     <label>{{ t('media.file') if profile else t('field.file') }}<input type="file" name="file" accept="{{ 'video/*,image/jpeg,image/png,image/webp' if profile else 'video/*' }}" required></label>
     <details{% if draft.get('form') == 'upload' and (draft.get('title') or draft.get('caption')) %} open{% endif %}><summary>{{ t('simple.file_details') }}</summary>
@@ -22,6 +23,7 @@
   <summary><strong>{{ t('media.compose') }}</strong><span class="small muted">{{ t('simple.text_hint') }}</span></summary>
   <p class="muted small">{{ t('media.compose_help') }}</p>
   <form method="post" action="/library/text" class="stack">{{ m.csrf() }}<input type="hidden" name="profile_id" value="{{ profile.id }}">{% if setup_plan_id is defined %}<input type="hidden" name="setup_plan_id" value="{{ setup_plan_id }}">{% endif %}
+    {% if person_hub is defined and person_hub %}<input type="hidden" name="person_hub" value="1">{% endif %}
     <label>{{ t('field.title') }}<input name="title" maxlength="300" required dir="auto" value="{{ draft.get('title', '') if draft.get('form') == 'text' else '' }}"></label>
     <label>{{ t('field.caption') }}<textarea name="caption" rows="5" maxlength="5000" required dir="auto">{{ draft.get('caption', '') if draft.get('form') == 'text' else '' }}</textarea></label>
     <button class="button" type="submit">{{ t('media.save') }}</button>

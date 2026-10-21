@@ -382,3 +382,30 @@ the existing navigation selection are retained. No detector rules were disabled.
 
 Finish verdict: SHIP for the customer preparation journey with publishing locked. This
 review does not establish live publishing acceptance or external-platform approval.
+
+## Person home — 2026-10-21
+
+A person now has one stable `/people/{profile_id}` home with native section links for
+Pages, Content, Times and Preview. The server renders the selected section; these are
+ordinary links, not JavaScript-only ARIA tabs. Creation, OAuth, source controls, inline
+uploads/text, validation errors and pagination return to the same owned person. Existing
+setup/editor URLs remain supported. Advanced settings and the full library remain explicit
+secondary destinations.
+
+Keep the Magic Lap palette, self-hosted fonts, logical properties, native controls and
+visible publishing lock. The person header summarizes selected connected pages and compatible
+items. Preparation labels distinguish a reviewed schedule from untouched defaults; compatibility
+is not a claim that every future slot can be filled. The compact four-column section navigation
+stacks icon, label and state on mobile. Secondary account/activity/legacy tools move into the
+Settings & activity disclosure; operator administration retains its role boundary.
+
+Expired page choices remain disabled with an adjacent reconnect link using their original
+provider. Explicitly disconnected accounts remain hidden from selection. Format-incompatible
+platforms are explanatory text rather than checkboxes; their saved preferences are preserved.
+
+Visual QA used synthetic local data in Chrome at desktop width and 390×844, Arabic/light and
+English/dark. Checked the section navigation, content disclosures, page choices, direct reconnect
+links, saved schedule → preview, and both themes without horizontal page overflow. The mobile
+header/navigation was shortened after the first render. This is implementation QA, not novice-user
+research. No publication, draft upload, provider authorization, new visual identity or animation
+was introduced. Finish disposition: ship within the existing publishing-locked preparation scope.

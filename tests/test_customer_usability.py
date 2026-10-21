@@ -46,15 +46,15 @@ def test_resume_and_navigation_follow_the_selected_person(web_owner, db, make_ac
     assert "First creator item" in page.text and "Second creator item" not in page.text
     assert f'href="/calendar?person={first.profile_id}"' in page.text
     home = web_owner.get("/")
-    assert f'href="/plans/{first.id}/setup/preview"' in home.text
-    assert f'href="/plans/{second.id}/setup/preview"' not in home.text
+    assert f'href="/people/{first.profile_id}?section=schedule"' in home.text
+    assert f'href="/people/{second.profile_id}?section=schedule"' not in home.text
     first.times = []
     db.commit()
     people = web_owner.get("/plans")
     assert "built-in method" not in people.text
-    assert f'href="/plans/{first.id}/setup/schedule"' in people.text
-    assert f'href="/plans/{second.id}/setup/accounts"' in people.text
-    assert f'href="/plans/{first.id}/setup/schedule"' in web_owner.get("/").text
+    assert f'href="/people/{first.profile_id}"' in people.text
+    assert f'href="/people/{second.profile_id}"' in people.text
+    assert f'href="/people/{first.profile_id}?section=schedule"' in web_owner.get("/").text
     web_owner.get(f"/calendar?person={second.profile_id}")
     assert "Second creator item" in web_owner.get("/library").text
     assert not db.scalar(select(func.count()).select_from(Job))

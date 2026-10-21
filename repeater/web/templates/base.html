@@ -28,16 +28,15 @@
     <details class="sidebar-navigation" open data-navigation>
       <summary class="nav-toggle">{{ m.icon('menu') }}<span>{{ t('nav.label') }}</span></summary>
       <nav class="mainnav" aria-label="{{ t('nav.label') }}">
-        {% for key, href, icon in [('overview', '/', 'overview'), ('plans', '/plans', 'plans'), ('library', '/library' ~ ('?profile_id=' ~ active_person.id if active_person else ''), 'library'), ('calendar', '/calendar' ~ ('?person=' ~ active_person.id if active_person else ''), 'schedule'), ('accounts', '/accounts', 'accounts')] %}
+        {% for key, href, icon in [('overview', '/', 'overview'), ('plans', '/plans', 'plans'), ('library', ('/people/' ~ active_person.id ~ '?section=content') if active_person else '/plans', 'library'), ('calendar', '/calendar' ~ ('?person=' ~ active_person.id if active_person else ''), 'schedule')] %}
         {% set selected = nav == key %}
         <a href="{{ href }}"{% if selected %} aria-current="page"{% endif %}>{{ m.icon(icon, 18) }}<span>{{ t('nav.' ~ key) }}</span>{% if selected %}<span class="nav-dot" aria-hidden="true"></span>{% endif %}</a>
         {% endfor %}
-        <a href="/activity"{% if nav == 'activity' %} aria-current="page"{% endif %}>{{ m.icon('activity',18) }}<span>{{ t('nav.activity') }}</span></a>
         <a href="/guide"{% if nav == 'guide' %} aria-current="page"{% endif %}>{{ m.icon('guide',18) }}<span>{{ t('nav.guide') }}</span></a>
-        <details class="nav-section"{% if nav in ['sources','rules','schedule'] %} open{% endif %}><summary>{{ m.icon('settings',18) }}{{ t('nav.advanced') }}</summary><div>
-        {% for key, href in [('sources','/sources'),('rules','/rules'),('schedule','/schedule')] %}<a href="{{ href }}"{% if nav == key %} aria-current="page"{% endif %}>{{ m.icon(key,18) }}<span>{{ t('nav.' ~ key) }}</span></a>{% endfor %}
+        <details class="nav-section"{% if nav in ['accounts','activity','settings','sources','rules','schedule'] %} open{% endif %}><summary>{{ m.icon('settings',18) }}{{ t('hub.settings') }}</summary><div>
+          {% for key, href in [('accounts','/accounts'),('activity','/activity'),('settings','/settings/workspace')] %}<a href="{{ href }}"{% if nav == key %} aria-current="page"{% endif %}>{{ t('nav.' ~ key) }}</a>{% endfor %}
+          <details class="nav-section"{% if nav in ['sources','rules','schedule'] %} open{% endif %}><summary>{{ t('nav.advanced') }}</summary><div>{% for key, href in [('sources','/sources'),('rules','/rules'),('schedule','/schedule')] %}<a href="{{ href }}"{% if nav == key %} aria-current="page"{% endif %}>{{ t('nav.' ~ key) }}</a>{% endfor %}</div></details>
         </div></details>
-        <a href="/settings/workspace" class="settings-link"{% if nav == 'settings' %} aria-current="page"{% endif %}>{{ m.icon('settings', 18) }}<span>{{ t('nav.settings') }}</span></a>
         {% if user.is_platform_admin %}<details class="nav-section"{% if nav in ['customers','operations'] %} open{% endif %}><summary>{{ m.icon('accounts',18) }}{{ t('nav.administration') }}</summary><div><a href="/admin/customers"{% if nav == 'customers' %} aria-current="page"{% endif %}>{{ t('access.customers') }}</a><a href="/admin/operations"{% if current_path == '/admin/operations' %} aria-current="page"{% endif %}>{{ t('operations.title') }}</a><a href="/admin/billing"{% if current_path == '/admin/billing' %} aria-current="page"{% endif %}>{{ t('commerce.catalog') }}</a></div></details>{% endif %}
       </nav>
     </details>
@@ -51,7 +50,7 @@
     <header class="topbar">
       <div class="topbar-row">
         {% if user and workspace %}
-        <div class="breadcrumb"><strong dir="auto">{{ workspace.name }}</strong>{% if active_person %}<span aria-hidden="true">/</span><a href="/plans" dir="auto" title="{{ t('simple.change_person') }}">{{ active_person.name }}</a>{% endif %}</div>
+        <div class="breadcrumb"><strong dir="auto">{{ workspace.name }}</strong>{% if active_person %}<span aria-hidden="true">/</span><a href="/people/{{ active_person.id }}" dir="auto" title="{{ t('hub.open_person') }}">{{ active_person.name }}</a>{% endif %}</div>
         {% else %}
         <a class="brand" href="/login"><img src="/static/favicon.svg" alt="" width="34" height="34"><span><strong>Repeater</strong><small>Magic Lap</small></span></a>
         {% endif %}

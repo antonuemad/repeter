@@ -1,4 +1,4 @@
-<section class="card" id="platforms">
+<section{% if wizard_step is not defined %} class="card"{% endif %} id="platforms">
   <h2>{{ t('plan.platforms') }}</h2>
   <p class="plan-measure">{{ t('plan.platform_help') }}</p>
   <p class="muted small plan-measure">{{ t('plan.platform_limits') }}</p>
@@ -18,7 +18,7 @@
     <p class="small muted plan-measure">{{ t('plan.source_save_help') }}</p>
     <button type="submit" class="button">{{ t('plan.add_source') }}</button>
   </form>
-  {% else %}<p><a href="#connections">{{ t('plan.no_source_accounts') }}</a></p>{% endif %}
+  {% else %}<p><a href="{{ setup_urls.accounts if setup_urls is defined else '#connections' }}">{{ t('plan.no_source_accounts') }}</a></p>{% endif %}
   <ul class="plain plan-import-list">
     {% for s in social_sources %}
     {% set counts = source_counts.get(s.id, {}) %}

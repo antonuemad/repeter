@@ -531,6 +531,71 @@ COPY.update(
     }
 )
 
+COPY.update(
+    {
+        "nav.library": ("Content", "المحتوى"),
+        "simple.person_summary": (
+            "Connected pages: {pages} · Compatible items: {items}",
+            "{pages} صفحة مختارة متصلة · {items} عنصر متوافق",
+        ),
+        "hub.accounts": ("Pages", "الصفحات"),
+        "hub.people": ("All people", "كل الأشخاص"),
+        "hub.content": ("Content", "المحتوى"),
+        "hub.schedule": ("Times", "المواعيد"),
+        "hub.preview": ("Preview", "المعاينة"),
+        "hub.navigation": ("This person's pages, content and schedule", "صفحات الشخص ومحتواه وجدوله"),
+        "hub.summary": (
+            "Connected pages: {pages} · Compatible library items: {items}",
+            "{pages} صفحة مختارة متصلة · {items} عنصر متوافق من المكتبة",
+        ),
+        "hub.next": ("Next:", "الخطوة الجاية:"),
+        "hub.prepared": (
+            "Preparation is ready. Review the preview; it does not start publishing.",
+            "التجهيز جاهز. راجع المعاينة؛ فتحها لا يشغّل النشر.",
+        ),
+        "hub.uncovered": (
+            "{n} selected pages have no compatible content yet",
+            "{n} صفحة مختارة لسه محتاجة محتوى متوافق",
+        ),
+        "hub.complete": ("Prepared", "جاهز"),
+        "hub.review": ("Needs review", "يحتاج مراجعة"),
+        "hub.default_schedule": (
+            "These are suggested daily times. Review and save them to confirm this section.",
+            "دي مواعيد يومية مقترحة. راجعها واحفظها عشان تأكد الإعداد.",
+        ),
+        "hub.recent": ("Recent content", "آخر محتوى أضفته"),
+        "hub.all_content": ("Manage all content", "إدارة كل المحتوى"),
+        "hub.saved_help": (
+            "Save each change before switching sections. Connecting or saving never starts publishing.",
+            "احفظ التعديل قبل تغيير التبويب. الربط والحفظ لا يشغّلان النشر.",
+        ),
+        "hub.open_person": ("Open person", "فتح الشخص"),
+        "hub.settings": ("Settings & activity", "الإعدادات والسجل"),
+        "hub.unsupported_format": ("Not supported for this content format", "غير متاح لشكل المحتوى ده"),
+        "hub.recovery_help": (
+            "Enter your account email to request a password-reset link.",
+            "اكتب بريد حسابك لطلب رابط استعادة كلمة المرور.",
+        ),
+        "hub.recovery_received": (
+            "If this email is eligible, a reset link will be sent. Check your inbox and spam folder. Contact support if it does not arrive.",
+            "لو البريد مؤهل للاستعادة، هيوصلك رابط. راجع الوارد والبريد غير المرغوب فيه، وتواصل مع الدعم لو الرسالة ما وصلتش.",
+        ),
+        "overview.setup_progress": ("{done} of 3 preparation sections ready", "{done} من 3 إعدادات جاهزة"),
+        "plan.warnings": (
+            "Pages that need reconnection or reassignment",
+            "صفحات محتاجة إعادة ربط أو مراجعة التخصيص",
+        ),
+        "accounts.connect_youtube_help": (
+            "Connect your channel. Use Drive or upload original files to add its content to your library.",
+            "اربط قناتك. لإضافة محتواها للمكتبة، استخدم الملفات الأصلية من Drive أو ارفعها من جهازك.",
+        ),
+        "library.no_posts": (
+            "This item has no actual publishing reservations. It may appear in the rotation preview.",
+            "العنصر ده ملوش حجوزات نشر فعلية. ممكن يظهر في معاينة الجدول.",
+        ),
+    }
+)
+
 COPY.update(MEDIA_COPY)
 EN = {k: v[0] for k, v in COPY.items()}
 AR = {k: v[1] for k, v in COPY.items()}

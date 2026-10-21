@@ -42,10 +42,10 @@
         <a class="button small secondary" href="/accounts/{{ a.id }}/videos">{{ t('tiktok_read.open') }}</a>
         {% endif %}
         {% if configured[a.id] and a.status != 'active' %}
-        <a class="button small" href="/connect/{{ purposes[a.id] }}">{{ t('accounts.reconnect') }}</a>
+        <a class="button small" href="/connect/{{ purposes[a.id] }}{% if a.profile_id in people %}?return_to={{ ('/people/' ~ a.profile_id ~ '?section=accounts')|urlencode }}{% elif active_person %}?return_to={{ ('/people/' ~ active_person.id ~ '?section=accounts')|urlencode }}{% endif %}">{{ t('accounts.reconnect') }}</a>
         {% endif %}
         {% if a.platform != 'gdrive' and a.status != 'disabled' %}
-        {% if a.profile_id in people %}<a class="button small secondary" href="/plans/{{ people[a.profile_id].plan_id }}/setup/accounts" dir="auto">{{ people[a.profile_id].name }}</a>{% else %}<a class="button small secondary" href="/plans">{{ t('simple.assign_person') }}</a>{% endif %}
+        {% if a.profile_id in people %}<a class="button small secondary" href="/people/{{ a.profile_id }}?section=accounts" dir="auto">{{ people[a.profile_id].name }}</a>{% else %}<a class="button small secondary" href="/plans">{{ t('simple.assign_person') }}</a>{% endif %}
         {% endif %}
         {% if can_disconnect and a.status != 'disabled' %}
         <a class="button small danger" href="/accounts/{{ a.id }}/disconnect">{{ t('accounts.disconnect') }}</a>
@@ -66,7 +66,7 @@
     <p class="muted small">{{ t('accounts.connect_' ~ b.purpose ~ '_help') }}</p>
     </div>{% if b.configured %}
     {# A plain link: the provider is reached by redirect, never by a form post (CSP form-action 'self'). #}
-    <a class="button secondary" href="/connect/{{ b.purpose }}">{{ t('accounts.connect') }}</a>
+    <a class="button secondary" href="/connect/{{ b.purpose }}{% if active_person %}?return_to={{ ('/people/' ~ active_person.id ~ '?section=accounts')|urlencode }}{% endif %}">{{ t('accounts.connect') }}</a>
     {% else %}
     <span class="badge badge-disabled">{{ t('accounts.not_configured') }}</span><p class="muted activation-help">{{ t('accounts.activation_help') }}</p>
     {% endif %}

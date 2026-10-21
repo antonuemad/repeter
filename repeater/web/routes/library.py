@@ -281,6 +281,9 @@ def _video_page(request, db, ctx, video_id, *, draft=None) -> Response:
         if draft is not None
         else _excluded_platforms(video),
         "publish_platforms": [p.value for p in PUBLISH_PLATFORMS],
+        "format_platforms": content.format_platforms(
+            video.media_kind, (draft or {}).get("content_format", video.content_format)
+        ),
         "has_preview": _preview_file(video) is not None,
         "overrides": draft if draft is not None else video.overrides or {},
     }
@@ -576,6 +579,7 @@ TEXT_FIELD_LIMITS = {
     "profile_id": 12,
     "format": 32,
     "setup_plan_id": 12,
+    "person_hub": 1,
 }
 MAX_PARTS = 16
 MULTIPART_OVERHEAD = 1024 * 1024
@@ -774,7 +778,7 @@ def _import_upload(request: Request, db: Session, ctx: WorkspaceContext, sink: U
             sink.path.unlink(missing_ok=True)
     flash(request, "success", "library.uploaded", title=video.title)
     return RedirectResponse(
-        f"/plans/{setup_plan.id}/setup/content" if setup_plan else f"/library/{video.id}", status_code=303
+        _content_return(setup_plan, sink.fields) if setup_plan else f"/library/{video.id}", status_code=303
     )
 
 
@@ -798,7 +802,11 @@ def _library_error(request, db, ctx, fields, form_name, exc) -> Response:
         from repeater.web.routes.plans import _context, _wizard
 
         data = _context(db, ctx, setup_plan)
-        data.update(error=exc, draft={"form": form_name, **_content_draft(fields)})
+        data.update(
+            error=exc,
+            draft={"form": form_name, **_content_draft(fields)},
+            person_hub=fields.get("person_hub") == "1",
+        )
         return _wizard(request, db, ctx, setup_plan, "content", data=data)
     messages.flash_error(request, exc)
     return _library_page(
@@ -855,6 +863,14 @@ def _setup_plan(db, ctx, fields, person):
     return plan
 
 
+def _content_return(plan, fields):
+    from repeater.web.journey import person_url
+
+    return (
+        person_url(plan, "content") if fields.get("person_hub") == "1" else f"/plans/{plan.id}/setup/content"
+    )
+
+
 @router.post("/library/text")
 def create_text(request: Request, db: DB, ctx: CurrentWorkspace, form: Form) -> Response:
     try:
@@ -898,5 +914,5 @@ def create_text(request: Request, db: DB, ctx: CurrentWorkspace, form: Form) -> 
     if setup_plan:
         flash(request, "success", "media.text_added")
     return RedirectResponse(
-        f"/plans/{setup_plan.id}/setup/content" if setup_plan else f"/library/{item.id}", status_code=303
+        _content_return(setup_plan, form) if setup_plan else f"/library/{item.id}", status_code=303
     )

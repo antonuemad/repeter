@@ -429,6 +429,10 @@ th { font-size: 12px; background: var(--surface-alt); }
 .plan-target > span { min-inline-size: 0; overflow-wrap: anywhere; }
 .plan-target .small { display: block; }
 .plan-target[hidden] { display: none; }
+.plan-target-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; border-block-end: 1px solid var(--border); }
+.plan-target-row > .plan-target { flex: 1 1 180px; border: 0; margin: 0; }
+.plan-target-row > a { display: inline-flex; align-items: center; min-block-size: 44px; padding: 8px; font-size: 13px; }
+.plan-target-row[hidden] { display: none; }
 .plan-folder-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-block: 12px; }
 .plan-folder-row > span { overflow-wrap: anywhere; min-inline-size: 0; }
 .plan-calendar > li { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(0, 3fr); gap: 24px; padding: 20px; border-block-end: 1px solid var(--border); background: var(--surface); }
@@ -453,6 +457,23 @@ th { font-size: 12px; background: var(--surface-alt); }
 .thumb, .thumb:hover { text-decoration: none; }
 /* The guided setup stays in the incumbent Magic Lap shell and works without JavaScript. */
 .wizard-shell { max-inline-size: 960px; margin-inline: auto; }
+.person-home { max-inline-size: 960px; margin-inline: auto; }
+.person-next { margin-block: 0 20px; padding-block: 12px; border-block-end: 1px solid var(--border); color: var(--muted); }
+.person-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin-block-end: 24px; border-block-end: 1px solid var(--border-strong); }
+.person-tabs > a { font-size: 14px; display: flex; align-items: center; gap: 8px; min-block-size: 52px; padding: 8px 16px; color: var(--muted); text-decoration: none; border-radius: 10px; }
+.person-tabs > a:hover { background: var(--surface-alt); color: var(--text); }
+.person-tabs > a[aria-current] { color: var(--primary); background: var(--primary-bg); font-weight: 600; }
+.person-tabs small { font-size: 12px; color: inherit; }
+.person-recent { margin-block: 28px; }
+.person-recent li { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding-block: 14px; border-block-end: 1px solid var(--border); }
+.person-recent a { overflow-wrap: anywhere; }
+@media (max-width: 699px) {
+  .person-home > .page-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; margin-block-end: 16px; }
+  .person-home > .page-heading > a { display: flex; align-items: center; min-block-size: 44px; font-size: 12px; }
+  .person-tabs { margin-block-end: 16px; }
+  .person-tabs > a { padding: 8px 4px; flex-direction: column; justify-content: center; gap: 4px; font-size: 13px; text-align: center; }
+  .person-tabs small { inline-size: 100%; }
+}
 .wizard-progress { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); list-style: none; margin: 0 0 24px; padding: 0; border-block-end: 1px solid var(--border-strong); }
 .wizard-progress li { color: var(--muted); min-inline-size: 0; padding: 12px 8px; }
 .wizard-progress li, .wizard-progress a { display: flex; align-items: center; gap: 8px; }

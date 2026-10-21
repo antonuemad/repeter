@@ -14,7 +14,6 @@ from repeater.accounts import AccountUnavailable, fresh_context
 from repeater.activity import log_activity
 from repeater.config import get_settings
 from repeater.content_plans import simulate, targets
-from repeater.engine.rules import rule_problems
 from repeater.jobs import kinds
 from repeater.models import (
     ACTIVE_POST_STATUSES,
@@ -25,7 +24,6 @@ from repeater.models import (
     CreatorProfile,
     PlanTarget,
     Platform,
-    RotationRule,
     ScheduledPost,
     Source,
     SourceKind,
@@ -37,7 +35,7 @@ from repeater.sources.drive import browse_folders, folder_details, parse_folder_
 from repeater.timeutil import utcnow
 from repeater.web.auth import CurrentWorkspace
 from repeater.web.deps import DB, Form, FormError, Page, form_bool, form_int, form_str, query_int
-from repeater.web.journey import progress, remember_person
+from repeater.web.journey import person_url, progress, remember_person
 from repeater.web.templating import flash, render
 
 router = APIRouter()
@@ -52,6 +50,7 @@ def _wizard_step(form, section):
         "source": "content",
         "folders": "content",
         "imports": "content",
+        "platforms": "content",
         "schedule": "schedule",
     }.get(section):
         raise HTTPException(400)
@@ -170,6 +169,7 @@ def _context(db, ctx, plan):
         "folders": None,
         "folder_drive_id": None,
         "folder_page": "",
+        "setup_urls": {s: f"/plans/{plan.id}/setup/{s}" for s in WIZARD_STEPS},
     }
 
 
@@ -177,6 +177,7 @@ def _edit(request, db, ctx, plan, *, error=None, submitted=None, **extra):
     data = _context(db, ctx, plan)
     remember_person(request, data["person"], plan)
     data.update(error=error, submitted=submitted or {}, **extra)
+    data["person_hub"] = data["submitted"].get("person_hub") == "1"
     if data["submitted"].get("wizard_step") in WIZARD_STEPS:
         return _wizard(request, db, ctx, plan, data["submitted"]["wizard_step"], data=data)
     return render(request, "plans/edit.html", data, status_code=422 if error else 200)
@@ -192,10 +193,52 @@ def _wizard(request, db, ctx, plan, step, *, data=None, page="1"):
         for status, count in statuses.items():
             counts[status] = counts.get(status, 0) + count
     data.update(wizard_step=step, wizard_steps=WIZARD_STEPS, library_counts=counts)
+    hub = bool(data.get("person_hub"))
+    data["person_hub"] = hub
+    data["setup_urls"] = {
+        s: person_url(plan, s) if hub else f"/plans/{plan.id}/setup/{s}" for s in WIZARD_STEPS
+    }
+    if hub:
+        data["readiness"] = progress(db, ctx.workspace.id, [plan])[plan.id]
+        data["recent_items"] = list(
+            db.scalars(
+                select(Video)
+                .where(
+                    Video.workspace_id == ctx.workspace.id,
+                    Video.profile_id == plan.profile_id,
+                )
+                .order_by(Video.created_at.desc(), Video.id.desc())
+                .limit(6)
+            )
+        )
     if step == "preview":
         data.update(_preview_context(db, ctx, plan, page))
-        data["preview_path"] = f"/plans/{plan.id}/setup/preview"
-    return render(request, "plans/wizard.html", data, status_code=422 if data["error"] else 200)
+        data["preview_path"] = f"/people/{plan.profile_id}" if hub else data["setup_urls"]["preview"]
+    return render(
+        request,
+        "plans/person.html" if hub else "plans/wizard.html",
+        data,
+        status_code=422 if data["error"] else 200,
+    )
+
+
+@router.get("/people/{person_id}")
+def person_home(
+    request: Request, db: DB, ctx: CurrentWorkspace, person_id: int, section: str = "", page: str = "1"
+) -> Response:
+    plan = db.scalar(
+        select(ContentPlan).where(
+            ContentPlan.profile_id == person_id, ContentPlan.workspace_id == ctx.workspace.id
+        )
+    )
+    if plan is None:
+        raise HTTPException(404)
+    if section and section not in WIZARD_STEPS:
+        raise HTTPException(404)
+    step = section or progress(db, ctx.workspace.id, [plan])[plan.id]["next_step"]
+    data = _context(db, ctx, plan)
+    data["person_hub"] = True
+    return _wizard(request, db, ctx, plan, step, data=data, page=page)
 
 
 @router.get("/setup")
@@ -271,6 +314,8 @@ def create(request: Request, db: DB, ctx: CurrentWorkspace, form: Form) -> Respo
     db.add(plan)
     db.commit()
     remember_person(request, person, plan)
+    if form.get("person_hub") == "1":
+        return RedirectResponse(person_url(plan), 303)
     destination = "setup/accounts" if form.get("wizard_step") == "accounts" else "edit"
     return RedirectResponse(f"/plans/{plan.id}/{destination}", 303)
 
@@ -461,6 +506,7 @@ def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section:
             plan.weekdays, plan.times, plan.ordering = sorted({int(d) for d in days}), sorted(times), ordering
             if wizard_step:
                 _rotation(form, plan)
+            plan.schedule_reviewed_at = utcnow()
         elif section == "rotation":
             _rotation(form, plan)
         elif section == "imports":
@@ -503,6 +549,8 @@ def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section:
         flash(request, "success", "plan.saved")
         if wizard_step:
             next_step = {"targets": "content", "schedule": "preview"}.get(section, wizard_step)
+            if form.get("person_hub") == "1":
+                return RedirectResponse(person_url(plan, next_step), 303)
             return RedirectResponse(f"/plans/{plan.id}/setup/{next_step}", 303)
         return RedirectResponse(
             f"/plans/{plan.id}"
@@ -612,6 +660,7 @@ def control_platform(
     request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, source_id: int, form: Form
 ) -> Response:
     plan = get_plan(db, ctx, plan_id, lock=True)
+    _wizard_step(form, "platforms")
     source = db.scalar(
         select(Source)
         .where(
@@ -668,10 +717,14 @@ def control_platform(
         )
         db.commit()
         flash(request, "success", "plan.saved")
+        if form.get("person_hub") == "1":
+            return RedirectResponse(person_url(plan, "content"), 303)
+        if form.get("wizard_step") == "content":
+            return RedirectResponse(f"/plans/{plan.id}/setup/content", 303)
         return RedirectResponse(f"/plans/{plan.id}/edit#platforms", 303)
     except FormError as exc:
         db.rollback()
-        return _edit(request, db, ctx, get_plan(db, ctx, plan_id), error=exc)
+        return _edit(request, db, ctx, get_plan(db, ctx, plan_id), error=exc, submitted=dict(form))
 
 
 @router.get("/plans/{plan_id}")
@@ -693,13 +746,7 @@ def _preview_context(db, ctx, plan, page):
     result = simulate(db, plan)
     pager = Page(number=query_int(page, default=1), size=10, total=len(result["rows"]))
     result["rows"] = result["rows"][pager.offset : pager.offset + pager.size]
-    rules = {
-        r.connected_account_id: r
-        for r in db.scalars(select(RotationRule).where(RotationRule.workspace_id == ctx.workspace.id))
-    }
     warnings = [
-        a
-        for a in result["accounts"]
-        if a.status != AccountStatus.ACTIVE or a.id not in rules or rule_problems(rules[a.id])
+        a for a in result["accounts"] if a.status != AccountStatus.ACTIVE or a.profile_id != plan.profile_id
     ]
     return {"preview": result, "warnings": warnings, "pager": pager}

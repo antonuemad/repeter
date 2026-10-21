@@ -8,60 +8,7 @@
   <div class="page-heading"><div><h1 dir="auto">{{ person.name }}</h1><p>{{ t('wizard.title') }}</p></div><a href="/plans">{{ t('wizard.exit') }}</a></div>
   <nav aria-label="{{ t('wizard.progress') }}"><ol class="wizard-progress">{% for step in wizard_steps %}<li{% if step == wizard_step %} aria-current="step"{% endif %}><a href="/plans/{{ plan.id }}/setup/{{ step }}"{% if step == wizard_step %} aria-current="step"{% endif %}><span class="wizard-number">{{ loop.index }}</span>{{ t('wizard.' ~ step) }}</a></li>{% endfor %}</ol></nav>
   {% if publishing_enabled %}<p class="wizard-safety">{{ t('wizard.preview_only') }}</p>{% endif %}
-  {% if wizard_step != 'preview' %}<section class="card wizard-panel" aria-labelledby="wizard-title">
-    <h2 id="wizard-title">{{ t('wizard.' ~ wizard_step ~ '_title') }}</h2>
-    <p class="muted plan-measure">{{ t('wizard.' ~ wizard_step ~ '_help') }}</p>
-    {{ m.form_error(error) }}
-    {% if wizard_step == 'accounts' %}
-      <details class="wizard-add-accounts"{% if not accounts|selectattr('status', 'equalto', 'active')|list %} open{% endif %}><summary><strong>{{ t('simple.connect_more') }}</strong></summary>
-      <div class="wizard-connections">
-      {% for purpose, configured in connections if purpose != 'gdrive' %}
-        {% set label = t('accounts.connect_meta') if purpose == 'meta' else t('accounts.connect_instagram') if purpose == 'instagram' else platform_name(purpose) %}
-        {% set matched = namespace(items=[]) %}
-        {% for a in accounts %}{% if (purpose in ['meta', 'instagram'] and account_providers[a.id] == purpose) or (purpose not in ['meta', 'instagram'] and a.platform == purpose) %}{% set matched.items = matched.items + [a] %}{% endif %}{% endfor %}
-        {% set matches = matched.items %}
-        {% set active = matches|selectattr('status', 'equalto', 'active')|list %}
-        <div class="wizard-connection"><div><strong>{{ label }}</strong>{% if purpose in ["instagram", "meta", "tiktok"] %}<p class="small muted">{{ t("accounts.connect_" ~ purpose ~ "_help") }}</p>{% endif %}<p class="small muted">{{ t('wizard.connected', n=active|length) if active else t('wizard.not_connected') }}</p>{% if matches|length > active|length %}<p class="small">{{ t('wizard.reconnect') }}</p>{% endif %}</div>
-        {% if configured %}<a class="button secondary" href="/connect/{{ purpose }}?return_to=/plans/{{ plan.id }}/setup/accounts">{{ t('wizard.manage_connection') if active else t('wizard.connect') }}</a>{% else %}<span class="small muted">{{ t('plan.unavailable') }}</span>{% endif %}</div>
-      {% endfor %}</div></details>
-      <h3>{{ t('wizard.pages_title') }}</h3><p class="muted small">{{ t('wizard.pages_help') }}</p>
-      {% include "plans/targets_form.html" %}
-    {% elif wizard_step == 'content' %}
-      <p class="library-readiness" role="status">{{ t('wizard.library_status', ready=library_counts.get('ready', 0), processing=library_counts.get('processing', 0) + library_counts.get('importing', 0), failed=library_counts.get('failed', 0)) }} <a href="/library?profile_id={{ person.id }}">{{ t('simple.open_library') }}</a></p>
-      {% set profile = person %}{% set setup_plan_id = plan.id %}{% set open_upload = false %}
-      {% include "plans/content_forms.html" %}
-      <details class="content-choice"{% if source or folders is not none or (error and not draft) %} open{% endif %}><summary><strong>{{ t('simple.drive') }}</strong><span class="small muted">{{ t('simple.drive_hint') }}</span></summary>
-      <div class="wizard-connection"><div><strong>Google Drive</strong><p class="small muted">{{ t('wizard.connected', n=drives|length) if drives else t('wizard.not_connected') }}</p></div>
-        {% if connections[0][1] %}<a class="button secondary" href="/connect/gdrive?return_to=/plans/{{ plan.id }}/setup/content">{{ t('wizard.manage_connection') if drives else t('wizard.connect') }}</a>{% else %}<span>{{ t('plan.unavailable') }}</span>{% endif %}
-      </div>
-      <p class="muted small plan-measure">{{ t('wizard.drive_permission') }}</p>
-      {% if drives %}
-        <details class="wizard-folder"{% if not source or error or folders is not none %} open{% endif %}><summary>{{ t('wizard.change_folder') if source else t('plan.folder') }}{% if source %}: <bdi>{{ source.name }}</bdi>{% endif %}</summary>
-          {% set images_selected = submitted.get('include_images') in ['1', 'on', 'true', 'yes'] if 'drive_id' in submitted else (source.config.get('include_images', false) if source else true) %}
-          {% include "plans/folder_form.html" %}
-        </details>
-      {% endif %}
-      {% if source %}
-      <div class="wizard-import"><h3>{{ t('wizard.import_title') }}</h3><p class="muted plan-measure">{{ t('wizard.import_help') }}</p>
-        <p>{{ t('wizard.library_status', ready=library_counts.get('ready', 0), processing=library_counts.get('processing', 0) + library_counts.get('importing', 0), failed=library_counts.get('failed', 0)) }}</p>
-        {% if source.last_polled_at %}<p class="muted small">{{ t('wizard.last_check', at=fmt_dt(source.last_polled_at, plan.timezone)) }}</p>{% endif %}
-        {% if source.last_error %}<p role="status">{{ m.error_text(source.last_error, 300, source.last_error_info) }}</p>{% endif %}
-        <form method="post" action="/plans/{{ plan.id }}/imports" class="actions">{{ revision() }}<button name="action" value="{{ 'pause' if source.enabled else 'start' }}" class="button secondary">{{ t('plan.import_pause') if source.enabled else t('plan.import_start') }}</button><a href="/plans/{{ plan.id }}/setup/content">{{ t('wizard.refresh') }}</a></form>
-      </div>
-      {% endif %}
-      </details>
-      <details class="content-choice"><summary><strong>{{ t('simple.platform_import') }}</strong><span class="small muted">{{ t('simple.platform_hint') }}</span></summary><p>{{ t('simple.platform_help') }}</p><a href="/plans/{{ plan.id }}/edit#platforms">{{ t('plan.platforms') }}</a></details>
-      <div class="wizard-actions"><a class="button" href="/plans/{{ plan.id }}/setup/schedule">{{ t('wizard.to_schedule') }}</a><a href="/plans/{{ plan.id }}/setup/accounts">{{ t('wizard.back') }}</a></div>
-      {% if not library_counts.get('ready', 0) %}<p class="small muted">{{ t('wizard.empty_help') }}</p>{% endif %}
-    {% elif wizard_step == 'schedule' %}
-      {% include "plans/wizard_schedule.html" %}
-    {% endif %}
-  </section>{% else %}
-    <div class="page-heading"><div><h2>{{ t('wizard.preview_title') }}</h2><p class="muted">{{ t('wizard.preview_help') }}</p></div><div class="actions"><a class="button" href="/calendar?person={{ person.id }}">{{ t('simple.open_calendar') }}</a><a href="/plans/{{ plan.id }}/setup/preview">{{ t('wizard.refresh_preview') }}</a></div></div>
-    {% if not preview.ready %}<p class="wizard-safety"><a href="/plans/{{ plan.id }}/setup/content">{{ t('wizard.add_content') }}</a></p>{% endif %}
-    {% include "plans/preview_body.html" %}
-    <div class="wizard-actions"><a class="button" href="/calendar?person={{ person.id }}">{{ t('simple.open_calendar') }}</a><a href="/plans/{{ plan.id }}/setup/schedule">{{ t('wizard.edit_schedule') }}</a></div>
-  {% endif %}
+  {% include "plans/panel.html" %}
   <div class="wizard-footer"><p class="small muted">{{ t('wizard.saved_help') }}</p><a href="/plans/{{ plan.id }}/edit">{{ t('wizard.advanced') }}</a></div>
 </div>
 {% endblock %}

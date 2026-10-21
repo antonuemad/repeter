@@ -2,6 +2,7 @@
 
 from sqlalchemy import func, select
 
+from repeater.media.content import problem
 from repeater.models import (
     PUBLISH_PLATFORMS,
     AccountStatus,
@@ -14,6 +15,10 @@ from repeater.models import (
 )
 
 PERSON_KEY = "active_person"
+
+
+def person_url(plan, section="accounts"):
+    return f"/people/{plan.profile_id}?section={section}"
 
 
 def remember_person(request, person, plan):
@@ -45,9 +50,16 @@ def restore_person(request, db, workspace_id):
 def progress(db, workspace_id, plans):
     """Batch readiness for lists, using only selected active pages and ready owned items."""
     ids = [p.id for p in plans]
-    pages = dict(
+    totals = dict(
         db.execute(
             select(PlanTarget.plan_id, func.count())
+            .where(PlanTarget.workspace_id == workspace_id, PlanTarget.plan_id.in_(ids))
+            .group_by(PlanTarget.plan_id)
+        ).all()
+    )
+    selected = list(
+        db.execute(
+            select(PlanTarget.plan_id, ConnectedAccount)
             .join(ConnectedAccount, ConnectedAccount.id == PlanTarget.account_id)
             .join(ContentPlan, ContentPlan.id == PlanTarget.plan_id)
             .where(
@@ -58,7 +70,6 @@ def progress(db, workspace_id, plans):
                 ConnectedAccount.platform.in_(PUBLISH_PLATFORMS),
                 ConnectedAccount.status == AccountStatus.ACTIVE,
             )
-            .group_by(PlanTarget.plan_id)
         ).all()
     )
     items = dict(
@@ -72,22 +83,49 @@ def progress(db, workspace_id, plans):
             .group_by(Video.profile_id)
         ).all()
     )
+    ready = list(
+        db.scalars(
+            select(Video).where(
+                Video.workspace_id == workspace_id,
+                Video.profile_id.in_([p.profile_id for p in plans]),
+                Video.status == VideoStatus.READY,
+            )
+        )
+    )
+    by_person = {}
+    for item in ready:
+        by_person.setdefault(item.profile_id, []).append(item)
     result = {}
     for plan in plans:
+        accounts = [account for plan_id, account in selected if plan_id == plan.id]
+        usable = set()
+        covered = 0
+        for account in accounts:
+            eligible = [
+                item.id
+                for item in by_person.get(plan.profile_id, [])
+                if item.source_account_id != account.id
+                and account.platform.value not in (item.overrides or {}).get("exclude_platforms", [])
+                and problem(item, account) is None
+            ]
+            usable.update(eligible)
+            covered += bool(eligible)
         steps = {
-            "accounts": pages.get(plan.id, 0) > 0,
-            "content": items.get(plan.profile_id, 0) > 0,
-            "schedule": bool(plan.times and plan.weekdays),
+            "accounts": bool(accounts) and len(accounts) == totals.get(plan.id, 0),
+            "content": bool(accounts) and covered == len(accounts),
+            "schedule": bool(plan.schedule_reviewed_at and plan.times and plan.weekdays),
         }
         next_step = next((key for key, done in steps.items() if not done), "preview")
         result[plan.id] = {
             **steps,
             "done": all(steps.values()),
             "completed": sum(steps.values()),
-            "pages": pages.get(plan.id, 0),
+            "pages": len(accounts),
             "items": items.get(plan.profile_id, 0),
+            "usable_items": len(usable),
+            "uncovered_pages": len(accounts) - covered,
             "next_step": next_step,
-            "next_url": f"/plans/{plan.id}/setup/{next_step}",
-            "links": {key: f"/plans/{plan.id}/setup/{key}" for key in steps},
+            "next_url": person_url(plan, next_step),
+            "links": {key: person_url(plan, key) for key in steps},
         }
     return result

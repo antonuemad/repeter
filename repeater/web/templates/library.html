@@ -2,8 +2,8 @@
 {% import "macros.html" as m with context %}
 {% block title %}{{ t('nav.library') }}{% endblock %}
 {% block content %}
-<div class="page-heading"><div><h1>{{ t('nav.library') }}{% if profile %} · <bdi>{{ profile.name }}</bdi>{% endif %}</h1><p>{{ t('simple.library_help') }}</p></div>{% if plan %}<a class="button" href="/plans/{{ plan.id }}/setup/preview">{{ t('plan.preview') }}</a>{% endif %}</div>
-<form method="get" class="person-switch"><label>{{ t('simple.library_for') }}<select name="profile_id"><option value="0"{% if not profile %} selected{% endif %}>{{ t('plan.unassigned') }}</option>{% for person in profiles %}<option value="{{ person.id }}"{% if profile_id == person.id %} selected{% endif %}>{{ person.name }}</option>{% endfor %}</select></label><button class="button secondary">{{ t('simple.open_library') }}</button>{% if plan %}<a href="/plans/{{ plan.id }}/setup/content">{{ t('wizard.resume') }}</a>{% endif %}</form>
+<div class="page-heading"><div><h1>{{ t('nav.library') }}{% if profile %} · <bdi>{{ profile.name }}</bdi>{% endif %}</h1><p>{{ t('simple.library_help') }}</p></div>{% if plan %}<a class="button" href="/people/{{ plan.profile_id }}?section=preview">{{ t('plan.preview') }}</a>{% endif %}</div>
+<form method="get" class="person-switch"><label>{{ t('simple.library_for') }}<select name="profile_id"><option value="0"{% if not profile %} selected{% endif %}>{{ t('plan.unassigned') }}</option>{% for person in profiles %}<option value="{{ person.id }}"{% if profile_id == person.id %} selected{% endif %}>{{ person.name }}</option>{% endfor %}</select></label><button class="button secondary">{{ t('simple.open_library') }}</button>{% if plan %}<a href="/people/{{ plan.profile_id }}?section=content">{{ t('wizard.resume') }}</a>{% endif %}</form>
 {% set open_upload = not videos or request.query_params.get('upload') == '1' %}
 <div class="library-add-options">{% include "plans/content_forms.html" %}</div>
 <nav class="tabs" aria-label="{{ t('library.filter') }}">

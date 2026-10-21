@@ -19,17 +19,17 @@ def guide(request: Request, ctx: CurrentWorkspace, topic: str = "access") -> Res
     if position is None:
         raise HTTPException(404)
     person = getattr(request.state, "active_person", None)
-    setup = f"/plans/{person['plan_id']}/setup" if person else None
+    setup = f"/people/{person['id']}?section=" if person else None
     links = {
         "home": "/",
         "people": "/plans",
         "new_person": "/setup",
-        "accounts": f"{setup}/accounts" if setup else "/accounts",
+        "accounts": f"{setup}accounts" if setup else "/accounts",
         "connected_accounts": "/accounts",
-        "content": f"{setup}/content" if setup else "/plans",
+        "content": f"{setup}content" if setup else "/plans",
         "library": f"/library?profile_id={person['id']}" if person else "/library",
-        "times": f"{setup}/schedule" if setup else "/plans",
-        "preview": f"{setup}/preview" if setup else "/plans",
+        "times": f"{setup}schedule" if setup else "/plans",
+        "preview": f"{setup}preview" if setup else "/plans",
         "calendar": f"/calendar?person={person['id']}" if person else "/calendar",
         "queue": "/schedule",
         "sources": "/sources",

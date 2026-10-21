@@ -9,6 +9,17 @@ from repeater.models import ConnectedAccount, Platform, Video
 FORMATS = {"video": ("reel", "story"), "image": ("post", "story"), "text": ("post",)}
 
 
+def format_platforms(kind: str, placement: str) -> tuple[Platform, ...]:
+    """Placement support only; account permissions and media dimensions still need problem()."""
+    if placement not in FORMATS.get(kind, ()):
+        return ()
+    if kind == "text":
+        return (Platform.FACEBOOK,)
+    if kind == "image" or placement == "story":
+        return (Platform.FACEBOOK, Platform.INSTAGRAM)
+    return (Platform.FACEBOOK, Platform.INSTAGRAM, Platform.YOUTUBE, Platform.TIKTOK)
+
+
 def caption(item: Video) -> str:
     return str((item.overrides or {}).get("caption", item.caption) or "")
 

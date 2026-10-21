@@ -10,5 +10,6 @@
     <div class="grid-2"><label>{{ t('plan.start') }}<input type="date" name="start_date" required value="{{ submitted.get('start_date', plan.start_date.isoformat()) }}"></label><label>{{ t('plan.timezone') }}<select name="timezone" required>{% for z in zones %}<option value="{{ z }}"{% if z == submitted.get('timezone', plan.timezone) %} selected{% endif %}>{{ z }}</option>{% endfor %}</select></label></div>
     <label>{{ t('plan.order') }}<select name="ordering">{% for value in ['oldest', 'newest'] %}<option value="{{ value }}"{% if value == submitted.get('ordering', plan.ordering) %} selected{% endif %}>{{ t('plan.' ~ value) }}</option>{% endfor %}</select></label>
   </details>
-  <div class="wizard-actions"><button type="submit" class="button">{{ t('plan.save_preview') }}</button><a href="/plans/{{ plan.id }}/setup/content">{{ t('wizard.back') }}</a></div>
+  {% if not plan.schedule_reviewed_at %}<p class="small" role="status">{{ t('hub.default_schedule') }}</p>{% endif %}
+  <div class="wizard-actions"><button type="submit" class="button">{{ t('plan.save_preview') }}</button><a href="{{ setup_urls.content }}">{{ t('wizard.back') }}</a></div>
 </form>

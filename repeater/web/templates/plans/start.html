@@ -7,7 +7,7 @@
   <section class="card wizard-panel">
     <h2>{{ t('wizard.person_title') }}</h2><p class="muted plan-measure">{{ t('wizard.person_help') }}</p>
     {{ m.form_error(error) }}
-    <form method="post" action="/plans" class="stack">{{ m.csrf() }}<input type="hidden" name="wizard_step" value="accounts">
+    <form method="post" action="/plans" class="stack">{{ m.csrf() }}<input type="hidden" name="wizard_step" value="accounts"><input type="hidden" name="person_hub" value="1">
       <label>{{ t('plan.name') }}<input name="name" maxlength="200" required dir="auto" autocomplete="off" value="{{ name }}"></label>
       <div class="wizard-actions"><button class="button">{{ t('wizard.create') }}</button></div>
     </form>

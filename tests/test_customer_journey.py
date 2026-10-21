@@ -186,8 +186,8 @@ def test_invitation_to_mixed_library_and_rotation(
         )
 
         library = client.get(f"/library?profile_id={plan.profile_id}")
-        assert f'href="/plans/{plan.id}/setup/preview"' in library.text
-        assert f'href="/plans/{plan.id}/setup/content"' in library.text
+        assert f'href="/people/{plan.profile_id}?section=preview"' in library.text
+        assert f'href="/people/{plan.profile_id}?section=content"' in library.text
         text = post(
             client,
             "/library/text",
@@ -203,7 +203,7 @@ def test_invitation_to_mixed_library_and_rotation(
         clip = video(db, plan, "Synthetic reel")
         db.commit()
         assert client.get(f"/library/{image.id}/preview").status_code == 200
-        assert f'href="/plans/{plan.id}/setup/preview"' in setup_card(client)
+        assert f'href="/people/{plan.profile_id}?section=preview"' in setup_card(client)
         for path in (
             f"/plans/{plan.id}",
             f"/plans/{plan.id}?page=2",
@@ -263,20 +263,24 @@ def test_setup_readiness_is_person_specific_and_requires_selected_active_pages(w
     plan = create_plan(web_owner, db, "Current person")
     account = make_account(Platform.FACEBOOK)
     db.commit()
-    assert setup_card(web_owner).count("Done") == 1
+    assert setup_card(web_owner).count("Done") == 0
     save(web_owner, db, plan, "targets", {"targets": [str(account.id)]})
-    assert setup_card(web_owner).count("Done") == 2
+    assert setup_card(web_owner).count("Done") == 1
     item = video(db, plan, "Still processing")
     item.status = VideoStatus.PROCESSING
     db.commit()
-    assert setup_card(web_owner).count("Done") == 2
+    assert setup_card(web_owner).count("Done") == 1
     item.status = VideoStatus.READY
     db.commit()
+    assert setup_card(web_owner).count("Done") == 2
+    from tests.test_setup_wizard import schedule_data
+
+    save(web_owner, db, plan, "schedule", schedule_data())
     assert setup_card(web_owner).count("Done") == 3
     assert "Preview 30 days" in setup_card(web_owner)
     account.status = AccountStatus.NEEDS_RECONNECT
     db.commit()
-    assert setup_card(web_owner).count("Done") == 2
+    assert setup_card(web_owner).count("Done") == 1
 
 
 def test_text_validation_keeps_person_and_long_escaped_draft(web_owner, db):
@@ -287,7 +291,7 @@ def test_text_validation_keeps_person_and_long_escaped_draft(web_owner, db):
     assert html.escape(body) in response.text
     assert '<details id="compose" class="card" open>' in response.text
     assert f'name="profile_id" value="{plan.profile_id}"' in response.text
-    assert f'href="/plans/{plan.id}/setup/preview"' in response.text
+    assert f'href="/people/{plan.profile_id}?section=preview"' in response.text
     assert not db.scalar(select(func.count()).select_from(Video))
     assert len(str(web_owner.cookies)) < 4000
     assert (

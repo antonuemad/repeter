@@ -414,3 +414,12 @@ shows concise totals before its entries, retains diagnostics in disclosures, lin
 to individual slot editing and offers the person's unified calendar as its next action.
 Current source and execution restrictions are unchanged. DESIGN.md records the bounded
 visual evidence and finish verdict for this simplification.
+
+## Unified person home (2026-10-21)
+
+`plans/person.html` and shared `plans/panel.html` provide one person-led preparation home.
+The four native section links retain owned context through form saves, source controls,
+upload errors and OAuth. The shared panel keeps old setup URLs compatible. Source-import
+forms are embedded; explicit monitoring and publication boundaries remain unchanged.
+Use DESIGN.md's Person home section for the compact desktop/mobile navigation and state
+language. The review record is `docs/review/2026-10-21-person-home.md`; no new tokens or fonts.

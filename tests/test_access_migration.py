@@ -67,6 +67,14 @@ def test_access_migration_roundtrip_preserves_existing_accounts():
                     ),
                     {"digest": "b" * 64},
                 )
+            command.upgrade(cfg, "0009")
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO activity_log (workspace_id,level,category,message,data,actor,created_at) VALUES (1,'info','plans','Saved schedule',:data,'synthetic','2026-10-20T09:00:00Z')"
+                    ),
+                    {"data": '{"plan_id":1,"section":"schedule"}'},
+                )
             command.upgrade(cfg, "head")
             with engine.connect() as conn:
                 assert conn.execute(
@@ -85,6 +93,14 @@ def test_access_migration_roundtrip_preserves_existing_accounts():
                     text("SELECT media_kind,content_format,status FROM videos WHERE id=1")
                 ).one() == ("video", "reel", "ready")
                 assert compare_metadata(MigrationContext.configure(conn), Base.metadata) == []
+                assert (
+                    conn.execute(
+                        text(
+                            "SELECT schedule_reviewed_at = TIMESTAMPTZ '2026-10-20T09:00:00Z' FROM content_plans WHERE id=1"
+                        )
+                    ).scalar_one()
+                    is True
+                )
                 assert (
                     conn.execute(text("SELECT original_sha256 FROM videos WHERE id=1")).scalar_one()
                     == "a" * 64
