@@ -146,7 +146,11 @@ def _context(db, ctx, plan):
         "source": _source(db, plan),
         "selected": {a.id for a in targets(db, plan)},
         "accounts": [
-            a for a in accounts if a.platform in PUBLISH_PLATFORMS and a.profile_id in (None, plan.profile_id)
+            a
+            for a in accounts
+            if a.platform in PUBLISH_PLATFORMS
+            and a.status != AccountStatus.DISABLED
+            and a.profile_id in (None, plan.profile_id)
         ],
         "drives": [a for a in accounts if a.platform == Platform.GDRIVE and a.status == AccountStatus.ACTIVE],
         "account_providers": {a.id: provider_name_for_account(a) for a in accounts},

@@ -21,7 +21,7 @@
         {% for a in accounts %}{% if (purpose in ['meta', 'instagram'] and account_providers[a.id] == purpose) or (purpose not in ['meta', 'instagram'] and a.platform == purpose) %}{% set matched.items = matched.items + [a] %}{% endif %}{% endfor %}
         {% set matches = matched.items %}
         {% set active = matches|selectattr('status', 'equalto', 'active')|list %}
-        <div class="wizard-connection"><div><strong>{{ label }}</strong>{% if purpose in ["instagram", "meta"] %}<p class="small muted">{{ t("accounts.connect_" ~ purpose ~ "_help") }}</p>{% endif %}<p class="small muted">{{ t('wizard.connected', n=active|length) if active else t('wizard.not_connected') }}</p>{% if matches|length > active|length %}<p class="small">{{ t('wizard.reconnect') }}</p>{% endif %}</div>
+        <div class="wizard-connection"><div><strong>{{ label }}</strong>{% if purpose in ["instagram", "meta", "tiktok"] %}<p class="small muted">{{ t("accounts.connect_" ~ purpose ~ "_help") }}</p>{% endif %}<p class="small muted">{{ t('wizard.connected', n=active|length) if active else t('wizard.not_connected') }}</p>{% if matches|length > active|length %}<p class="small">{{ t('wizard.reconnect') }}</p>{% endif %}</div>
         {% if configured %}<a class="button secondary" href="/connect/{{ purpose }}?return_to=/plans/{{ plan.id }}/setup/accounts">{{ t('wizard.manage_connection') if active else t('wizard.connect') }}</a>{% else %}<span class="small muted">{{ t('plan.unavailable') }}</span>{% endif %}</div>
       {% endfor %}</div></details>
       <h3>{{ t('wizard.pages_title') }}</h3><p class="muted small">{{ t('wizard.pages_help') }}</p>

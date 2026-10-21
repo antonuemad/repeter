@@ -303,5 +303,20 @@ returns to content setup and validation errors retain escaped bounded drafts. CS
 streaming upload limits, tenant boundaries and publication guards remain enforced.
 Selecting or previewing content creates no publishing reservation or publishing job.
 Optional metadata and advanced times remain available through native disclosures.
+
+## Preparation feedback corrections — 2026-10-21
+
+Page selection in guided setup and the advanced editor hides explicitly disconnected accounts,
+while expired/revoked authorizations remain visible for reconnection. Retained plan targets and
+library content are not deleted; a connection restored through its original provider becomes
+selectable again. TikTok connection copy states the current identity/public-video reading scope
+and excludes publishing and draft uploads, including within guided setup.
+
+An empty preview slot names its shared actual blocker, or asks the user to check each page when
+causes differ. Disconnection, authorization renewal and changed person assignment have distinct
+messages in previews and Calendar, with a link back to page setup. Repeat intervals, pending
+outcomes and explicit slot exclusions retain their own reasons. A library without ready content
+is not described as necessarily empty. These changes do not start imports, activate plans, create
+publication jobs or change the mandatory publishing lock.
 Production publishing and TikTok audit flags remain false; no real social publication,
 container creation or draft upload was used for this work.

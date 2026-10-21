@@ -61,6 +61,12 @@ class PreviewSlot:
     def filled(self) -> int:
         return sum(entry.video is not None for entry in self.entries)
 
+    @property
+    def empty_reason(self) -> str | None:
+        """An empty slot can name one shared blocker; mixed blockers need page-level detail."""
+        reasons = {entry.reason for entry in self.entries}
+        return next(iter(reasons)) if not self.filled and len(reasons) == 1 else None
+
 
 def targets(db: Session, plan: ContentPlan) -> list[ConnectedAccount]:
     return list(
@@ -196,7 +202,13 @@ def simulate(db: Session, plan: ContentPlan, *, now: datetime | None = None) -> 
                 "pending" if blocked_here else "exhausted" if choices else "no_eligible"
             )
         else:
-            empty_reasons[account.id] = "account_unavailable"
+            empty_reasons[account.id] = (
+                "account_disconnected"
+                if account.status == AccountStatus.DISABLED
+                else "account_reconnect"
+                if account.status != AccountStatus.ACTIVE
+                else "account_unavailable"
+            )
         blocked_count += blocked_here
         queues[account.id] = choices
     rows = []

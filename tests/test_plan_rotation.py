@@ -224,7 +224,7 @@ def test_rotation_keeps_person_isolation_and_format_exclusions(web_owner, db, ma
     a.status = AccountStatus.NEEDS_RECONNECT
     result = simulate(db, p, now=NOW)
     assert result["filled"] == 0
-    assert all(e.reason == "account_unavailable" for _, e in assignments(result, a))
+    assert all(e.reason == "account_reconnect" for _, e in assignments(result, a))
 
 
 def test_foreign_workspace_history_cannot_affect_rotation(web_owner, db, make_account):

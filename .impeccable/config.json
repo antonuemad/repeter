@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "inter",
+        "createdAt": "2026-10-21T02:30:06.033Z",
+        "reason": "Agent: DESIGN.md Typography and PRODUCT.md Brand Commitments intentionally retain Inter with IBM Plex Sans Arabic from the user-approved Sentinel Eye / Magic Lap reference; this review does not replace the visual identity."
+      }
+    ]
+  }
+}

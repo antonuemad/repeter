@@ -121,7 +121,7 @@ def test_complete_draft_flow_never_enqueues_or_publishes(
     set_lang(web_owner, "en")
     preview = web_owner.get(f"/plans/{p.id}")
     assert preview.status_code == 200
-    assert "Waiting for eligible content" in preview.text
+    assert "No eligible content in this library" in preview.text
     db.expire_all()
     assert db.get(ConnectedAccount, a.id).profile_id == p.profile_id
     assert not db.get(Source, p.source_id).enabled

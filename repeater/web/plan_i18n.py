@@ -213,9 +213,18 @@ COPY = {
         "المحتوى المتبقي عليه نشر معلّق أو نتيجة غير محسومة",
     ),
     "plan.reason_account_unavailable": (
-        "Reconnect or check this page’s ownership",
-        "أعد ربط الصفحة أو راجع تخصيصها للشخص",
+        "This page is no longer assigned to this person",
+        "الصفحة لم تعد مخصّصة للشخص ده",
     ),
+    "plan.reason_account_disconnected": (
+        "Account disconnected — connect it again",
+        "الحساب مفصول — اربطه من جديد",
+    ),
+    "plan.reason_account_reconnect": (
+        "Authorization needs renewal — reconnect this account",
+        "التفويض محتاج تجديد — أعد ربط الحساب",
+    ),
+    "plan.review_pages": ("Review this person’s pages", "راجع صفحات الشخص"),
     "plan.pending_uses": (
         "{n} item/page pairs are held until pending or uncertain publications are resolved. Rotation never bypasses them.",
         "تم تعليق {n} حالة محتوى/صفحة لحين حسم النشر المعلّق أو غير المؤكد. الروتيشن ما بيتخطّاش الحالات دي.",
@@ -278,14 +287,17 @@ COPY = {
         "{ready} ready items · {filled} filled page slots · {empty} empty page slots",
         "{ready} عنصر جاهز · {filled} موعد صفحة بمحتوى · {empty} موعد صفحة فاضي",
     ),
-    "plan.empty_slot": ("Waiting for eligible content", "بانتظار محتوى مناسب"),
+    "plan.empty_slot": (
+        "Check why each page has no content assigned",
+        "راجع سبب عدم التجهيز لكل صفحة",
+    ),
     "plan.no_targets": (
         "Select pages to see where each item would go.",
         "اختار الصفحات عشان تشوف كل محتوى هيروح فين.",
     ),
     "plan.no_videos": (
-        "The library is empty. Your times appear below; add content to preview actual items.",
-        "المكتبة فاضية. المواعيد ظاهرة بالأسفل؛ أضف محتوى للمكتبة لمعاينته.",
+        "No ready content yet. Your times appear below; add content or wait for preparation to finish.",
+        "مفيش محتوى جاهز لسه. المواعيد ظاهرة بالأسفل؛ أضف محتوى أو انتظر اكتمال تجهيزه.",
     ),
     "plan.no_slots": (
         "No future slots in this 30-day window. Adjust the days or times.",
