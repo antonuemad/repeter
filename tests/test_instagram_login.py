@@ -240,7 +240,10 @@ def test_callback_keeps_wizard_context_encrypts_tokens_and_cannot_replay(
     assert "Instagram directly" in web_owner.get(target).text
     a.status = AccountStatus.NEEDS_RECONNECT
     db.commit()
-    assert 'href="/connect/instagram"' in web_owner.get("/accounts").text
+    assert (
+        f'href="/connect/instagram?return_to=/people/{plan.profile_id}%3Fsection%3Daccounts"'
+        in web_owner.get("/accounts").text
+    )
 
 
 def test_existing_login_cannot_be_overwritten(mock, db, workspace, make_account):

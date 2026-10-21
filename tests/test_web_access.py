@@ -452,7 +452,7 @@ def test_settings_has_own_page_and_active_navigation(web_owner, lang):
     set_lang(web_owner, lang)
     response = web_owner.get("/settings/workspace")
     assert response.status_code == 200
-    assert 'href="/settings/workspace" class="settings-link" aria-current="page"' in response.text
+    assert 'href="/settings/workspace" aria-current="page"' in response.text
     assert 'action="/settings/workspace"' in response.text
     rules = web_owner.get("/rules").text
     assert 'action="/settings/workspace"' not in rules and "/rules#workspace" not in rules

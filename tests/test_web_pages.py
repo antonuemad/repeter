@@ -363,8 +363,8 @@ def test_overview_guides_to_content_and_manual_upload_even_with_existing_videos(
     plan = create_plan(web_owner, db)
     web_make_video(title="Already in the library")
     overview = web_owner.get("/").text
-    assert f'href="/plans/{plan.id}/setup/content"' in overview
-    wizard = web_owner.get(f"/plans/{plan.id}/setup/content")
+    assert f'href="/people/{plan.profile_id}?section=content"' in overview
+    wizard = web_owner.get(f"/people/{plan.profile_id}?section=content")
     assert wizard.status_code == 200
     assert 'id="upload"' in wizard.text
     assert 'action="/library/upload"' in wizard.text
