@@ -368,3 +368,24 @@ belong to that source and person. A database-only status fragment refreshes visi
 10 seconds for up to 20 minutes, stops on errors, and supports manual refresh and no-JS navigation.
 It also refreshes the person's library summary. Last-scan counts advance only after a successful
 complete listing. No percentage or time estimate is invented, and refresh never starts a job.
+
+## Schedule and preview usability (2026-10-21)
+
+Person Times exposes start date and time zone, offers Every day or specific weekdays, one main
+time with optional additional times, and an explicit choice of once-per-page or repeat rotation.
+A weekly per-page slot count updates locally. Once mode hides its inactive interval and preserves
+the saved value; native no-JS forms and old clients remain valid. Validation names the problematic
+field, retains the draft and rolls back the complete schedule on error.
+
+Preview identifies its date range, uses full-result gap totals before filtering and pagination,
+and offers All times or Times with gaps. Partial rows retain their filled destinations. Gap
+recovery distinguishes preparation, failed imports, missing/unsuitable originals, source-account
+avoidance, platform exclusions, once-mode exhaustion, interval waits, pending outcomes, account
+status and per-slot exclusions/replacements. Links lead to the relevant person section, activity
+or slot editor. Earliest eligibility is explicitly not a reserved publication. Simulated later
+choices assume earlier success; viewing or saving never enqueues publishing.
+
+A filtered person's Calendar uses their plan time zone, including date boundaries, and explains
+empty days before start, outside the preview, unselected weekdays, elapsed times and daylight-saving
+gaps. The combined Calendar retains workspace time. Neither publishing eligibility nor safety
+holds are relaxed. Both publishing and TikTok publication-audit flags remain false.

@@ -650,3 +650,33 @@ th { font-size: 12px; background: var(--surface-alt); }
   .plan-folder-row { align-items: start; gap: 12px; }
   .import-progress .page-heading { align-items: start; }
 }
+
+.schedule-form > fieldset { border: 0; border-block-start: 1px solid var(--border); padding: 20px 0 0; }
+.schedule-form > fieldset > legend { padding-inline: 0 12px; }
+.schedule-choices { display: flex; flex-wrap: wrap; gap: 12px 28px; margin-block-end: 12px; }
+.schedule-choices label { min-block-size: 44px; }
+.schedule-rotation { display: grid; gap: 8px; margin-block-end: 20px; }
+.schedule-rotation > label { display: flex; flex-direction: row; align-items: start; gap: 12px; padding-block: 12px; cursor: pointer; }
+.schedule-rotation input { margin-block-start: 5px; }
+.schedule-rotation strong, .schedule-rotation small { display: block; }
+.schedule-rotation small { color: var(--muted); font-size: 13px; font-weight: 400; margin-block-start: 4px; max-inline-size: 70ch; }
+.schedule-demand { padding-block: 16px; border-block: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.preview-gaps { margin-block: 24px; }
+.preview-gaps li { padding-block: 12px; border-block-end: 1px solid var(--border); }
+.preview-gaps p, .gap-help { margin-block: 6px; max-inline-size: 72ch; font-size: 13px; color: var(--muted); }
+.preview-filters { display: flex; flex-wrap: wrap; gap: 12px 24px; padding-block: 16px; }
+.preview-filters [aria-current="page"] { color: var(--text); font-weight: 600; text-decoration: none; }
+.plan-slot-targets > li:has([data-gap]) { align-items: start; }
+
+/* Native hidden state takes priority over layout display declarations. */
+.schedule-form [hidden] { display: none !important; }
+
+.preview-filters > a, .gap-help > a { display: inline-flex; align-items: center; min-block-size: 44px; }
+.schedule-preview-heading > div:first-child { flex: 1 1 420px; }
+@media (max-width: 699px) {
+  .person-home > .schedule-preview-heading { display: flex; flex-direction: column; align-items: stretch; }
+  .schedule-preview-heading > div:first-child { flex-basis: auto; }
+  .schedule-preview-heading .actions { inline-size: 100%; }
+}
+
+.calendar-gap-details > summary { min-block-size: 44px; padding-block: 10px; cursor: pointer; font-size: 13px; }

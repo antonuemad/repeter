@@ -29,6 +29,7 @@ from repeater.web.auth import CurrentWorkspace
 from repeater.web.deps import DB, Form, FormError, form_int
 from repeater.web.journey import remember_person
 from repeater.web.routes.plans import get_plan
+from repeater.web.schedule_view import empty_day
 from repeater.web.templating import flash, render
 
 router = APIRouter()
@@ -86,16 +87,6 @@ def slot_context(db, ctx, plan_id, account_id, slot, *, lock=False):
 
 @router.get("/calendar")
 def calendar(request: Request, db: DB, ctx: CurrentWorkspace, day: str = "", person: int = 0):
-    zone = ZoneInfo(ctx.workspace.timezone)
-    today = utcnow().astimezone(zone).date()
-    try:
-        first = datetime.fromisoformat(day).date() if day else today
-        if abs((first - today).days) > 366:
-            raise ValueError
-    except ValueError:
-        raise HTTPException(400) from None
-    start = datetime.combine(first, datetime.min.time(), zone)
-    end = start + timedelta(days=7)
     people = db.execute(
         select(CreatorProfile, ContentPlan)
         .join(ContentPlan, ContentPlan.profile_id == CreatorProfile.id)
@@ -104,11 +95,35 @@ def calendar(request: Request, db: DB, ctx: CurrentWorkspace, day: str = "", per
         .limit(101)
     ).all()
     selected = [(profile, plan) for profile, plan in people if not person or profile.id == person]
+    if person and not selected:
+        selected = db.execute(
+            select(CreatorProfile, ContentPlan)
+            .join(ContentPlan, ContentPlan.profile_id == CreatorProfile.id)
+            .where(CreatorProfile.workspace_id == ctx.workspace.id, CreatorProfile.id == person)
+        ).all()
+        if not selected:
+            raise HTTPException(404)
+        people = [*people[:99], selected[0]]
     if person and selected:
         remember_person(request, *selected[0])
+    zone = ZoneInfo(selected[0][1].timezone if person else ctx.workspace.timezone)
+    now = utcnow()
+    today = now.astimezone(zone).date()
+    try:
+        first = datetime.fromisoformat(day).date() if day else today
+        if abs((first - today).days) > 366:
+            raise ValueError
+    except ValueError:
+        raise HTTPException(400) from None
+    start = datetime.combine(first, datetime.min.time(), zone)
+    end = start + timedelta(days=7)
     events = []
+    selected_has_targets = True
     for profile, plan in selected[:20]:
-        for row in simulate(db, plan)["rows"]:
+        preview = simulate(db, plan)
+        if person:
+            selected_has_targets = bool(preview["accounts"])
+        for row in preview["rows"]:
             if start <= row.at < end:
                 for entry in row.entries:
                     events.append(
@@ -172,6 +187,15 @@ def calendar(request: Request, db: DB, ctx: CurrentWorkspace, day: str = "", per
             "previous": (first - timedelta(days=7)).isoformat(),
             "following": (first + timedelta(days=7)).isoformat(),
             "first": first,
+            "zone": zone,
+            "empty_day_reasons": {
+                first + timedelta(days=i): empty_day(
+                    selected[0][1], first + timedelta(days=i), now, has_targets=selected_has_targets
+                )
+                for i in range(7)
+            }
+            if person
+            else {},
             "person_filter": person,
             "people": people[:100],
             "selected_plan": selected[0][1] if person and selected else None,

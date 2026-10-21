@@ -12,7 +12,7 @@ from datetime import UTC, datetime, time, timedelta
 from heapq import heapify, heappop, heappush
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from repeater.engine.publisher import reached_platform
@@ -42,6 +42,7 @@ class PreviewEntry:
     available_at: datetime | None = None
     original_at: datetime | None = None
     customized: bool = False
+    detail: str | None = None
 
     @property
     def repeated(self) -> bool:
@@ -146,6 +147,16 @@ def _history(db, plan, accounts, videos):
 def simulate(db: Session, plan: ContentPlan, *, now: datetime | None = None) -> dict:
     now = ensure_aware(now or utcnow())
     accounts = targets(db, plan)
+    library_counts = dict(
+        db.execute(
+            select(Video.status, func.count())
+            .where(
+                Video.workspace_id == plan.workspace_id,
+                Video.profile_id == plan.profile_id,
+            )
+            .group_by(Video.status)
+        ).all()
+    )
     order = [Video.source_published_at.asc().nullslast(), Video.created_at.asc(), Video.id.asc()]
     if plan.ordering == "newest":
         order = [Video.source_published_at.desc().nullslast(), Video.created_at.desc(), Video.id.desc()]
@@ -169,12 +180,15 @@ def simulate(db: Session, plan: ContentPlan, *, now: datetime | None = None) -> 
     cooldown = timedelta(days=plan.repeat_after_days)
     queues: dict[int, list] = {}
     empty_reasons: dict[int, str] = {}
+    empty_details: dict[int, str] = {}
     excluded = 0
     blocked_count = 0
     incompatibilities = []
     for account in accounts:
         choices = []
         blocked_here = 0
+        used_once = 0
+        exclusions = {"same_origin": 0, "excluded_content": 0, "incompatible": 0}
         if account.status == AccountStatus.ACTIVE and account.profile_id == plan.profile_id:
             for rank, video in enumerate(videos):
                 pair = (video.id, account.id)
@@ -187,6 +201,14 @@ def simulate(db: Session, plan: ContentPlan, *, now: datetime | None = None) -> 
                     or account.platform.value in (video.overrides or {}).get("exclude_platforms", [])
                     or issue
                 ):
+                    cause = (
+                        "same_origin"
+                        if video.source_account_id == account.id
+                        else "excluded_content"
+                        if account.platform.value in (video.overrides or {}).get("exclude_platforms", [])
+                        else "incompatible"
+                    )
+                    exclusions[cause] += 1
                     excluded += 1
                     continue
                 if pair in blocked:
@@ -194,12 +216,30 @@ def simulate(db: Session, plan: ContentPlan, *, now: datetime | None = None) -> 
                     excluded += 1
                     continue
                 if last is not None and not repeating:
+                    used_once += 1
                     excluded += 1
                     continue
                 # Rank breaks ties using the saved library order; unused always wins.
                 heappush(choices, (last.timestamp() if last else float("-inf"), rank, video, last, False))
             empty_reasons[account.id] = (
-                "pending" if blocked_here else "exhausted" if choices else "no_eligible"
+                "pending" if blocked_here else "exhausted" if choices or used_once else "no_eligible"
+            )
+            empty_details[account.id] = (
+                "processing"
+                if not videos
+                and (
+                    library_counts.get(VideoStatus.IMPORTING, 0)
+                    + library_counts.get(VideoStatus.PROCESSING, 0)
+                )
+                else "import_failed"
+                if not videos and library_counts.get(VideoStatus.FAILED, 0)
+                else "review_content"
+                if not videos and library_counts.get(VideoStatus.READY, 0)
+                else "empty_library"
+                if not videos
+                else next(
+                    (cause for cause, count in exclusions.items() if count == len(videos)), "review_content"
+                )
             )
         else:
             empty_reasons[account.id] = (
@@ -261,7 +301,19 @@ def simulate(db: Session, plan: ContentPlan, *, now: datetime | None = None) -> 
                 entries.append(PreviewEntry(account, None, reason="excluded", **meta))
                 continue
             if not queue:
-                entries.append(PreviewEntry(account, None, reason=empty_reasons[account.id], **meta))
+                entries.append(
+                    PreviewEntry(
+                        account,
+                        None,
+                        reason=(
+                            "replacement_unavailable"
+                            if edit and edit.replacement and empty_reasons[account.id] == "no_eligible"
+                            else empty_reasons[account.id]
+                        ),
+                        detail=empty_details.get(account.id),
+                        **meta,
+                    )
+                )
                 continue
             index = 0
             if edit and edit.replacement:
@@ -302,4 +354,7 @@ def simulate(db: Session, plan: ContentPlan, *, now: datetime | None = None) -> 
         "truncated": truncated,
         "incompatibilities": incompatibilities[:100],
         "incompatibilities_total": len(incompatibilities),
+        "window_start": max(plan.start_date, now.astimezone(ZoneInfo(plan.timezone)).date()),
+        "window_end": max(plan.start_date, now.astimezone(ZoneInfo(plan.timezone)).date())
+        + timedelta(days=29),
     }

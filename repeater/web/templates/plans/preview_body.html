@@ -1,4 +1,6 @@
 <section class="card"><h2>{{ t('plan.draft') }}</h2>
+<p>{{ t('schedule.window', start=preview.window_start.isoformat(), end=preview.window_end.isoformat(), zone=plan.timezone) }}</p>
+<p class="plan-measure">{{ t('schedule.draft_help') }}</p>
 <p><strong>{{ t('plan.coverage', ready=preview.ready, filled=preview.filled, empty=preview.empty) }}</strong></p>
 <p class="muted">{{ t('plan.saved_pages', n=preview.accounts|length) }} · <bdi>{{ plan.timezone }}</bdi>{% if plan.rotation_mode == 'repeat' %} · {{ t('plan.rotation_summary', days=plan.repeat_after_days) }}{% endif %}</p>
 {% if not preview.ready %}<p><a href="{{ setup_urls.content }}">{{ t('plan.no_videos') }}</a></p>{% endif %}
@@ -11,19 +13,21 @@
 </details>
 {% if warnings %}<details><summary>{{ t('plan.warnings') }} ({{ warnings|length }})</summary><ul>{% for a in warnings %}<li><bdi>{{ a.display_name }}</bdi> · {{ platform_name(a.platform) }} · <a href="/accounts">{{ t('nav.accounts') }}</a></li>{% endfor %}</ul></details>{% endif %}
 </section>
+{% if gap_summary %}<section class="preview-gaps" aria-labelledby="preview-gaps-title"><h2 id="preview-gaps-title">{{ t('schedule.gaps') }}</h2><ul class="plain">{% for gap in gap_summary %}<li><strong>{{ t('schedule.gap_title_' ~ gap.key) if gap.key in ['processing', 'import_failed', 'empty_library', 'incompatible', 'same_origin', 'excluded_content', 'review_content'] else t('plan.reason_' ~ gap.key) }}</strong> · {{ t('schedule.gap_count', n=gap.count) }}{{ m.gap_help(gap.entry, plan, setup_urls, gap.at, true) }}</li>{% endfor %}</ul></section>{% endif %}
+<nav class="preview-filters" aria-label="{{ t('plan.draft') }}"><a href="{{ preview_path }}?{{ 'section=preview&' if person_hub is defined and person_hub else '' }}view=all"{% if preview_view == 'all' %} aria-current="page"{% endif %}>{{ t('schedule.show_all') }}</a><a href="{{ preview_path }}?{{ 'section=preview&' if person_hub is defined and person_hub else '' }}view=gaps"{% if preview_view == 'gaps' %} aria-current="page"{% endif %}>{{ t('schedule.show_gaps') }}</a></nav>
 {% if wizard_step is defined %}<details class="wizard-preview-notes"><summary>{{ t('wizard.preview_notes') }}</summary><p class="muted plan-measure">{{ t('plan.preview_help') }}</p>{% endif %}
 <p class="muted plan-measure">{{ t('plan.preview_limits') }}</p><p class="muted plan-measure">{{ t('media.scope') }}</p>
 {% if wizard_step is defined %}</details>{% endif %}
 {% if preview.incompatibilities %}<details class="card"><summary>{{ t('media.excluded', n=preview.incompatibilities_total) }}</summary><p class="muted">{{ t('media.excluded_help') }}</p><ul class="plain">{% for issue in preview.incompatibilities %}<li class="caption-preview"><a href="/library/{{ issue.video.id }}" dir="auto">{{ m.video_title(issue.video) }}</a> · <bdi>{{ issue.account.display_name }}</bdi> {{ m.platform(issue.account.platform) }}<p>{{ t('media.' ~ issue.reason) }}</p></li>{% endfor %}</ul></details>{% endif %}
-{% if not preview.accounts %}<section class="card"><a href="{{ '/plans/' ~ plan.id ~ '/setup/accounts' if wizard_step is defined else '/plans/' ~ plan.id ~ '/edit#targets' }}">{{ t('plan.no_targets') }}</a></section>{% elif not preview.rows %}<section class="card">{{ t('plan.no_slots') }}</section>{% else %}
+{% if not preview.accounts %}<section class="card"><a href="{{ setup_urls.accounts }}">{{ t('plan.no_targets') }}</a></section>{% elif not preview.rows %}<section class="card">{{ t('schedule.no_gaps') if preview_view == 'gaps' and preview.has_slots else t('plan.no_slots') }}{% if preview_view != 'gaps' or not preview.has_slots %} <a href="{{ setup_urls.schedule }}">{{ t('schedule.fix_schedule') }}</a>{% endif %}</section>{% else %}
 <ol class="plan-calendar">{% for row in preview.rows %}<li>
 <div class="plan-slot-date"><time datetime="{{ row.at.isoformat() }}">{{ fmt_dt(row.at, plan.timezone) }}</time><span class="muted small">{{ t('plan.slot_count', n=row.entries|length) }}</span></div>
 <details{% if loop.first %} open{% endif %}><summary><span dir="auto">{{ m.video_title(row.first_video) if row.first_video else t('plan.reason_' ~ row.empty_reason) if row.empty_reason else t('plan.empty_slot') }}</span> · {{ t('plan.slot_filled', n=row.filled, total=row.entries|length) }}</summary>
+{% if row.filled and row.filled < row.entries|length %}<p class="small muted">{{ t('schedule.partial') }}</p>{% endif %}
 <ul class="plan-slot-targets">{% for entry in row.entries %}<li><span><bdi>{{ entry.account.display_name }}</bdi> {{ m.platform(entry.account.platform) }}</span>
 <div class="plan-entry-content">{% if entry.video %}<a href="/library/{{ entry.video.id }}" dir="auto">{{ m.video_title(entry.video) }}</a><span class="small muted">{{ t('media.' ~ entry.video.media_kind ~ '_' ~ entry.video.content_format) }}</span><span class="small muted">{{ t('plan.repeat_use') if entry.repeated else t('plan.first_use') }}</span>{% if entry.repeated %}<span class="small muted">{{ t('plan.previous_preview' if entry.previous_is_preview else 'plan.previous_actual', at=fmt_dt(entry.previous_at, plan.timezone)) }}</span>{% endif %}
-{% else %}<span>{{ t('plan.reason_' ~ entry.reason) }}</span>{% if entry.available_at %}<span class="small muted">{{ t('plan.eligible_after', at=fmt_dt(entry.available_at, plan.timezone)) }}</span>{% endif %}
-{% if entry.reason in ['account_disconnected', 'account_reconnect', 'account_unavailable'] %}<a href="{{ setup_urls.accounts }}">{{ t('plan.review_pages') }}</a>{% endif %}{% endif %}
+{% else %}<span>{{ t('plan.reason_' ~ entry.reason) }}</span>{{ m.gap_help(entry, plan, setup_urls, row.at) }}{% endif %}
 <a href="/calendar/{{ plan.id }}/{{ entry.account.id }}/edit?slot={{ (entry.original_at or row.at).isoformat()|urlencode }}">{{ t('calendar.edit') }}</a></div></li>{% endfor %}</ul></details>
 </li>{% endfor %}</ol>
-{{ m.pager(pager, preview_path, {'section': 'preview'} if person_hub is defined and person_hub else {}) }}
+{{ m.pager(pager, preview_path, {'section': 'preview', 'view': preview_view} if person_hub is defined and person_hub and preview_view != 'all' else {'section': 'preview'} if person_hub is defined and person_hub else {'view': preview_view} if preview_view != 'all' else {}) }}
 {% endif %}

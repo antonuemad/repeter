@@ -1,6 +1,7 @@
 """Copy for the person-led draft planning flow; kept together in both supported languages."""
 
 from repeater.web.media_i18n import COPY as MEDIA_COPY
+from repeater.web.schedule_i18n import COPY as SCHEDULE_COPY
 
 COPY = {
     "plan.execution": ("Plan execution", "تشغيل الخطة"),
@@ -784,6 +785,7 @@ COPY.update(
         )
     }
 )
+COPY.update(SCHEDULE_COPY)
 COPY.update(MEDIA_COPY)
 EN = {k: v[0] for k, v in COPY.items()}
 AR = {k: v[1] for k, v in COPY.items()}

@@ -343,12 +343,12 @@ CHAPTERS = (
         ),
         (
             (
-                "من الشخص افتح خطوة «المواعيد». حدّد أيام الأسبوع ووقت النشر اليومي؛ يمكنك إضافة مواعيد أخرى من الخيارات المتاحة.",
-                "Open the person's Times step. Select weekdays and a daily time; add more times using the available options.",
+                "من الشخص افتح «المواعيد». راجع تاريخ البداية والمنطقة الزمنية، ثم اختَر كل يوم أو أيام محددة والموعد الأساسي.",
+                "Open the person's Times step. Check the visible start date and timezone, then choose Every day or specific days and the main time.",
             ),
             (
-                "راجع المنطقة الزمنية وتاريخ البداية وترتيب المكتبة داخل الخيارات الإضافية. المواعيد تُعرض بتوقيت الخطة.",
-                "Check the timezone, start date and library order in the extra options. Times use the plan's timezone.",
+                "لو محتاج أكثر من مرة يوميًا، افتح الأوقات الإضافية. راجع عدد المواعيد المطلوبة لكل صفحة أسبوعيًا؛ ترتيب المكتبة موجود في الخيارات الإضافية.",
+                "Open extra times if needed. Review the requested weekly slots per page; library order is under extra options.",
             ),
             (
                 "اختر مرة واحدة لكل صفحة، أو الروتيشن المتكرر. في التكرار حدّد أقل فاصل قبل إعادة نفس العنصر على نفس الصفحة، من يوم إلى ٣٦٥ يومًا.",
@@ -383,8 +383,8 @@ CHAPTERS = (
                 "Review filled and empty slot totals, then expand a slot to inspect the page, proposed item and first-use or repeat status.",
             ),
             (
-                "لو الموعد فارغ، اقرأ السبب: محتوى غير جاهز، شكل غير متوافق، فاصل تكرار لم ينتهِ، أو حساب يحتاج إعادة ربط.",
-                "For empty slots, read the reason: content not ready, incompatible format, an unelapsed repeat interval, or an account needing reconnection.",
+                "راجع ملخص «ليه فيه مواعيد فاضية؟»، واختَر عرض المواعيد التي فيها فراغات. كل سبب له رابط لمعالجته، ووقت السماح بالإعادة ليس حجز نشر.",
+                "Read the gap summary and select Times with gaps. Each reason links to the relevant task. Earliest repeat eligibility is not a reserved publication time.",
             ),
             (
                 "ارجع للخطوة المطلوبة وعدّلها، ثم حدّث المعاينة. استخدم الصفحات التالية لرؤية بقية المواعيد وافتح تقويم الشخص للصورة المجمّعة.",

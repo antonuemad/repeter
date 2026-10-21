@@ -88,3 +88,11 @@
   {% endfor %}
 </ul>
 {% endmacro %}
+
+{% macro gap_help(entry, plan, urls, at, summary=false) %}
+{% set info = gap_recovery(entry) %}
+{% set edit_url = '/calendar/' ~ plan.id ~ '/' ~ entry.account.id ~ '/edit?slot=' ~ ((entry.original_at or at).isoformat()|urlencode) %}
+<div class="gap-help" data-gap="{{ info.key }}"><p>{{ t('schedule.gap_help_' ~ info.key) }}</p>
+{% if entry.available_at and not summary %}<p>{{ t('plan.eligible_after', at=fmt_dt(entry.available_at, plan.timezone)) }} · <bdi>{{ plan.timezone }}</bdi><br>{{ t('schedule.available_help') }}</p>{% endif %}
+<a href="{{ '/activity' if info.section == 'activity' else edit_url if info.section == 'slot' else urls[info.section] }}">{{ t('schedule.fix_' ~ info.section) }}</a></div>
+{% endmacro %}

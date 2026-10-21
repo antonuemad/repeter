@@ -51,7 +51,7 @@
       {% include "plans/wizard_schedule.html" %}
     {% endif %}
   </section>{% else %}
-    <div class="page-heading"><div><h2>{{ t('wizard.preview_title') }}</h2><p class="muted">{{ t('wizard.preview_help') }}</p></div><div class="actions"><a class="button" href="/calendar?person={{ person.id }}">{{ t('simple.open_calendar') }}</a><a href="{{ setup_urls.preview }}">{{ t('wizard.refresh_preview') }}</a></div></div>
+    <div class="page-heading schedule-preview-heading"><div><h2>{{ t('wizard.preview_title') }}</h2><p class="muted">{{ t('wizard.preview_help') }}</p></div><div class="actions"><a class="button secondary" href="{{ setup_urls.schedule }}">{{ t('wizard.edit_schedule') }}</a><a href="{{ setup_urls.preview }}">{{ t('wizard.refresh_preview') }}</a></div></div>
     {% if not preview.ready %}<p class="wizard-safety"><a href="{{ setup_urls.content }}">{{ t('wizard.add_content') }}</a></p>{% endif %}
     {% include "plans/preview_body.html" %}
     <div class="wizard-actions"><a class="button" href="/calendar?person={{ person.id }}">{{ t('simple.open_calendar') }}</a><a href="{{ setup_urls.schedule }}">{{ t('wizard.edit_schedule') }}</a></div>

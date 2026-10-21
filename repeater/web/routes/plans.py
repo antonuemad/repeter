@@ -38,6 +38,7 @@ from repeater.web.auth import CurrentWorkspace
 from repeater.web.deps import DB, Form, FormError, Page, form_bool, form_int, form_str, query_int
 from repeater.web.import_progress import source_progress
 from repeater.web.journey import person_url, progress, remember_person
+from repeater.web.schedule_view import gap_summary
 from repeater.web.templating import flash, render, templates
 
 router = APIRouter()
@@ -221,7 +222,7 @@ def _wizard(request, db, ctx, plan, step, *, data=None, page="1"):
             )
         )
     if step == "preview":
-        data.update(_preview_context(db, ctx, plan, page))
+        data.update(_preview_context(db, ctx, plan, page, request.query_params.get("view", "all")))
         data["preview_path"] = f"/people/{plan.profile_id}" if hub else data["setup_urls"]["preview"]
     return render(
         request,
@@ -546,26 +547,32 @@ def save(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, section:
                 a.profile_id = plan.profile_id
                 db.add(PlanTarget(plan_id=plan.id, account_id=a.id, workspace_id=plan.workspace_id))
         elif section == "schedule":
-            zone = form_str(form, "timezone", max_len=64, required=True)
+            zone = form_str(form, "timezone", max_len=64)
             try:
                 ZoneInfo(zone)
-                start = date.fromisoformat(form_str(form, "start_date", max_len=10, required=True))
             except (ValueError, ZoneInfoNotFoundError):
-                raise FormError("plan.schedule_invalid") from None
+                raise FormError("schedule.zone_invalid") from None
+            try:
+                start = date.fromisoformat(form_str(form, "start_date", max_len=10, required=True))
+            except ValueError:
+                raise FormError("schedule.start_invalid") from None
             today = utcnow().astimezone(ZoneInfo(zone)).date()
             # An ongoing plan keeps its original start date when its hours/days change.
             if start != plan.start_date and not today <= start <= today + timedelta(days=365):
                 raise FormError("plan.date_invalid")
-            days = form.getlist("weekdays")
+            day_mode = form_str(form, "day_mode", max_len=12)
+            if day_mode not in {"", "daily", "custom"}:
+                raise FormError("schedule.days_invalid")
+            days = [str(i) for i in range(7)] if day_mode == "daily" else form.getlist("weekdays")
             times = [str(t).strip() for t in form.getlist("times") if str(t).strip()]
+            if not days or any(d not in [str(i) for i in range(7)] for d in days):
+                raise FormError("schedule.days_invalid")
             if (
-                not days
-                or any(d not in [str(i) for i in range(7)] for d in days)
-                or not 1 <= len(times) <= 5
+                not 1 <= len(times) <= 5
                 or any(not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", t) for t in times)
                 or len(set(times)) != len(times)
             ):
-                raise FormError("plan.schedule_invalid")
+                raise FormError("schedule.times_invalid")
             ordering = form_str(form, "ordering", max_len=16)
             if ordering not in {"oldest", "newest"}:
                 raise FormError("plan.schedule_invalid")
@@ -663,7 +670,13 @@ def _rotation(form, plan):
     if mode not in {"once", "repeat"}:
         raise FormError("plan.rotation_invalid")
     try:
-        days = form_int(form, "repeat_after_days", minimum=1, maximum=365)
+        days = form_int(
+            form,
+            "repeat_after_days",
+            minimum=1,
+            maximum=365,
+            **({"default": plan.repeat_after_days} if mode == "once" else {}),
+        )
     except FormError:
         raise FormError("plan.rotation_invalid") from None
     plan.rotation_mode, plan.repeat_after_days = mode, days
@@ -813,17 +826,29 @@ def preview(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int, page:
         "plans/preview.html",
         {
             **_context(db, ctx, plan),
-            **_preview_context(db, ctx, plan, page),
+            **_preview_context(db, ctx, plan, page, request.query_params.get("view", "all")),
             "preview_path": f"/plans/{plan.id}",
         },
     )
 
 
-def _preview_context(db, ctx, plan, page):
+def _preview_context(db, ctx, plan, page, view="all"):
+    if view not in {"all", "gaps"}:
+        raise HTTPException(400)
     result = simulate(db, plan)
+    gaps = gap_summary(result)
+    result["has_slots"] = bool(result["rows"])
+    if view == "gaps":
+        result["rows"] = [row for row in result["rows"] if row.filled < len(row.entries)]
     pager = Page(number=query_int(page, default=1), size=10, total=len(result["rows"]))
     result["rows"] = result["rows"][pager.offset : pager.offset + pager.size]
     warnings = [
         a for a in result["accounts"] if a.status != AccountStatus.ACTIVE or a.profile_id != plan.profile_id
     ]
-    return {"preview": result, "warnings": warnings, "pager": pager}
+    return {
+        "preview": result,
+        "warnings": warnings,
+        "pager": pager,
+        "gap_summary": gaps,
+        "preview_view": view,
+    }

@@ -283,3 +283,24 @@ document.querySelectorAll('[data-import-progress]').forEach((panel) => {
   document.addEventListener('visibilitychange', schedule);
   schedule();
 });
+
+// Optional schedule help; all fields remain native and the server validates the same intent.
+document.querySelectorAll('[data-schedule-form]').forEach((form) => {
+  const custom = form.querySelector('[data-custom-days]');
+  const repeat = form.querySelector('[data-repeat-options]');
+  const summary = form.querySelector('[data-schedule-summary]');
+  function update() {
+    const daily = form.querySelector('[name="day_mode"]:checked')?.value === 'daily';
+    custom.hidden = daily;
+    form.querySelector('[data-day-help]').hidden = daily;
+    const once = form.querySelector('[name="rotation_mode"]:checked')?.value === 'once';
+    repeat.hidden = once;
+    repeat.querySelector('input').disabled = once;
+    const days = daily ? 7 : form.querySelectorAll('[name="weekdays"]:checked').length;
+    const times = [...form.querySelectorAll('[name="times"]')].filter(input => input.value).length;
+    summary.textContent = summary.dataset.template.replace('{days}', days).replace('{times}', times).replace('{weekly}', days * times);
+  }
+  form.addEventListener('input', update);
+  form.addEventListener('change', update);
+  update();
+});

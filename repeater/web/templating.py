@@ -19,6 +19,7 @@ from repeater.engine.actions import may_be_live
 from repeater.engine.captions import platform_name
 from repeater.timeutil import ensure_aware, tz
 from repeater.web import csrf, i18n
+from repeater.web.schedule_view import recovery
 
 WEB_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = WEB_DIR / "templates"
@@ -76,6 +77,7 @@ def _build_env() -> jinja2.Environment:
         fmt_duration=fmt_duration,
         platform_name=platform_name,
         may_be_live=may_be_live,
+        gap_recovery=recovery,
         # A new deployment must not reuse cached CSS/JS from an older release. Compute once
         # per process from the shipped bytes, including when file sizes/timestamps match.
         asset_versions={
