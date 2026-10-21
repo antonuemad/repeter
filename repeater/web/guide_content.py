@@ -74,8 +74,8 @@ CHAPTERS = (
                 "Open People to switch people or add someone. Check the name at the top before editing their library or schedule.",
             ),
             (
-                "امشِ بالترتيب: الأشخاص ← الحسابات المختارة ← المحتوى ← المواعيد ← المعاينة والتقويم.",
-                "Follow this order: person → selected accounts → content → times → preview and calendar.",
+                "افتح الشخص، وهتلاقي صفحاته ومحتواه ومواعيده ومعاينته في تبويبات داخل نفس الصفحة.",
+                "Open a person to find Pages, Content, Times and Preview together on the same page.",
             ),
             (
                 "من أعلى الصفحة غيّر اللغة أو المظهر. على الموبايل افتح «القائمة الرئيسية» لإظهار الأقسام.",
@@ -83,8 +83,8 @@ CHAPTERS = (
             ),
         ),
         (
-            "«أدوات متقدمة» فيها المصادر والقواعد وقائمة الانتظار؛ معالج تجهيز الشخص هو البداية الأسهل.",
-            "Advanced tools contains Sources, Rules and the actual queue. The person setup wizard is the easiest starting point.",
+            "«الإعدادات والسجل» تجمع الحسابات والإعدادات العامة، وبداخل «أدوات متقدمة» تلاقي المصادر والقواعد وقائمة الانتظار.",
+            "Settings & activity contains global accounts and workspace settings; its Advanced tools section contains Sources, Rules and the actual queue.",
         ),
         "people",
         ("افتح الأشخاص", "Open People"),
@@ -303,8 +303,8 @@ CHAPTERS = (
         ),
         (
             (
-                "اختر الشخص في «المكتبة»، واستخدم الحالة والبحث للوصول للعنصر. «محتوى غير مخصص» ليس مكتبة الشخص.",
-                "Select a person in Library, then use search and status filters. Unassigned content is separate from a person's library.",
+                "افتح تبويب «المحتوى» عند الشخص ثم «إدارة كل المحتوى»، واستخدم تصفية الحالة للوصول للعنصر. المكتبة غير المخصصة متاحة ضمن الأدوات المتقدمة.",
+                "Open the person’s Content section, then Manage all content. Use the status filters to find an item. The unassigned library remains under Advanced tools.",
             ),
             (
                 "افتح العنصر لمعاينته وتعديل العنوان والوصف والمنصات المتاحة وشكل المحتوى.",
@@ -511,8 +511,8 @@ CHAPTERS = (
         ),
         (
             (
-                "افتح «أدوات متقدمة» في القائمة الجانبية، ثم «المصادر» لمراجعة حالة كل مصدر وآخر فحص وأخطائه.",
-                "Expand Advanced tools, then Sources to review source status, last checks and errors.",
+                "افتح «الإعدادات والسجل» ثم «أدوات متقدمة» ثم «المصادر» لمراجعة حالة المصادر وآخر فحص وأخطائها.",
+                "Expand Settings & activity, then Advanced tools and Sources to review source status, last checks and errors.",
             ),
             (
                 "المصدر التابع لشخص يقودك لإعداداته عند ذلك الشخص. بدء الاستيراد أو المتابعة وإيقافهما منفصل عن تشغيل خطة النشر.",
@@ -543,8 +543,8 @@ CHAPTERS = (
         ),
         (
             (
-                "افتح «إعدادات مساحة العمل» من القائمة الجانبية لمراجعة المنطقة الزمنية وفاصل المنصات وأفق التخطيط.",
-                "Open Workspace settings to review the timezone, cross-platform gap and planning horizon.",
+                "افتح «الإعدادات والسجل» ثم «إعدادات مساحة العمل» لمراجعة المنطقة الزمنية وفاصل المنصات وأفق التخطيط.",
+                "Open Settings & activity, then Workspace settings to review the timezone, cross-platform gap and planning horizon.",
             ),
             (
                 "عدّل القيم المسموح بها لدورك ثم احفظ. لا تفترض أن تغيير توقيت مساحة العمل غيّر توقيت خطة محفوظة؛ راجع خطوة مواعيد الشخص.",
