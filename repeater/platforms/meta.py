@@ -113,7 +113,12 @@ PUBLISH_TASK = "CREATE_CONTENT"
 # Listing a Page's videos (GET /{page-id}/videos) needs a Page token requested by a person who can
 # perform the MANAGE task (https://developers.facebook.com/docs/video-api/guides/get-videos).
 MANAGE_TASK = "MANAGE"
-PAGE_FIELDS = "id,name,access_token,tasks,picture{url},instagram_business_account{id,username,name,profile_picture_url,account_type}"
+# Facebook Login exposes the linked IGUser schema, which has no account_type field.
+# Requesting the Instagram Login-only field rejects the entire Page discovery with #100.
+# Source: facebook/facebook-python-business-sdk, facebook_business/adobjects/iguser.py.
+PAGE_FIELDS = (
+    "id,name,access_token,tasks,picture{url},instagram_business_account{id,username,name,profile_picture_url}"
+)
 
 API_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 DEFAULT_PAGE_SIZE = 50
@@ -754,7 +759,9 @@ def _instagram_account(
         extra={
             "oauth_provider": "meta",
             "ig_user_id": ig_user_id,
-            **({"account_type": ig["account_type"]} if ig.get("account_type") else {}),
+            # Unknown must also replace stale stored metadata on reconnection. A linked
+            # professional account is not necessarily Business; never infer Story eligibility.
+            "account_type": ig.get("account_type"),
             "page_id": str(page["id"]),
             "username": username,
             "fb_user_id": fb_user_id,

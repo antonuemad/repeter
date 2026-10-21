@@ -336,6 +336,7 @@ def test_exchange_code_pages_ig_and_pagination(mock):
     assert ig.extra == {
         "oauth_provider": "meta",
         "ig_user_id": IG_A["id"],
+        "account_type": None,
         "page_id": "111",
         "username": "magiclap",
         "fb_user_id": "fbuser1",

@@ -320,3 +320,12 @@ is not described as necessarily empty. These changes do not start imports, activ
 publication jobs or change the mandatory publishing lock.
 Production publishing and TikTok audit flags remain false; no real social publication,
 container creation or draft upload was used for this work.
+
+## Meta Page discovery correction — 2026-10-21
+
+Facebook Login Page discovery no longer requests the unsupported Instagram `account_type`
+field that rejected the entire connection with Graph error #100. Linked profile identities,
+pagination and permission checks remain intact. Missing account type clears stale stored
+type metadata rather than implying Business/Story eligibility. Direct Instagram Login keeps
+its separate supported account-type read. Acceptance uses synthetic OAuth and mocked HTTP;
+no real customer authorization or publication is performed by this fix.
