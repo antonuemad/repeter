@@ -33,7 +33,7 @@
       {% endif %}
       {% if source %}
       <div class="wizard-import"><p class="muted plan-measure">{{ t('wizard.import_help') }}</p>
-        <form method="post" action="/plans/{{ plan.id }}/imports" class="actions">{{ revision() }}<button name="action" value="{{ 'pause' if source.enabled else 'start' }}" class="button{{ ' secondary' if source.enabled else '' }}">{{ t('plan.import_pause') if source.enabled else t('plan.import_start') }}</button></form>
+        <form method="post" action="/plans/{{ plan.id }}/imports" class="actions">{{ revision() }}<button name="action" value="{{ 'pause' if source.enabled else 'start' }}" class="button{{ ' secondary' if source.enabled else '' }}">{{ t('plan.import_pause') if source.enabled else t('import.retry') if source.last_error else t('plan.import_start') }}</button>{% if source.enabled and source.connected_account_id in drives|map(attribute='id')|list %}<button name="action" value="start" class="button secondary">{{ t('import.retry') if source.last_error else t('plan.watch_check') }}</button>{% endif %}</form>
       </div>
       {% endif %}
       </details>

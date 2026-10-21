@@ -81,7 +81,7 @@ def source_progress(db, plan, sources):
                 if source.last_polled_at or source.last_success_at or source.config.get("baseline_at")
                 else "saved"
             )
-        if source.last_error:
+        if source.last_error and not (source.enabled and poll):
             state = "error"
         if account is None or account.status != AccountStatus.ACTIVE:
             state = "reconnect"

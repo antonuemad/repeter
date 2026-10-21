@@ -3,12 +3,12 @@
 {% for item in import_progress %}{% set s = item.source %}{% set c = item.counts %}
 <article class="import-source" data-import-source="{{ s.id }}" data-import-state="{{ item.state }}">
   <div class="import-source-heading"><h3 dir="auto">{{ s.name }}</h3><span class="badge badge-{{ 'needs_reconnect' if item.state in ['reconnect', 'error', 'failed'] else 'active' if item.state == 'watching' else 'disabled' }}">{{ t('import.' ~ item.state) }}</span></div>
-  {% if item.state != 'empty' %}<p class="plan-measure">{{ t('import.' ~ item.state ~ '_help') }}</p>{% endif %}
+  {% if item.state != 'empty' %}<p class="plan-measure">{{ t('import.platform_saved_help') if item.state == 'saved' and s.kind != 'drive' else t('import.' ~ item.state ~ '_help') }}</p>{% endif %}
   {% if item.state == 'empty' %}<p class="small muted plan-measure">{{ t('import.new_only_help') if item.new_only else t('import.empty_scan') if item.empty_scan and s.kind == 'drive' else t('import.empty_help') }}</p>{% endif %}
   {% if item.total or s.last_success_at %}<p class="import-counts">{{ t('import.counts', total=item.total, ready=c.get('ready', 0), importing=c.get('importing', 0), processing=c.get('processing', 0)) }}{% if c.get('failed') %} · {{ t('import.failed_count', n=c.failed) }}{% endif %}{% if c.get('duplicate') %} · {{ t('import.duplicate_count', n=c.duplicate) }}{% endif %}{% if c.get('archived') %} · {{ t('import.archived_count', n=c.archived) }}{% endif %}</p>{% endif %}
   {% if s.last_success_at %}<p class="muted small">{{ t('import.last_success', at=fmt_dt(s.last_success_at, plan.timezone)) }}{% if 'last_listed_count' in s.config %}<br>{{ t('import.last_scan', listed=s.config.last_listed_count, created=s.config.last_created_count) }}{% endif %}</p>{% endif %}
   {% if item.state == 'reconnect' %}<p><a href="/accounts">{{ t('import.reconnect_action') }}</a></p>{% endif %}
-  {% if s.last_error %}<details class="small"><summary>{{ t('import.details') }}</summary>{{ m.error_text(s.last_error, 300, s.last_error_info) }}</details>{% endif %}
+  {% if s.last_error %}<details class="small"><summary>{{ t('import.previous_error') if item.state in ['queued', 'scheduled', 'checking'] else t('import.details') }}</summary>{{ m.error_text(s.last_error, 300, s.last_error_info) }}</details>{% endif %}
   {% if item.failures %}<ul class="plain import-failures">{% for v in item.failures %}<li><a href="/library/{{ v.id }}"><span>{{ t('import.failed_item') }}:</span> <bdi>{{ m.video_title(v) }}</bdi></a>{% if v.error %}<p class="small">{{ m.error_text(v.error, 200, v.error_info) }}</p>{% endif %}</li>{% endfor %}</ul>{% endif %}
   {% if item.pending and not s.enabled %}<p class="small muted">{{ t('import.paused_help') }}</p>{% endif %}
 </article>

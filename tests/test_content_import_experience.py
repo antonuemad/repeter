@@ -338,3 +338,42 @@ def test_preferences_after_folder_post_return_to_readable_content(
         result = post(web_owner, endpoint, {**options, "next": expected})
         assert result.status_code == 303 and result.headers["location"] == expected
         assert web_owner.get(expected).status_code == 200
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_retry_failed_folder_shows_queued_instead_of_stale_error(
+    web_owner, db, make_account, isolated, enabled
+):
+    plan, source, _ = setup_source(web_owner, db, make_account, isolated)
+    source.enabled = enabled
+    source.last_polled_at = utcnow()
+    source.last_error = "Synthetic network failure"
+    db.commit()
+    response = web_owner.get(f"/people/{plan.profile_id}?section=content")
+    assert "إعادة محاولة فحص الفولدر" in response.text
+    calls = len(isolated.calls)
+    response = save(
+        web_owner, db, plan, "imports", {"wizard_step": "content", "person_hub": "1", "action": "start"}
+    )
+    assert response.status_code == 303
+    response = web_owner.get(f"/plans/{plan.id}/import-status")
+    assert 'data-import-state="queued"' in response.text and "خطأ الفحص السابق" in response.text
+    assert len(isolated.calls) == calls
+    assert all(j.kind == "poll_source" for j in db.scalars(select(Job)))
+    assert not db.scalar(select(func.count()).select_from(ScheduledPost))
+
+
+def test_saved_platform_progress_points_to_monitoring_not_drive(web_owner, db, make_account, isolated):
+    plan = create_plan(web_owner, db)
+    account = make_account(Platform.FACEBOOK)
+    assert (
+        save(
+            web_owner, db, plan, "platforms", {"source_account_id": account.id, "import_mode": "latest30"}
+        ).status_code
+        == 303
+    )
+    result = web_owner.get(f"/plans/{plan.id}/import-status")
+    assert "اضغط بدء المتابعة في قسم المنصة المربوطة" in result.text
+    assert "اضغط بدء الاستيراد في قسم Google Drive" not in result.text
+    assert not isolated.calls
+    assert not db.scalar(select(func.count()).select_from(Job))

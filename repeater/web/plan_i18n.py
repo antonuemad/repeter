@@ -655,8 +655,8 @@ COPY.update(
         ),
         "import.queued": ("Waiting for the worker", "في انتظار بدء الفحص"),
         "import.queued_help": (
-            "The check is queued. File counts appear after the folder has been checked.",
-            "تمت إضافة طلب الفحص للطابور. أعداد الملفات تظهر بعد انتهاء فحص الفولدر.",
+            "The check is queued. Item counts appear after the source has been checked.",
+            "تمت إضافة طلب الفحص للطابور. أعداد العناصر تظهر بعد انتهاء فحص المصدر.",
         ),
         "import.scheduled": ("Next check scheduled", "الفحص القادم مجدول"),
         "import.scheduled_help": (
@@ -707,8 +707,8 @@ COPY.update(
         ),
         "import.error": ("Source check failed", "تعذّر فحص المصدر"),
         "import.error_help": (
-            "Check access to the folder or source account, then retry using the import control below. Ready files are preserved.",
-            "راجع الوصول للفولدر أو حساب المصدر، ثم أعد المحاولة من زر الاستيراد بالأسفل. الملفات الجاهزة محفوظة.",
+            "Check access to the folder or source account, then retry using the source controls. Ready files are preserved.",
+            "راجع الوصول للفولدر أو حساب المصدر، ثم أعد المحاولة من أزرار التحكم في المصدر. الملفات الجاهزة محفوظة.",
         ),
         "import.reconnect": ("Reconnect required", "محتاج إعادة ربط"),
         "import.reconnect_help": (
@@ -767,6 +767,20 @@ COPY.update(
         "import.drive_link": (
             "Choose a folder from the search results or paste its Google Drive folder link.",
             "اختَر فولدرًا من نتائج البحث أو الصق رابط الفولدر من Google Drive.",
+        )
+    }
+)
+COPY.update(
+    {
+        "import.retry": ("Retry folder check", "إعادة محاولة فحص الفولدر"),
+        "import.previous_error": ("Previous check error", "خطأ الفحص السابق"),
+    }
+)
+COPY.update(
+    {
+        "import.platform_saved_help": (
+            "Source saved; monitoring has not started. Use Start monitoring in the connected-platform section.",
+            "المصدر محفوظ والمتابعة لم تبدأ. اضغط بدء المتابعة في قسم المنصة المربوطة.",
         )
     }
 )
