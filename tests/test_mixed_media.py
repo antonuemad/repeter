@@ -492,7 +492,7 @@ def test_saving_drive_image_option_preserves_existing_checkpoint(web_owner, db, 
 
 
 def _submitted_forms(html):
-    """Read native form controls as a browser submission would (unchecked boxes are absent)."""
+    """Successful controls per submitter, including native button formaction and selected options."""
     from html.parser import HTMLParser
 
     class Forms(HTMLParser):
@@ -500,18 +500,35 @@ def _submitted_forms(html):
             super().__init__()
             self.forms = []
             self.current = None
+            self.select_name = None
 
         def handle_starttag(self, tag, attrs):
             attrs = dict(attrs)
             if tag == "form":
-                self.current = (attrs.get("action"), {})
-                self.forms.append(self.current)
-            elif tag == "input" and self.current and attrs.get("name"):
-                if attrs.get("type") != "checkbox" or "checked" in attrs:
-                    self.current[1][attrs["name"]] = attrs.get("value", "")
+                self.current = (attrs.get("action"), {}, [])
+            elif self.current is not None:
+                fields = self.current[1]
+                if tag == "input" and attrs.get("name") and "disabled" not in attrs:
+                    if attrs.get("type") not in ("checkbox", "radio") or "checked" in attrs:
+                        fields[attrs["name"]] = attrs.get("value", "")
+                elif tag == "select":
+                    self.select_name = attrs.get("name")
+                elif tag == "option" and self.select_name:
+                    if "selected" in attrs or self.select_name not in fields:
+                        fields[self.select_name] = attrs.get("value", "")
+                elif tag == "button" and attrs.get("type", "submit") == "submit" and "disabled" not in attrs:
+                    self.current[2].append(attrs)
 
         def handle_endtag(self, tag):
-            if tag == "form":
+            if tag == "select":
+                self.select_name = None
+            if tag == "form" and self.current is not None:
+                action, fields, buttons = self.current
+                for button in buttons:
+                    submitted = dict(fields)
+                    if button.get("name"):
+                        submitted[button["name"]] = button.get("value", "")
+                    self.forms.append((button.get("formaction", action), submitted))
                 self.current = None
 
     parser = Forms()
@@ -551,7 +568,7 @@ def test_folder_browse_pagination_and_choice_keep_explicit_image_selection(
     pagination = next(
         fields for action, fields in forms if action == f"/plans/{p.id}/folders" and "page_token" in fields
     )
-    assert pagination["include_images"] == ("1" if selected else "0")
+    assert (pagination.get("include_images") == "1") is selected
     response = post(web_owner, f"/plans/{p.id}/folders", pagination)
     choices = [
         fields for action, fields in _submitted_forms(response.text) if action == f"/plans/{p.id}/source"

@@ -24,7 +24,7 @@ Validation uses synthetic accounts, mocked HTTP and disposable local DB/media. T
 acceptance cases covering search/paging/escaping/options, error recovery, twelve progress states
 in both languages, tenant/CSRF isolation, empty/new-only modes and successful scan checkpoints.
 The affected 352-case regression run and final 147-case setup/guide acceptance run passed; these
-runs overlap. The final language/theme and setup regression run passed 97 cases; the completed retry/monitoring recovery run passed 100 cases. Ruff and formatting pass. Full Linux CI on the pushed commit must pass before release.
+runs overlap. The final language/theme and setup regression run passed 97 cases; the completed retry/monitoring recovery run passed 100 cases. Ruff and formatting pass. The native-form simulator in the existing mixed-media tests now submits the selected button’s formaction/value and selected account, preserving the actual saved image-option assertions; that 96-case mixed-media/import/setup run passed. Full Linux CI on the pushed commit must pass before release.
 
 The local importer run passed 164 cases and failed one FFmpeg-dependent voice-over deduplication
 assertion. The same single case fails separately on the unchanged baseline; it does not call
