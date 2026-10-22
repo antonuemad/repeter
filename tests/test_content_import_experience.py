@@ -222,7 +222,9 @@ def test_progress_states_and_counts_are_local_read_only(web_owner, db, make_acco
     assert response.headers["Cache-Control"] == "no-store"
     assert response.headers["X-Repeater-Import-Status"] == "1"
     assert f'data-import-state="{state}"' in response.text
-    assert "PRIVATE foreign title" not in response.text and "Manual item" not in response.text
+    assert "PRIVATE foreign title" not in response.text
+    source_rows = response.text.split('<article class="import-source"', 1)[1]
+    assert "Manual item" not in source_rows
     assert "import." not in response.text
     if state == "failed":
         assert "&lt;fixture&gt;" in response.text and f"/library/{item.id}" in response.text
@@ -377,3 +379,66 @@ def test_saved_platform_progress_points_to_monitoring_not_drive(web_owner, db, m
     assert "اضغط بدء الاستيراد في قسم Google Drive" not in result.text
     assert not isolated.calls
     assert not db.scalar(select(func.count()).select_from(Job))
+
+
+@pytest.mark.parametrize("lang", ["ar", "en"])
+def test_progress_refresh_keeps_person_guidance_in_sync_with_ready_content(
+    web_owner, db, make_account, isolated, lang
+):
+    """A completed import must clear the stale warning and expose the next preparation step."""
+    from repeater.web.i18n import Translator
+
+    set_lang(web_owner, lang)
+    t = Translator(lang)
+    plan, _, _ = setup_source(web_owner, db, make_account, isolated)
+    target = make_account(Platform.FACEBOOK)
+    assert save(web_owner, db, plan, "targets", {"targets": [str(target.id)]}).status_code == 303
+    db.refresh(plan)
+    revision = plan.revision
+    before_jobs = db.scalar(select(func.count()).select_from(Job))
+    before_calls = len(isolated.calls)
+
+    def fragment():
+        response = web_owner.get(f"/plans/{plan.id}/import-status")
+        assert response.status_code == 200
+        guidance = response.text.split("<template data-person-guidance-update>", 1)[1].split(
+            "</template>", 1
+        )[0]
+        return response.text, guidance
+
+    empty, guidance = fragment()
+    assert 'data-has-ready="false"' in empty
+    recent = empty.split("<template data-person-recent-update>", 1)[1].split("</template>", 1)[0]
+    assert not recent.strip()
+    assert t("hub.uncovered", n=1) in guidance
+    assert t("simple.next_schedule") not in guidance
+    page = web_owner.get(f"/people/{plan.profile_id}?section=content")
+    assert "data-person-guidance" in page.text and t("hub.uncovered", n=1) in page.text
+    assert "data-import-empty-help hidden" not in page.text
+
+    item = video(db, plan, "Synthetic imported original")
+    db.commit()
+    ready, guidance = fragment()
+    assert 'data-has-ready="true"' in ready
+    assert t("hub.uncovered", n=1) not in guidance
+    assert t("simple.next_schedule") in guidance
+    assert f'href="/people/{plan.profile_id}?section=schedule"' in guidance
+    recent = ready.split("<template data-person-recent-update>", 1)[1].split("</template>", 1)[0]
+    assert "Synthetic imported original" in recent and 'class="badge badge-ready"' in recent
+    page = web_owner.get(f"/people/{plan.profile_id}?section=content")
+    assert t("hub.uncovered", n=1) not in page.text
+    assert "data-import-empty-help hidden" in page.text
+
+    item.status = VideoStatus.ARCHIVED
+    db.commit()
+    empty_again, guidance = fragment()
+    assert 'data-has-ready="false"' in empty_again
+    assert t("hub.uncovered", n=1) in guidance
+    assert t("simple.next_schedule") not in guidance
+    recent = empty_again.split("<template data-person-recent-update>", 1)[1].split("</template>", 1)[0]
+    assert "Synthetic imported original" in recent and 'class="badge badge-archived"' in recent
+    db.refresh(plan)
+    assert plan.revision == revision and not plan.enabled
+    assert len(isolated.calls) == before_calls
+    assert db.scalar(select(func.count()).select_from(Job)) == before_jobs
+    assert not db.scalar(select(func.count()).select_from(ScheduledPost))

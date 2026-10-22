@@ -266,6 +266,16 @@ document.querySelectorAll('[data-import-progress]').forEach((panel) => {
           const target = document.querySelector(selector);
           if (target && target.textContent !== overview.dataset[key]) target.textContent = overview.dataset[key];
         });
+        ['guidance', 'recent'].forEach((part) => {
+          const target = document.querySelector(`[data-person-${part}]`);
+          const updated = rows.querySelector(`template[data-person-${part}-update]`);
+          if (target && updated && !target.contains(document.activeElement)
+              && target.innerHTML !== updated.innerHTML) {
+            target.replaceChildren(updated.content.cloneNode(true));
+          }
+        });
+        const emptyHelp = document.querySelector('[data-import-empty-help]');
+        if (emptyHelp) emptyHelp.hidden = overview.dataset.hasReady === 'true';
       }
       notice.textContent = attempts >= 120 ? notice.dataset.paused : '';
     } catch (_) {

@@ -191,6 +191,17 @@ def _edit(request, db, ctx, plan, *, error=None, submitted=None, **extra):
     return render(request, "plans/edit.html", data, status_code=422 if error else 200)
 
 
+def _recent_items(db, plan):
+    return list(
+        db.scalars(
+            select(Video)
+            .where(Video.workspace_id == plan.workspace_id, Video.profile_id == plan.profile_id)
+            .order_by(Video.created_at.desc(), Video.id.desc())
+            .limit(6)
+        )
+    )
+
+
 def _wizard(request, db, ctx, plan, step, *, data=None, page="1"):
     data = data or _context(db, ctx, plan)
     remember_person(request, data["person"], plan)
@@ -210,17 +221,7 @@ def _wizard(request, db, ctx, plan, step, *, data=None, page="1"):
         data["preference_return"] = data["setup_urls"][step]
     if hub:
         data["readiness"] = progress(db, ctx.workspace.id, [plan])[plan.id]
-        data["recent_items"] = list(
-            db.scalars(
-                select(Video)
-                .where(
-                    Video.workspace_id == ctx.workspace.id,
-                    Video.profile_id == plan.profile_id,
-                )
-                .order_by(Video.created_at.desc(), Video.id.desc())
-                .limit(6)
-            )
-        )
+        data["recent_items"] = _recent_items(db, plan)
     if step == "preview":
         data.update(_preview_context(db, ctx, plan, page, request.query_params.get("view", "all")))
         data["preview_path"] = f"/people/{plan.profile_id}" if hub else data["setup_urls"]["preview"]
@@ -409,6 +410,7 @@ def import_status(request: Request, db: DB, ctx: CurrentWorkspace, plan_id: int)
             "content_url": person_url(plan, "content"),
             "readiness": progress(db, ctx.workspace.id, [plan])[plan.id],
             "library_counts": counts,
+            "recent_items": _recent_items(db, plan),
         },
         headers={"Cache-Control": "no-store", "X-Repeater-Import-Status": "1"},
     )

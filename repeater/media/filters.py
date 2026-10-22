@@ -17,6 +17,7 @@ dark. Needs ffmpeg built with libzimg (zscale) and the tonemap filter: Debian/Ub
 
 from __future__ import annotations
 
+import re
 import subprocess
 from functools import lru_cache
 
@@ -52,7 +53,13 @@ def _filter_names(ffmpeg_bin: str) -> frozenset[str]:
     names: set[str] = set()
     for line in proc.stdout.decode("utf-8", "replace").splitlines():
         parts = line.split()
-        if len(parts) >= 3 and len(parts[0]) == 3:  # " TSC zscale  V->V  description"
+        # Older builds have TSC flags; newer builds omit the command-support column.
+        # Validate the stream signature too so the flag legend is never parsed as a filter.
+        if (
+            len(parts) >= 3
+            and re.fullmatch(r"[TSC.]{2,3}", parts[0])
+            and re.fullmatch(r"[AVN|]+->[AVN|]+", parts[2])
+        ):
             names.add(parts[1])
     return frozenset(names)
 

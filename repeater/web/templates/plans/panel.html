@@ -46,7 +46,7 @@
         <p class="small muted">{{ t('import.counts_help') }}</p>
       </section>{% endif %}
       <div class="wizard-actions"><a class="button" href="{{ setup_urls.schedule }}">{{ t('wizard.to_schedule') }}</a><a href="{{ setup_urls.accounts }}">{{ t('wizard.back') }}</a></div>
-      {% if not library_counts.get('ready', 0) %}<p class="small muted">{{ t('wizard.empty_help') }}</p>{% endif %}
+      <p class="small muted" data-import-empty-help{% if library_counts.get('ready', 0) %} hidden{% endif %}>{{ t('wizard.empty_help') }}</p>
     {% elif wizard_step == 'schedule' %}
       {% include "plans/wizard_schedule.html" %}
     {% endif %}

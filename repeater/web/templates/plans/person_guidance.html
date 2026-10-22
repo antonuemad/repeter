@@ -1,0 +1,2 @@
+{% if not readiness.done and readiness.next_step != wizard_step %}<p class="person-next" role="status">{{ t('hub.next') }} <a href="{{ readiness.next_url }}">{{ t('simple.next_' ~ readiness.next_step) }}</a></p>{% elif readiness.done and wizard_step == 'preview' %}<p class="person-next" role="status">{{ t('hub.prepared') }}</p>{% endif %}
+{% if readiness.uncovered_pages and wizard_step == 'content' %}<p class="person-next" role="status">{{ t('hub.uncovered', n=readiness.uncovered_pages) }}</p>{% endif %}

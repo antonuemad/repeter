@@ -613,6 +613,29 @@ def test_filter_listing_is_parsed_from_ffmpeg(monkeypatch):
     assert filters.hdr_tools_available("/nonexistent/ffmpeg") is False
 
 
+@pytest.mark.parametrize("flags", ["TSC", "TS"])
+def test_filter_names_accept_supported_flag_layouts_without_parsing_the_legend(monkeypatch, flags):
+    output = (
+        "Filters:\n  T.. = Timeline support\n  .S. = Slice threading\n"
+        "  ..C = Command support\n  A = Audio input/output\n  ------\n"
+        f" {flags} scale V->V Scale the picture\n"
+        f" {'.' * len(flags)} zscale V->V Color conversion\n"
+        f" {'.' * len(flags)} tonemap V->V Tone map\n"
+        f" {'.' * len(flags)} anullsrc |->A Audio source\n"
+    ).encode()
+    monkeypatch.setattr(
+        filters.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout=output),
+    )
+    filters._filter_names.cache_clear()
+    try:
+        assert filters._filter_names("synthetic-ffmpeg") == {"scale", "zscale", "tonemap", "anullsrc"}
+        assert filters.hdr_tools_available("synthetic-ffmpeg")
+    finally:
+        filters._filter_names.cache_clear()
+
+
 def _anamorphic(path: Path, *, size: str, sar: str) -> Path:
     ffmpeg("-f", "lavfi", "-i", f"testsrc2=size={size}:rate=30:duration=2,setsar={sar.replace(':', '/')}",
            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(path))  # fmt: skip

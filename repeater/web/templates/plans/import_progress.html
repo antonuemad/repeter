@@ -1,5 +1,7 @@
 {% import "macros.html" as m with context %}
-{% if readiness is defined %}<div hidden data-import-overview data-summary="{{ t('hub.summary', pages=readiness.pages, items=readiness.usable_items) }}" data-library="{{ t('wizard.library_status', ready=library_counts.get('ready', 0), processing=library_counts.get('processing', 0) + library_counts.get('importing', 0), failed=library_counts.get('failed', 0)) }}" data-content-status="{{ t('hub.complete') if readiness.content else t('hub.review') }}"></div>{% endif %}
+{% if readiness is defined %}<div hidden data-import-overview data-summary="{{ t('hub.summary', pages=readiness.pages, items=readiness.usable_items) }}" data-library="{{ t('wizard.library_status', ready=library_counts.get('ready', 0), processing=library_counts.get('processing', 0) + library_counts.get('importing', 0), failed=library_counts.get('failed', 0)) }}" data-content-status="{{ t('hub.complete') if readiness.content else t('hub.review') }}" data-has-ready="{{ 'true' if library_counts.get('ready', 0) else 'false' }}"></div>
+<template data-person-guidance-update>{% with wizard_step='content' %}{% include "plans/person_guidance.html" %}{% endwith %}</template>
+<template data-person-recent-update>{% include "plans/person_recent.html" %}</template>{% endif %}
 {% for item in import_progress %}{% set s = item.source %}{% set c = item.counts %}
 <article class="import-source" data-import-source="{{ s.id }}" data-import-state="{{ item.state }}">
   <div class="import-source-heading"><h3 dir="auto">{{ s.name }}</h3><span class="badge badge-{{ 'needs_reconnect' if item.state in ['reconnect', 'error', 'failed'] else 'active' if item.state == 'watching' else 'disabled' }}">{{ t('import.' ~ item.state) }}</span></div>
