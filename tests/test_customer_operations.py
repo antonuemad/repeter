@@ -158,8 +158,13 @@ def mail_ready(monkeypatch):
         monkeypatch.setattr(get_settings(), key, value)
 
 
-def test_invitation_mail_encrypted_delivered_and_wiped(db, workspace, admin_user, mail_ready, monkeypatch):
-    row, url = access.issue_invitation(db, workspace.id, "invite@example.com", "editor", admin_user.id)
+@pytest.mark.parametrize("role", ["owner", "editor"])
+@pytest.mark.parametrize("publishing_enabled", [False, True])
+def test_invitation_mail_encrypted_delivered_and_wiped(
+    db, workspace, admin_user, mail_ready, monkeypatch, no_provider_network, role, publishing_enabled
+):
+    monkeypatch.setattr(get_settings(), "publishing_enabled", publishing_enabled)
+    row, url = access.issue_invitation(db, workspace.id, "invite@example.com", role, admin_user.id)
     db.commit()
     queued = db.scalar(select(MailOutbox))
     assert url not in queued.payload_enc and "invite@example.com" not in queued.payload_enc
@@ -169,9 +174,119 @@ def test_invitation_mail_encrypted_delivered_and_wiped(db, workspace, admin_user
     mail.deliver(db, {})
     db.refresh(queued)
     assert queued.status == "sent" and queued.payload_enc is None and len(sent) == 1
-    assert url in sent[0][0][2]
+    body = sent[0][0][2]
+    assert body.count(url) == 1
+    assert [line[:2] for line in body.splitlines() if line[:1].isdigit()] == [
+        "1.",
+        "2.",
+        "3.",
+        "4.",
+        "5.",
+        "1.",
+        "2.",
+        "3.",
+        "4.",
+        "5.",
+    ]
+    for instruction in (
+        "عيّن كلمة مرور",
+        "أضف شخصًا",
+        "اختر الصفحات",
+        "Google Drive",
+        "ارفع ملفاتك من جهازك",
+        "ابدأ الاستيراد",
+        "فاصل إعادة المحتوى",
+        "معاينة الجدول",
+        "set your password",
+        "Add a person",
+        "choose your pages",
+        "upload files from your device",
+        "Start importing",
+        "content repeat interval",
+        "schedule preview",
+    ):
+        assert instruction in body
+    assert ("النشر ورفع المسودات مقفولان تمامًا" in body) is not publishing_enabled
+    assert ("publishing and draft uploads are disabled" in body) is not publishing_enabled
+    assert "بدون كلمات مرور أو أكواد تحقق" in body
+    assert "without passwords or verification codes" in body
     mail.deliver(db, {})
     assert len(sent) == 1
+    assert db.scalar(select(func.count()).select_from(Job)) == 0
+    assert db.scalar(select(func.count()).select_from(ScheduledPost)) == 0
+    assert not no_provider_network.calls
+
+
+@pytest.mark.parametrize("smtp_ssl", [False, True])
+def test_invitation_steps_survive_smtp_message_encoding(
+    db, workspace, admin_user, mail_ready, monkeypatch, smtp_ssl
+):
+    from email import policy
+    from email.parser import BytesParser
+
+    monkeypatch.setattr(get_settings(), "publishing_enabled", False)
+    monkeypatch.setattr(get_settings(), "smtp_ssl", smtp_ssl)
+    _, url = access.issue_invitation(db, workspace.id, "invite@example.com", "owner", admin_user.id)
+    db.commit()
+    messages = []
+
+    class FakeSMTP:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def starttls(self, **kwargs):
+            assert not smtp_ssl
+
+        def login(self, username, password):
+            assert username == "synthetic" and password == "synthetic-secret"
+
+        def send_message(self, message):
+            messages.append(BytesParser(policy=policy.default).parsebytes(message.as_bytes()))
+            return {}
+
+    monkeypatch.setattr(mail.smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(mail.smtplib, "SMTP_SSL", FakeSMTP)
+    mail.deliver(db, {})
+    assert len(messages) == 1
+    message = messages[0]
+    assert str(message["To"]) == "invite@example.com"
+    assert str(message["Subject"]) == "Your Repeater invitation | دعوتك إلى Repeater"
+    assert message.get_content_type() == "text/plain"
+    body = message.get_content()
+    assert body.count(url) == 1 and url in body.splitlines()
+    assert "5. حدّد أيام ومواعيد النشر" in body
+    assert "5. Choose your posting days" in body
+    assert "النشر ورفع المسودات مقفولان تمامًا" in body
+    assert "publishing and draft uploads are disabled" in body
+
+
+@pytest.mark.parametrize("kind", ["reset", "alert"])
+def test_other_mail_does_not_include_invitation_steps(
+    db, workspace, admin_user, mail_ready, monkeypatch, kind
+):
+    monkeypatch.setattr(get_settings(), "publishing_enabled", False)
+    if kind == "reset":
+        row, url = access.issue_reset(db, admin_user.id, None)
+        mail.queue_link(db, row, url, kind, admin_user.email, workspace.id)
+        content = f"\n{url}"
+    else:
+        mail.queue_operator_alert(db, "synthetic_alert", workspace_id=workspace.id)
+        content = f"synthetic_alert: 1. Workspace: {workspace.id}.\n{get_settings().base_url}/activity"
+    db.commit()
+    sent = []
+    monkeypatch.setattr(mail, "send_email", lambda *a, **kw: sent.append(a))
+    mail.deliver(db, {})
+    assert len(sent) == 1
+    assert sent[0][2] == (
+        f"{content}\n\nRepeater · Magic Lap\nIf you did not request this, ignore this email.\n"
+        "لو لم تطلب هذه الرسالة، تجاهلها."
+    )
 
 
 @pytest.mark.parametrize("reason", ["revoked", "used", "expired"])

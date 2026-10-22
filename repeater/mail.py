@@ -136,6 +136,39 @@ def prepare_recoveries(db):
         request.status, request.handled_at = "issued", utcnow()
 
 
+def _invitation_body(url):
+    testing_ar = testing_en = ""
+    if not get_settings().publishing_enabled:
+        testing_ar = (
+            "أثناء التجربة، النشر ورفع المسودات مقفولان تمامًا. "
+            "التجربة للتجهيز والمعاينة فقط؛ لن ينشر Repeater أي محتوى على حساباتك.\n\n"
+        )
+        testing_en = (
+            "During the trial, publishing and draft uploads are disabled. "
+            "You can prepare content and preview your schedule; Repeater will not post anything to your accounts.\n\n"
+        )
+    return (
+        "أهلًا بك في Repeater | Welcome to Repeater\n\n"
+        f"رابط دعوتك | Your invitation link:\n{url}\n\n"
+        "ابدأ خطوة بخطوة:\n"
+        "1. افتح رابط الدعوة أعلاه، وعيّن كلمة مرور وسجّل الدخول.\n"
+        "2. أضف شخصًا باسمك أو اسم البراند.\n"
+        "3. اربط حساباتك من أزرار المنصات الرسمية، وراجع الصلاحيات، ثم اختر الصفحات المطلوبة.\n"
+        "4. اختر فولدر المحتوى من Google Drive أو ارفع ملفاتك من جهازك، وابدأ الاستيراد وانتظر اكتمال التجهيز.\n"
+        "5. حدّد أيام ومواعيد النشر وفاصل إعادة المحتوى، ثم افتح معاينة الجدول.\n\n"
+        f"{testing_ar}"
+        "لو واجهتك مشكلة في ربط منصة أو أي خطوة، أرسل للمسؤول صورة أو نص الرسالة، بدون كلمات مرور أو أكواد تحقق.\n\n"
+        "Get started step by step:\n"
+        "1. Open the invitation link above, set your password and sign in.\n"
+        "2. Add a person using your name or your brand name.\n"
+        "3. Connect your accounts using the official platform buttons, review the permissions, then choose your pages.\n"
+        "4. Choose your Google Drive content folder or upload files from your device. Start importing and wait for preparation to finish.\n"
+        "5. Choose your posting days, times and content repeat interval, then open the schedule preview.\n\n"
+        f"{testing_en}"
+        "If a connection or step fails, send your administrator a screenshot or the message text, without passwords or verification codes."
+    )
+
+
 @handler("deliver_mail")
 def deliver(db, payload):
     if not get_settings().mail_configured:
@@ -165,7 +198,12 @@ def deliver(db, payload):
                 "reset": "Reset your Repeater password | استعادة كلمة المرور",
                 "alert": "Repeater: action needed | تنبيه",
             }[mail.kind]
-            body = f"{data.get('body', '')}\n{data.get('url', '')}\n\nRepeater · Magic Lap\nIf you did not request this, ignore this email.\nلو لم تطلب هذه الرسالة، تجاهلها."
+            content = (
+                _invitation_body(data["url"])
+                if mail.kind == "invite"
+                else f"{data.get('body', '')}\n{data.get('url', '')}"
+            )
+            body = f"{content}\n\nRepeater · Magic Lap\nIf you did not request this, ignore this email.\nلو لم تطلب هذه الرسالة، تجاهلها."
             send_email(data["to"], subject, body, message_id=mail.id)
         except Exception as exc:  # noqa: BLE001 - redact SMTP/server details and bearer URLs
             mail.attempts += 1
